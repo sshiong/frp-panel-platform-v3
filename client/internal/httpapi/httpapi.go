@@ -68,7 +68,7 @@ func (a *API) cors(next http.Handler) http.Handler {
 		if origin := r.Header.Get("Origin"); origin == "http://127.0.0.1:5174" || origin == "http://localhost:5174" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-CSRF-Token")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Idempotency-Key, X-CSRF-Token")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		}
 		if r.Method == http.MethodOptions {
@@ -178,7 +178,7 @@ func (a *API) createMapping(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var output interface{}
-	if err := a.App.Proxy(r.Context(), "POST", "/api/v1/mappings", input, r.Header.Get("X-CSRF-Token"), &output); err != nil {
+	if err := a.App.Proxy(r.Context(), "POST", "/api/v1/mappings", input, r.Header.Get("X-CSRF-Token"), &output, r.Header.Get("Idempotency-Key")); err != nil {
 		problem(w, r, 400, "MAPPING_CREATE_FAILED", err.Error(), err)
 		return
 	}
@@ -191,7 +191,7 @@ func (a *API) updateMapping(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var output interface{}
-	if err := a.App.Proxy(r.Context(), "PUT", "/api/v1/mappings/"+chi.URLParam(r, "id"), input, r.Header.Get("X-CSRF-Token"), &output); err != nil {
+	if err := a.App.Proxy(r.Context(), "PUT", "/api/v1/mappings/"+chi.URLParam(r, "id"), input, r.Header.Get("X-CSRF-Token"), &output, r.Header.Get("Idempotency-Key")); err != nil {
 		problem(w, r, 400, "MAPPING_UPDATE_FAILED", err.Error(), err)
 		return
 	}
@@ -201,7 +201,7 @@ func (a *API) updateMapping(w http.ResponseWriter, r *http.Request) {
 func (a *API) deleteMapping(w http.ResponseWriter, r *http.Request) {
 	var output interface{}
 	path := "/api/v1/mappings/" + chi.URLParam(r, "id")
-	if err := a.App.Proxy(r.Context(), "DELETE", path, nil, r.Header.Get("X-CSRF-Token"), &output); err != nil {
+	if err := a.App.Proxy(r.Context(), "DELETE", path, nil, r.Header.Get("X-CSRF-Token"), &output, r.Header.Get("Idempotency-Key")); err != nil {
 		problem(w, r, 400, "MAPPING_DELETE_FAILED", err.Error(), err)
 		return
 	}
@@ -214,7 +214,7 @@ func (a *API) toggleMapping(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var output interface{}
-	if err := a.App.Proxy(r.Context(), "POST", "/api/v1/mappings/"+chi.URLParam(r, "id")+"/toggle", input, r.Header.Get("X-CSRF-Token"), &output); err != nil {
+	if err := a.App.Proxy(r.Context(), "POST", "/api/v1/mappings/"+chi.URLParam(r, "id")+"/toggle", input, r.Header.Get("X-CSRF-Token"), &output, r.Header.Get("Idempotency-Key")); err != nil {
 		problem(w, r, 400, "MAPPING_TOGGLE_FAILED", err.Error(), err)
 		return
 	}
@@ -237,7 +237,7 @@ func (a *API) createDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var output interface{}
-	if err := a.App.Proxy(r.Context(), "POST", "/api/v1/domains", input, r.Header.Get("X-CSRF-Token"), &output); err != nil {
+	if err := a.App.Proxy(r.Context(), "POST", "/api/v1/domains", input, r.Header.Get("X-CSRF-Token"), &output, r.Header.Get("Idempotency-Key")); err != nil {
 		problem(w, r, 400, "DOMAIN_CREATE_FAILED", err.Error(), err)
 		return
 	}
@@ -247,7 +247,7 @@ func (a *API) createDomain(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) deleteDomain(w http.ResponseWriter, r *http.Request) {
 	var output interface{}
-	if err := a.App.Proxy(r.Context(), "DELETE", "/api/v1/domains/"+chi.URLParam(r, "id"), nil, r.Header.Get("X-CSRF-Token"), &output); err != nil {
+	if err := a.App.Proxy(r.Context(), "DELETE", "/api/v1/domains/"+chi.URLParam(r, "id"), nil, r.Header.Get("X-CSRF-Token"), &output, r.Header.Get("Idempotency-Key")); err != nil {
 		problem(w, r, 400, "DOMAIN_DELETE_FAILED", err.Error(), err)
 		return
 	}
@@ -262,7 +262,7 @@ func (a *API) domainDNSAction(w http.ResponseWriter, r *http.Request) {
 	}
 	var output interface{}
 	path := "/api/v1/domains/" + chi.URLParam(r, "id") + "/dns-action"
-	if err := a.App.Proxy(r.Context(), "POST", path, input, r.Header.Get("X-CSRF-Token"), &output); err != nil {
+	if err := a.App.Proxy(r.Context(), "POST", path, input, r.Header.Get("X-CSRF-Token"), &output, r.Header.Get("Idempotency-Key")); err != nil {
 		problem(w, r, 400, "DNS_ACTION_FAILED", err.Error(), err)
 		return
 	}

@@ -166,6 +166,8 @@ func (a *App) deleteDomainExternal(ctx context.Context, job jobs.Job) error {
 }
 
 func (a *App) finalizeDeletedDomain(ctx context.Context, domainID string) error {
+	var mappingID string
+	_ = a.DB.QueryRowContext(ctx, `SELECT mapping_id FROM domain_bindings WHERE id=?`, domainID).Scan(&mappingID)
 	now := nowString()
 	if _, err := a.DB.ExecContext(ctx, `DELETE FROM dns_records WHERE domain_binding_id=?`, domainID); err != nil {
 		return err
@@ -177,7 +179,62 @@ func (a *App) finalizeDeletedDomain(ctx context.Context, domainID string) error 
 		return err
 	}
 	_, err := a.DB.ExecContext(ctx, `UPDATE operations SET status='succeeded',phase='cleanup',step='completed',error_code=NULL,error_message=NULL,updated_at=?,completed_at=? WHERE resource_type='domain' AND resource_id=? AND operation_type='delete' AND status IN ('pending','running')`, now, now, domainID)
-	return err
+	if err != nil {
+		return err
+	}
+	if mappingID != "" {
+		return a.finalizeDeletedMapping(ctx, mappingID)
+	}
+	return nil
+}
+
+func (a *App) finalizeDeletedMappings(ctx context.Context, userID string) error {
+	rows, err := a.DB.QueryContext(ctx, `SELECT id FROM mappings WHERE user_id=? AND lifecycle_status='deleting' AND NOT EXISTS (SELECT 1 FROM domain_bindings WHERE mapping_id=mappings.id AND status <> 'deleted')`, userID)
+	if err != nil {
+		return err
+	}
+	ids := make([]string, 0)
+	for rows.Next() {
+		var mappingID string
+		if err := rows.Scan(&mappingID); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		ids = append(ids, mappingID)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, mappingID := range ids {
+		if err := a.finalizeDeletedMapping(ctx, mappingID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *App) finalizeDeletedMapping(ctx context.Context, mappingID string) error {
+	tx, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `DELETE FROM mappings WHERE id=? AND lifecycle_status='deleting' AND NOT EXISTS (SELECT 1 FROM domain_bindings WHERE mapping_id=? AND status <> 'deleted')`, mappingID, mappingID)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return tx.Commit()
+	}
+	now := nowString()
+	if _, err := tx.ExecContext(ctx, `UPDATE operations SET status='succeeded',phase='cleanup',step='completed',error_code=NULL,error_message=NULL,updated_at=?,completed_at=? WHERE resource_type='mapping' AND resource_id=? AND operation_type='delete' AND status IN ('pending','running')`, now, now, mappingID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (a *App) markDomainDeleteFailure(ctx context.Context, domainID, code, message string) error {

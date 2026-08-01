@@ -112,6 +112,12 @@ func (a *App) BuildRouterSnapshot(ctx context.Context) (router.Snapshot, error) 
 	if err := router.AtomicWrite(path, snapshot); err != nil {
 		return router.Snapshot{}, err
 	}
+	// The versioned file is retained for audit/recovery. The stable pointer is
+	// the only file watched by the DB-free Router process and is also replaced
+	// atomically, so a partial write can never become the active snapshot.
+	if err := router.AtomicWrite(filepath.Join(snapshotDir, "last-good.json"), snapshot); err != nil {
+		return router.Snapshot{}, err
+	}
 	if !router.Verify(snapshot, a.Crypto.RouterKey) {
 		return router.Snapshot{}, errors.New("router snapshot self-verification failed")
 	}

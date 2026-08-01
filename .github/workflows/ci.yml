@@ -22,6 +22,15 @@ jobs:
       - run: go vet ./...
         working-directory: ${{ matrix.module }}
 
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - run: ruby scripts/validate-openapi.rb
+
   web:
     runs-on: ubuntu-latest
     strategy:
@@ -38,3 +47,17 @@ jobs:
         working-directory: web/${{ matrix.app }}
       - run: npm run build
         working-directory: web/${{ matrix.app }}
+
+  release-metadata:
+    runs-on: ubuntu-latest
+    needs: [go, web]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - run: ruby scripts/validate-openapi.rb
+      - run: ruby scripts/generate-sbom.rb

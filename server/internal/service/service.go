@@ -105,6 +105,16 @@ type MappingRequest struct {
 	ExpectedRevision      *int64 `json:"expected_revision"`
 }
 
+// ToggleMappingOptions carries the concurrency and retry metadata for the
+// small state mutation endpoint. It is variadic at the service boundary so
+// older internal callers remain source-compatible while HTTP callers can use
+// the full optimistic-concurrency contract.
+type ToggleMappingOptions struct {
+	ExpectedConfigVersion *int64
+	ExpectedRevision      *int64
+	IdempotencyKey        string
+}
+
 type Domain struct {
 	ID           string `json:"id"`
 	MappingID    string `json:"mapping_id"`
@@ -442,8 +452,8 @@ func (a *App) CreateMapping(ctx context.Context, ac AuthContext, req MappingRequ
 		return item, nil
 	}
 	var desired int64
-	var maxMappings int
-	if err := tx.QueryRowContext(ctx, `SELECT desired_config_version,max_mappings FROM users WHERE id=? AND status='active'`, ac.UserID).Scan(&desired, &maxMappings); err != nil {
+	var maxMappings, maxPendingMappings, maxPendingPortLeases int
+	if err := tx.QueryRowContext(ctx, `SELECT desired_config_version,max_mappings,max_pending_mappings,max_pending_port_leases FROM users WHERE id=? AND status='active'`, ac.UserID).Scan(&desired, &maxMappings, &maxPendingMappings, &maxPendingPortLeases); err != nil {
 		return Mapping{}, ErrForbidden
 	}
 	if req.ExpectedConfigVersion != nil && *req.ExpectedConfigVersion != desired {
@@ -453,8 +463,22 @@ func (a *App) CreateMapping(ctx context.Context, ac AuthContext, req MappingRequ
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM mappings WHERE user_id=? AND lifecycle_status <> 'deleted'`, ac.UserID).Scan(&count); err != nil || count >= maxMappings {
 		return Mapping{}, fmt.Errorf("mapping quota exceeded")
 	}
+	var pendingMappings int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM mappings WHERE user_id=? AND lifecycle_status IN ('reserved','pending_apply')`, ac.UserID).Scan(&pendingMappings); err != nil {
+		return Mapping{}, err
+	}
+	if pendingMappings >= maxPendingMappings {
+		return Mapping{}, fmt.Errorf("pending mapping quota exceeded")
+	}
 	remotePort := req.RemotePort
 	if req.ProxyType == "tcp" || req.ProxyType == "udp" {
+		var pendingPorts int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM port_leases p JOIN mappings m ON m.id=p.mapping_id WHERE m.user_id=? AND (p.lease_role='pending' OR m.lifecycle_status IN ('reserved','pending_apply'))`, ac.UserID).Scan(&pendingPorts); err != nil {
+			return Mapping{}, err
+		}
+		if pendingPorts >= maxPendingPortLeases {
+			return Mapping{}, fmt.Errorf("pending port lease quota exceeded")
+		}
 		if remotePort == nil || *remotePort == 0 {
 			port, err := allocatePort(ctx, tx, a.Config.PortStart, a.Config.PortEnd)
 			if err != nil {
@@ -533,7 +557,8 @@ func (a *App) UpdateMapping(ctx context.Context, ac AuthContext, mappingID strin
 		return Mapping{}, ErrNotFound
 	}
 	var desired int64
-	if err := tx.QueryRowContext(ctx, `SELECT desired_config_version FROM users WHERE id=?`, ac.UserID).Scan(&desired); err != nil {
+	var maxPendingMappings, maxPendingPortLeases int
+	if err := tx.QueryRowContext(ctx, `SELECT desired_config_version,max_pending_mappings,max_pending_port_leases FROM users WHERE id=?`, ac.UserID).Scan(&desired, &maxPendingMappings, &maxPendingPortLeases); err != nil {
 		return Mapping{}, err
 	}
 	if req.ExpectedConfigVersion != nil && *req.ExpectedConfigVersion != desired {
@@ -542,6 +567,15 @@ func (a *App) UpdateMapping(ctx context.Context, ac AuthContext, mappingID strin
 	if req.ExpectedRevision != nil && *req.ExpectedRevision != current.Revision {
 		return Mapping{}, ErrRevisionConflict
 	}
+	if current.LifecycleStatus != "reserved" && current.LifecycleStatus != "pending_apply" {
+		var pendingMappings int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM mappings WHERE user_id=? AND lifecycle_status IN ('reserved','pending_apply')`, ac.UserID).Scan(&pendingMappings); err != nil {
+			return Mapping{}, err
+		}
+		if pendingMappings >= maxPendingMappings {
+			return Mapping{}, fmt.Errorf("pending mapping quota exceeded")
+		}
+	}
 	remotePort := req.RemotePort
 	if req.ProxyType == "tcp" || req.ProxyType == "udp" {
 		if remotePort == nil || *remotePort == 0 {
@@ -549,6 +583,15 @@ func (a *App) UpdateMapping(ctx context.Context, ac AuthContext, mappingID strin
 		}
 		if remotePort == nil || *remotePort < a.Config.PortStart || *remotePort > a.Config.PortEnd {
 			return Mapping{}, fmt.Errorf("port not allowed")
+		}
+	}
+	if remotePort != nil && (current.RemotePort == nil || *remotePort != *current.RemotePort) {
+		var pendingPorts int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM port_leases p JOIN mappings m ON m.id=p.mapping_id WHERE m.user_id=? AND (p.lease_role='pending' OR m.lifecycle_status IN ('reserved','pending_apply'))`, ac.UserID).Scan(&pendingPorts); err != nil {
+			return Mapping{}, err
+		}
+		if pendingPorts >= maxPendingPortLeases {
+			return Mapping{}, fmt.Errorf("pending port lease quota exceeded")
 		}
 	}
 	now := nowString()
@@ -589,48 +632,165 @@ func (a *App) UpdateMapping(ctx context.Context, ac AuthContext, mappingID strin
 	return current, nil
 }
 
-func (a *App) DeleteMapping(ctx context.Context, ac AuthContext, mappingID string, force bool) (string, error) {
-	now := nowString()
-	if force {
-		result, err := a.DB.ExecContext(ctx, `DELETE FROM mappings WHERE id=? AND user_id=?`, mappingID, ac.UserID)
-		if err != nil {
-			return "", err
-		}
-		if n, _ := result.RowsAffected(); n == 0 {
-			return "", ErrNotFound
-		}
-		_, _ = a.DB.ExecContext(ctx, `UPDATE users SET desired_config_version=desired_config_version+1,updated_at=? WHERE id=?`, now, ac.UserID)
-		_ = a.Audit(ctx, ac, "mapping_force_deleted", "mapping", mappingID, "success", nil, "")
-		return "", nil
+func (a *App) DeleteMapping(ctx context.Context, ac AuthContext, mappingID string, force bool, idempotencyKeys ...string) (string, error) {
+	tx, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
 	}
-	result, err := a.DB.ExecContext(ctx, `UPDATE mappings SET lifecycle_status='deleting',desired_state='disabled',updated_at=? WHERE id=? AND user_id=? AND lifecycle_status <> 'deleted'`, now, mappingID, ac.UserID)
+	defer tx.Rollback()
+	now := nowString()
+	idempotencyKey := ""
+	if len(idempotencyKeys) > 0 {
+		idempotencyKey = strings.TrimSpace(idempotencyKeys[0])
+	}
+	if idempotencyKey == "" {
+		idempotencyKey = uuid.NewString()
+	}
+	bodyHash := requestHash(map[string]bool{"force": force})
+	var existingHash, existingOperation string
+	if err := tx.QueryRowContext(ctx, `SELECT request_body_hash,COALESCE(operation_id,'') FROM idempotency_records WHERE user_id=? AND session_generation=? AND http_method='DELETE' AND normalized_path=? AND idempotency_key=?`, ac.UserID, ac.Generation, "/api/v1/mappings/"+mappingID, idempotencyKey).Scan(&existingHash, &existingOperation); err == nil {
+		if existingHash != bodyHash {
+			return "", ErrIdempotencyReuse
+		}
+		return existingOperation, nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE mappings SET lifecycle_status='deleting',desired_state='disabled',updated_at=? WHERE id=? AND user_id=? AND lifecycle_status <> 'deleted'`, now, mappingID, ac.UserID)
 	if err != nil {
 		return "", err
 	}
 	if n, _ := result.RowsAffected(); n == 0 {
 		return "", ErrNotFound
 	}
-	_, _ = a.DB.ExecContext(ctx, `UPDATE users SET desired_config_version=desired_config_version+1,updated_at=? WHERE id=?`, now, ac.UserID)
+	// Keep domain bindings until their external DNS records have been removed.
+	// This prevents a mapping FK cascade from losing the record_id needed for
+	// managed Cloudflare cleanup.
+	domainRows, err := tx.QueryContext(ctx, `SELECT id FROM domain_bindings WHERE mapping_id=? AND status <> 'deleted'`, mappingID)
+	if err != nil {
+		return "", err
+	}
+	domainIDs := make([]string, 0)
+	for domainRows.Next() {
+		var domainID string
+		if err := domainRows.Scan(&domainID); err != nil {
+			_ = domainRows.Close()
+			return "", err
+		}
+		domainIDs = append(domainIDs, domainID)
+	}
+	if err := domainRows.Err(); err != nil {
+		_ = domainRows.Close()
+		return "", err
+	}
+	if err := domainRows.Close(); err != nil {
+		return "", err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE domain_bindings SET status='deleting',updated_at=? WHERE mapping_id=? AND status <> 'deleted'`, now, mappingID); err != nil {
+		return "", err
+	}
+	for _, domainID := range domainIDs {
+		var existing string
+		err := tx.QueryRowContext(ctx, `SELECT id FROM operations WHERE resource_type='domain' AND resource_id=? AND operation_type='delete' AND status IN ('pending','running') LIMIT 1`, domainID).Scan(&existing)
+		if errors.Is(err, sql.ErrNoRows) {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO operations(id,user_id,resource_type,resource_id,operation_type,status,phase,step,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), ac.UserID, "domain", domainID, "delete", "pending", "router", "awaiting_client", now, now); err != nil {
+				return "", err
+			}
+		} else if err != nil {
+			return "", err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET desired_config_version=desired_config_version+1,updated_at=? WHERE id=?`, now, ac.UserID); err != nil {
+		return "", err
+	}
 	opID := uuid.NewString()
-	_, _ = a.DB.ExecContext(ctx, `INSERT INTO operations(id,user_id,resource_type,resource_id,operation_type,status,phase,step,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, opID, ac.UserID, "mapping", mappingID, "delete", "pending", "client", "awaiting_apply", now, now)
-	_ = a.Audit(ctx, ac, "mapping_delete_requested", "mapping", mappingID, "success", nil, opID)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO operations(id,user_id,resource_type,resource_id,operation_type,status,phase,step,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, opID, ac.UserID, "mapping", mappingID, "delete", "pending", "client", "awaiting_apply", now, now); err != nil {
+		return "", err
+	}
+	responseBody, _ := json.Marshal(map[string]interface{}{"operation_id": opID, "status": "pending"})
+	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,operation_id,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), ac.UserID, ac.Generation, "DELETE", "/api/v1/mappings/"+mappingID, idempotencyKey, bodyHash, 202, string(responseBody), opID, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
+		return "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+	auditAction := "mapping_delete_requested"
+	if force {
+		auditAction = "mapping_force_delete_requested"
+	}
+	_ = a.Audit(ctx, ac, auditAction, "mapping", mappingID, "pending", map[string]interface{}{"force": force, "domain_count": len(domainIDs)}, opID)
 	return opID, nil
 }
 
-func (a *App) ToggleMapping(ctx context.Context, ac AuthContext, mappingID string, enabled bool) error {
+func (a *App) ToggleMapping(ctx context.Context, ac AuthContext, mappingID string, enabled bool, options ...ToggleMappingOptions) error {
+	var option ToggleMappingOptions
+	if len(options) > 0 {
+		option = options[0]
+	}
 	state := "disabled"
 	if enabled {
 		state = "enabled"
 	}
-	result, err := a.DB.ExecContext(ctx, `UPDATE mappings SET desired_state=?,lifecycle_status=CASE WHEN ?='enabled' THEN 'pending_apply' ELSE 'disabled' END,updated_at=? WHERE id=? AND user_id=? AND lifecycle_status <> 'deleted'`, state, state, nowString(), mappingID, ac.UserID)
+	idempotencyKey := strings.TrimSpace(option.IdempotencyKey)
+	if idempotencyKey == "" {
+		idempotencyKey = uuid.NewString()
+	}
+	normalizedPath := "/api/v1/mappings/" + mappingID + "/toggle"
+	bodyHash := requestHash(map[string]interface{}{
+		"enabled":                 enabled,
+		"expected_config_version": option.ExpectedConfigVersion,
+		"expected_revision":       option.ExpectedRevision,
+	})
+	tx, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var existingHash string
+	if err := tx.QueryRowContext(ctx, `SELECT request_body_hash FROM idempotency_records WHERE user_id=? AND session_generation=? AND http_method='POST' AND normalized_path=? AND idempotency_key=?`, ac.UserID, ac.Generation, normalizedPath, idempotencyKey).Scan(&existingHash); err == nil {
+		if existingHash != bodyHash {
+			return ErrIdempotencyReuse
+		}
+		return nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	var currentConfigVersion, currentRevision int64
+	if err := tx.QueryRowContext(ctx, `SELECT u.desired_config_version,COALESCE(r.revision,0) FROM users u JOIN mappings m ON m.user_id=u.id LEFT JOIN mapping_revisions r ON r.id=COALESCE(m.pending_revision_id,m.active_revision_id) WHERE m.id=? AND m.user_id=? AND m.lifecycle_status <> 'deleted'`, mappingID, ac.UserID).Scan(&currentConfigVersion, &currentRevision); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if option.ExpectedConfigVersion != nil && *option.ExpectedConfigVersion != currentConfigVersion {
+		return ErrConfigConflict
+	}
+	if option.ExpectedRevision != nil && *option.ExpectedRevision != currentRevision {
+		return ErrRevisionConflict
+	}
+	now := nowString()
+	result, err := tx.ExecContext(ctx, `UPDATE mappings SET desired_state=?,lifecycle_status=CASE WHEN ?='enabled' THEN 'pending_apply' ELSE 'disabled' END,updated_at=? WHERE id=? AND user_id=? AND lifecycle_status <> 'deleted'`, state, state, now, mappingID, ac.UserID)
 	if err != nil {
 		return err
 	}
 	if n, _ := result.RowsAffected(); n == 0 {
 		return ErrNotFound
 	}
-	_, _ = a.DB.ExecContext(ctx, `UPDATE users SET desired_config_version=desired_config_version+1,updated_at=? WHERE id=?`, nowString(), ac.UserID)
-	return a.Audit(ctx, ac, "mapping_toggled", "mapping", mappingID, "success", map[string]interface{}{"enabled": enabled}, "")
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET desired_config_version=desired_config_version+1,updated_at=? WHERE id=?`, now, ac.UserID); err != nil {
+		return err
+	}
+	responseBody, _ := json.Marshal(map[string]bool{"ok": true})
+	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), ac.UserID, ac.Generation, "POST", normalizedPath, idempotencyKey, bodyHash, 200, string(responseBody), time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	_ = a.Audit(ctx, ac, "mapping_toggled", "mapping", mappingID, "success", map[string]interface{}{"enabled": enabled}, "")
+	if a.Jobs != nil {
+		_ = a.EnqueueRouterSnapshot(ctx)
+	}
+	return nil
 }
 
 func (a *App) ListDomains(ctx context.Context, userID string) ([]Domain, error) {
@@ -695,9 +855,25 @@ func (a *App) CreateDomain(ctx context.Context, ac AuthContext, req DomainReques
 	if err := tx.QueryRowContext(ctx, `SELECT user_id,proxy_type FROM mappings WHERE id=? AND lifecycle_status <> 'deleted'`, req.MappingID).Scan(&mappingOwner, &proxyType); err != nil || mappingOwner != ac.UserID || proxyType != "http" {
 		return Domain{}, fmt.Errorf("HTTP mapping is required")
 	}
-	var domainCount, maxDomains int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(1),(SELECT max_domains FROM users WHERE id=?) FROM domain_bindings WHERE user_id=? AND status <> 'deleted'`, ac.UserID, ac.UserID).Scan(&domainCount, &maxDomains); err != nil || domainCount >= maxDomains {
+	var domainCount, maxDomains, maxPendingDomainOperations, maxCertificateJobs int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(1),(SELECT max_domains FROM users WHERE id=?),(SELECT max_pending_domain_operations FROM users WHERE id=?),(SELECT max_certificate_jobs FROM users WHERE id=?) FROM domain_bindings WHERE user_id=? AND status <> 'deleted'`, ac.UserID, ac.UserID, ac.UserID, ac.UserID, ac.UserID).Scan(&domainCount, &maxDomains, &maxPendingDomainOperations, &maxCertificateJobs); err != nil || domainCount >= maxDomains {
 		return Domain{}, fmt.Errorf("domain quota exceeded")
+	}
+	var pendingDomainOperations int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM operations WHERE user_id=? AND resource_type='domain' AND status IN ('pending','running')`, ac.UserID).Scan(&pendingDomainOperations); err != nil {
+		return Domain{}, err
+	}
+	if pendingDomainOperations >= maxPendingDomainOperations {
+		return Domain{}, fmt.Errorf("pending domain operation quota exceeded")
+	}
+	if req.HTTPSMode != "http_only" {
+		var certificateJobs int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM certificates c JOIN domain_bindings d ON d.id=c.domain_binding_id WHERE d.user_id=? AND c.status IN ('pending','renewing')`, ac.UserID).Scan(&certificateJobs); err != nil {
+			return Domain{}, err
+		}
+		if certificateJobs >= maxCertificateJobs {
+			return Domain{}, fmt.Errorf("certificate job quota exceeded")
+		}
 	}
 	now := nowString()
 	domainID := uuid.NewString()
@@ -732,12 +908,38 @@ func (a *App) CreateDomain(ctx context.Context, ac AuthContext, req DomainReques
 	return item, nil
 }
 
-func (a *App) ResolveDomainDNS(ctx context.Context, ac AuthContext, domainID, action string) error {
+func (a *App) ResolveDomainDNS(ctx context.Context, ac AuthContext, domainID, action string, idempotencyKeys ...string) error {
 	if action != "adopt" && action != "overwrite" && action != "cancel" {
 		return fmt.Errorf("unsupported DNS conflict action")
 	}
+	if a.Jobs == nil {
+		return errors.New("job worker is unavailable")
+	}
+	idempotencyKey := ""
+	if len(idempotencyKeys) > 0 {
+		idempotencyKey = strings.TrimSpace(idempotencyKeys[0])
+	}
+	if idempotencyKey == "" {
+		idempotencyKey = uuid.NewString()
+	}
+	normalizedPath := "/api/v1/domains/" + domainID + "/dns-action"
+	bodyHash := requestHash(map[string]string{"action": action})
+	tx, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var existingHash, existingBody string
+	if err := tx.QueryRowContext(ctx, `SELECT request_body_hash,response_body_json FROM idempotency_records WHERE user_id=? AND session_generation=? AND http_method='POST' AND normalized_path=? AND idempotency_key=?`, ac.UserID, ac.Generation, normalizedPath, idempotencyKey).Scan(&existingHash, &existingBody); err == nil {
+		if existingHash != bodyHash {
+			return ErrIdempotencyReuse
+		}
+		return nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
 	var owner string
-	if err := a.DB.QueryRowContext(ctx, `SELECT user_id FROM domain_bindings WHERE id=? AND status <> 'deleted'`, domainID).Scan(&owner); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT user_id FROM domain_bindings WHERE id=? AND status <> 'deleted'`, domainID).Scan(&owner); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -747,29 +949,69 @@ func (a *App) ResolveDomainDNS(ctx context.Context, ac AuthContext, domainID, ac
 		return ErrNotFound
 	}
 	now := nowString()
-	if _, err := a.DB.ExecContext(ctx, `UPDATE domain_bindings SET status='pending_dns',updated_at=? WHERE id=?`, now, domainID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE domain_bindings SET status='pending_dns',updated_at=? WHERE id=?`, now, domainID); err != nil {
 		return err
 	}
-	_, _ = a.DB.ExecContext(ctx, `UPDATE operations SET status='pending',phase='dns',step='awaiting_provider',error_code=NULL,error_message=NULL,updated_at=?,completed_at=NULL WHERE resource_type='domain' AND resource_id=? AND status IN ('failed','canceled')`, now, domainID)
-	if a.Jobs == nil {
-		return errors.New("job worker is unavailable")
+	if _, err := tx.ExecContext(ctx, `UPDATE operations SET status='pending',phase='dns',step='awaiting_provider',error_code=NULL,error_message=NULL,updated_at=?,completed_at=NULL WHERE resource_type='domain' AND resource_id=? AND status IN ('failed','canceled')`, now, domainID); err != nil {
+		return err
 	}
-	_, err := a.Jobs.Enqueue(ctx, "domain_dns_sync", "domain", domainID, "domain:"+domainID+":dns", map[string]interface{}{"user_id": owner, "domain_id": domainID, "action": action}, nil)
+	responseBody, _ := json.Marshal(map[string]string{"status": "pending", "action": action})
+	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), ac.UserID, ac.Generation, "POST", normalizedPath, idempotencyKey, bodyHash, 202, string(responseBody), time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	_, err = a.Jobs.Enqueue(ctx, "domain_dns_sync", "domain", domainID, "domain:"+domainID+":dns", map[string]interface{}{"user_id": owner, "domain_id": domainID, "action": action}, nil)
 	return err
 }
 
-func (a *App) DeleteDomain(ctx context.Context, ac AuthContext, domainID string) (string, error) {
+func (a *App) DeleteDomain(ctx context.Context, ac AuthContext, domainID string, idempotencyKeys ...string) (string, error) {
+	tx, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
 	now := nowString()
-	result, err := a.DB.ExecContext(ctx, `UPDATE domain_bindings SET status='deleting',updated_at=? WHERE id=? AND user_id=? AND status <> 'deleted'`, now, domainID, ac.UserID)
+	idempotencyKey := ""
+	if len(idempotencyKeys) > 0 {
+		idempotencyKey = strings.TrimSpace(idempotencyKeys[0])
+	}
+	if idempotencyKey == "" {
+		idempotencyKey = uuid.NewString()
+	}
+	normalizedPath := "/api/v1/domains/" + domainID
+	bodyHash := requestHash(map[string]interface{}{})
+	var existingHash, existingOperation string
+	if err := tx.QueryRowContext(ctx, `SELECT request_body_hash,COALESCE(operation_id,'') FROM idempotency_records WHERE user_id=? AND session_generation=? AND http_method='DELETE' AND normalized_path=? AND idempotency_key=?`, ac.UserID, ac.Generation, normalizedPath, idempotencyKey).Scan(&existingHash, &existingOperation); err == nil {
+		if existingHash != bodyHash {
+			return "", ErrIdempotencyReuse
+		}
+		return existingOperation, nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE domain_bindings SET status='deleting',updated_at=? WHERE id=? AND user_id=? AND status <> 'deleted'`, now, domainID, ac.UserID)
 	if err != nil {
 		return "", err
 	}
 	if n, _ := result.RowsAffected(); n == 0 {
 		return "", ErrNotFound
 	}
-	_, _ = a.DB.ExecContext(ctx, `UPDATE users SET desired_config_version=desired_config_version+1,updated_at=? WHERE id=?`, now, ac.UserID)
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET desired_config_version=desired_config_version+1,updated_at=? WHERE id=?`, now, ac.UserID); err != nil {
+		return "", err
+	}
 	opID := uuid.NewString()
-	_, _ = a.DB.ExecContext(ctx, `INSERT INTO operations(id,user_id,resource_type,resource_id,operation_type,status,phase,step,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, opID, ac.UserID, "domain", domainID, "delete", "pending", "router", "awaiting_client", now, now)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO operations(id,user_id,resource_type,resource_id,operation_type,status,phase,step,idempotency_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, opID, ac.UserID, "domain", domainID, "delete", "pending", "router", "awaiting_client", idempotencyKey, now, now); err != nil {
+		return "", err
+	}
+	responseBody, _ := json.Marshal(map[string]string{"operation_id": opID, "status": "pending"})
+	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,operation_id,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), ac.UserID, ac.Generation, "DELETE", normalizedPath, idempotencyKey, bodyHash, 202, string(responseBody), opID, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
+		return "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
 	if a.Jobs != nil {
 		if err := a.EnqueueRouterSnapshot(ctx); err != nil {
 			return "", err
@@ -834,19 +1076,15 @@ func (a *App) ApplyResult(ctx context.Context, ac AuthContext, req ApplyResultRe
 			_ = tx.Rollback()
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE mappings SET active_revision_id=COALESCE(pending_revision_id,active_revision_id),pending_revision_id=NULL,lifecycle_status=CASE WHEN desired_state='disabled' THEN 'disabled' WHEN lifecycle_status='deleting' THEN 'deleting' ELSE 'running' END,observed_state='running',updated_at=? WHERE user_id=? AND lifecycle_status <> 'deleted'`, now, ac.UserID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE mappings SET active_revision_id=COALESCE(pending_revision_id,active_revision_id),pending_revision_id=NULL,lifecycle_status=CASE WHEN lifecycle_status='deleting' THEN 'deleting' WHEN desired_state='disabled' THEN 'disabled' ELSE 'running' END,observed_state='running',updated_at=? WHERE user_id=? AND lifecycle_status <> 'deleted'`, now, ac.UserID); err != nil {
 			_ = tx.Rollback()
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM port_leases WHERE mapping_id IN (SELECT id FROM mappings WHERE user_id=?) AND lease_role='pending'`, ac.UserID); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM port_leases WHERE mapping_id IN (SELECT id FROM mappings WHERE user_id=?) AND NOT EXISTS (SELECT 1 FROM mappings m JOIN mapping_revisions r ON r.id=m.active_revision_id WHERE m.id=port_leases.mapping_id AND r.remote_port=port_leases.remote_port)`, ac.UserID); err != nil {
 			_ = tx.Rollback()
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE port_leases SET lease_role='active' WHERE mapping_id IN (SELECT id FROM mappings WHERE user_id=?)`, ac.UserID); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM mappings WHERE user_id=? AND lifecycle_status='deleting'`, ac.UserID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE port_leases SET lease_role='active',mapping_revision_id=(SELECT active_revision_id FROM mappings WHERE id=port_leases.mapping_id) WHERE mapping_id IN (SELECT id FROM mappings WHERE user_id=?)`, ac.UserID); err != nil {
 			_ = tx.Rollback()
 			return err
 		}
@@ -864,6 +1102,7 @@ func (a *App) ApplyResult(ctx context.Context, ac AuthContext, req ApplyResultRe
 		// Domain deletion is a second durable step after the Client has
 		// acknowledged the config that removes the binding from FRPC.
 		rows, queryErr := a.DB.QueryContext(ctx, `SELECT id,user_id FROM domain_bindings WHERE status='deleting'`)
+		deletions := make([]struct{ domainID, userID string }, 0)
 		if queryErr == nil {
 			for rows.Next() {
 				var domainID, userID string
@@ -871,16 +1110,21 @@ func (a *App) ApplyResult(ctx context.Context, ac AuthContext, req ApplyResultRe
 					_ = rows.Close()
 					return scanErr
 				}
-				if _, enqueueErr := a.Jobs.Enqueue(ctx, "domain_delete", "domain", domainID, "domain:"+domainID+":delete", map[string]interface{}{"user_id": userID, "domain_id": domainID}, nil); enqueueErr != nil {
-					_ = rows.Close()
-					return enqueueErr
-				}
+				deletions = append(deletions, struct{ domainID, userID string }{domainID: domainID, userID: userID})
 			}
 			queryErr = rows.Err()
 			_ = rows.Close()
 		}
 		if queryErr != nil {
 			return queryErr
+		}
+		for _, deletion := range deletions {
+			if _, enqueueErr := a.Jobs.Enqueue(ctx, "domain_delete", "domain", deletion.domainID, "domain:"+deletion.domainID+":delete", map[string]interface{}{"user_id": deletion.userID, "domain_id": deletion.domainID}, nil); enqueueErr != nil {
+				return enqueueErr
+			}
+		}
+		if err := a.finalizeDeletedMappings(ctx, ac.UserID); err != nil {
+			return err
 		}
 		// A successful Client apply changes the route's observed availability;
 		// refresh the independent Router snapshot after the short DB tx.
@@ -900,6 +1144,21 @@ func (a *App) Heartbeat(ctx context.Context, ac AuthContext, clientVersion, frpc
 	now := nowString()
 	_, err := a.DB.ExecContext(ctx, `UPDATE user_runtime_state SET observed_client_status='online',client_panel_version=?,frpc_version=?,last_heartbeat_at=?,updated_at=? WHERE user_id=?`, clientVersion, frpcVersion, now, now, ac.UserID)
 	return err
+}
+
+// TouchSession keeps a long-lived WebSocket session inside the same idle
+// timeout rules as ordinary authenticated HTTP requests. It fails closed when
+// the session was revoked, expired, or the user was disabled.
+func (a *App) TouchSession(ctx context.Context, ac AuthContext) error {
+	now := time.Now().UTC()
+	result, err := a.DB.ExecContext(ctx, `UPDATE sessions SET last_seen_at=?,idle_expires_at=? WHERE id=? AND user_id=? AND session_generation=? AND revoked_at IS NULL AND expires_at>? AND idle_expires_at>? AND EXISTS (SELECT 1 FROM users WHERE id=? AND status='active' AND active_session_generation=?)`, now.Format(time.RFC3339Nano), now.Add(30*time.Minute).Format(time.RFC3339Nano), ac.SessionID, ac.UserID, ac.Generation, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), ac.UserID, ac.Generation)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return ErrSessionInvalid
+	}
+	return nil
 }
 
 func (a *App) AdminUsers(ctx context.Context) ([]UserRecord, error) {

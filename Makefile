@@ -4,7 +4,7 @@ GO_CACHE ?= /private/tmp/frp-cf-gocache
 GO_MODULE_CACHE ?= /private/tmp/frp-cf-gomodcache
 GO_ENV = GOCACHE=$(GO_CACHE) GOMODCACHE=$(GO_MODULE_CACHE)
 
-.PHONY: install-web build test lint dev-server dev-client clean
+.PHONY: install-web build test lint contract sbom checksums dev-server dev-client clean
 
 install-web:
 	cd web/admin && npm install
@@ -27,6 +27,15 @@ lint:
 	cd client && $(GO_ENV) go fmt ./... && $(GO_ENV) go vet ./...
 	cd web/admin && npm run typecheck
 	cd web/client && npm run typecheck
+
+contract:
+	ruby scripts/validate-openapi.rb
+
+sbom: build
+	ruby scripts/generate-sbom.rb
+
+checksums: build
+	shasum -a 256 build/frp-panel-server build/frp-panel-client build/frp-panel-backup-restore > build/SHA256SUMS
 
 dev-server:
 	cd server && $(GO_ENV) go run ./cmd/server

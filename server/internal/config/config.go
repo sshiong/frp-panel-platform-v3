@@ -33,6 +33,7 @@ type Config struct {
 	AdminWebDir          string
 	CloudflareAPIBaseURL string
 	RouterSnapshotDir    string
+	RouterListenAddr     string
 	RouterControlHosts   []string
 	RouterControlTarget  string
 	RouterBusinessTarget string
@@ -46,7 +47,12 @@ func Load() Config {
 	dataDir := getenv("FRP_SERVER_DATA_DIR", "./data")
 	allowedOrigins := splitCSV(os.Getenv("FRP_ALLOWED_ORIGINS"))
 	if len(allowedOrigins) == 0 {
-		allowedOrigins = []string{"http://127.0.0.1:5173", "http://localhost:5173", "http://127.0.0.1:7400", "http://localhost:7400"}
+		allowedOrigins = []string{
+			"http://127.0.0.1:5173", "http://localhost:5173",
+			"http://127.0.0.1:5174", "http://localhost:5174",
+			"http://127.0.0.1:7410", "http://localhost:7410",
+			"http://127.0.0.1:7400", "http://localhost:7400",
+		}
 	}
 	return Config{
 		ListenAddr:           getenv("SERVER_LISTEN_ADDR", "127.0.0.1:7400"),
@@ -71,6 +77,7 @@ func Load() Config {
 		AdminWebDir:          os.Getenv("FRP_ADMIN_WEB_DIR"),
 		CloudflareAPIBaseURL: getenv("CLOUDFLARE_API_BASE_URL", "https://api.cloudflare.com/client/v4"),
 		RouterSnapshotDir:    getenv("FRP_ROUTER_SNAPSHOT_DIR", filepath.Join(dataDir, "router")),
+		RouterListenAddr:     os.Getenv("FRP_ROUTER_LISTEN_ADDR"),
 		RouterControlHosts:   splitCSV(os.Getenv("FRP_ROUTER_CONTROL_HOSTS")),
 		RouterControlTarget:  getenv("FRP_ROUTER_CONTROL_TARGET", "http://127.0.0.1:7400"),
 		RouterBusinessTarget: getenv("FRP_ROUTER_BUSINESS_TARGET", "http://127.0.0.1:8080"),

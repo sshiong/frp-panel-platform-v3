@@ -13,6 +13,7 @@ import (
 func main() {
 	input := flag.String("input", "", "path to an FPPB1 backup")
 	target := flag.String("target", "", "target SQLite database path")
+	dataDir := flag.String("data-dir", "", "server data directory for restoring encrypted keys and certificate metadata")
 	flag.Parse()
 	if *input == "" || *target == "" {
 		fmt.Fprintln(os.Stderr, "usage: backup-restore -input backup.fppb -target server.db")
@@ -23,7 +24,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "FRP_BACKUP_PASSWORD is required and must be supplied out of band")
 		os.Exit(2)
 	}
-	previous, err := backup.Restore(*input, password, *target)
+	previous, err := backup.RestoreWithOptions(*input, password, *target, backup.Options{DataDir: *dataDir})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "restore failed: %v\n", err)
 		os.Exit(1)

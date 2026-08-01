@@ -15,3 +15,9 @@ Important boundaries:
 - `POST /api/v1/domains/{id}/dns-action` accepts only `adopt`, `overwrite`, or `cancel`; `adopt` stores `managed_by_panel=false`, while `overwrite` stores `managed_by_panel=true`.
 - `POST /api/v1/operations/{id}/retry` requeues failed/canceled Domain operations with their user-scoped resource filter. Admins can inspect and retry all operations.
 - Admins can inspect `/api/v1/admin/router/status` and enqueue `/api/v1/admin/router/rebuild`; the reported `adapter=file-last-good` is an explicit local adapter, not evidence of a production TLS Router deployment.
+
+## WebSocket protocol
+
+`GET /api/v1/ws` is available only with a valid Client Panel bearer session and an allowed `Origin`. The connection uses the envelope declared in `contracts/openapi.yaml` and always carries `message_id`, `protocol_version`, `timestamp`, `type`, and `payload`.
+
+The Server sends session invalidation (`session_replaced`, `user_disabled`), configuration invalidation (`config_version_changed`, `force_full_sync`, `mapping_deleted`), and safety events (`shutdown_frpc`). The Client sends a heartbeat every 20 seconds, renews the session idle lease, reconnects with exponential backoff from one second to 60 seconds with jitter, and performs a signed full configuration fetch after a configuration event. WebSocket messages are notifications only; the database version and `/api/v1/config/full` remain authoritative.

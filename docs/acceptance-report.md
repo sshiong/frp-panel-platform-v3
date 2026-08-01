@@ -22,8 +22,15 @@ This report records evidence available in the local development environment. It 
 - Router tests cover HMAC/hash rejection, last-good retention, control/business Host routing, unknown Host 404 and offline upstream 502. Router runtime has no database dependency.
 - ACME DNS-01 provider is implemented with the Go ACME client, encrypted account material, TXT propagation polling and cleanup; it remains disabled unless an operator supplies a staging/production directory, email and verified Cloudflare Token.
 - FRPS fixed-binary process tests cover SHA-256 verification, PID ownership and controlled stop.
+- Server/Client WebSocket tests cover the v1 envelope boundary, heartbeat session renewal, remote disable cleanup, bounded exponential backoff with jitter, and signed full-sync recovery after configuration notifications.
+- Pending quotas cover mappings, pending port leases, domain operations and certificate jobs; metrics expose resource counts, job backlog, Router lag and SQLite WAL size without user-input labels.
+- Mapping deletion retains domain bindings until managed DNS cleanup succeeds; a focused service test proves managed records are deleted and mapping operations only finalize after compensation. Port rotation proves the old lease is released only after the new revision applies.
+- Mapping toggle, Domain deletion and DNS conflict actions persist request hashes under the authenticated session generation; retries return the original outcome and conflicting bodies return `IDEMPOTENCY_KEY_REUSED`. Toggle also enforces optional expected config/revision values.
+- Formal FPPB1 backup tests include protected data-directory files, per-entry checksums, wrong-password rejection, SQLite integrity validation, session/runtime credential revocation and atomic restore.
+- `scripts/validate-openapi.rb` validates OpenAPI 3.1 paths, unique operation IDs and the WebSocket metadata; `make sbom` emits a local SPDX inventory and `make checksums` emits SHA-256 checksums for the three local artifacts. Artifact signing and third-party scanner attestations remain release work.
+- Final local regression: Server and Client `go test -race ./...`, repository `make test lint build contract sbom checksums`, whitespace validation and secret-pattern scan pass. Vite reports a non-blocking warning for the current JavaScript chunk size.
 - Browser screenshots: [`admin-overview.png`](../output/playwright/admin-overview.png), [`client-tunnels.png`](../output/playwright/client-tunnels.png), [`client-domains.png`](../output/playwright/client-domains.png).
 
 ## Not signed off yet
 
-Real FRPS Plugin Login/NewProxy/WorkConn E2E, Cloudflare Sandbox timeout compensation, ACME Staging against a real CA, Router TLS SNI certificate hot reload, encrypted restore drill, fuzz/SAST/SCA/secret scan, performance baseline, SBOM/signing, and a production HTTPS deployment remain release gates. Local tests never mark those external integrations active.
+Real FRPS/FRPC Plugin Login/NewProxy/WorkConn E2E, Cloudflare Sandbox timeout compensation, ACME Staging against a real CA, Router TLS SNI certificate hot reload, a clean-host disaster restore drill, implementation-level API Contract tests, fuzz/SAST/SCA/secret scan, performance baseline, SBOM/signing, and a production HTTPS deployment remain release gates. Local tests never mark those external integrations active.

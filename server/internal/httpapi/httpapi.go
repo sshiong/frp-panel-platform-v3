@@ -39,6 +39,14 @@ type API struct {
 	clients map[string]map[*websocket.Conn]struct{}
 }
 
+type wsEnvelope struct {
+	MessageID       string      `json:"message_id"`
+	ProtocolVersion string      `json:"protocol_version"`
+	Timestamp       time.Time   `json:"timestamp"`
+	Type            string      `json:"type"`
+	Payload         interface{} `json:"payload,omitempty"`
+}
+
 func New(app *service.App, logger *slog.Logger) *API {
 	origins := make(map[string]bool)
 	for _, origin := range app.Config.AllowedOrigins {
@@ -206,12 +214,21 @@ func (a *API) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) metrics(w http.ResponseWriter, r *http.Request) {
-	var users, mappings, sessions int
+	var users, mappings, sessions, portLeases, pendingDomains, pendingCertificates, pendingJobs, routerLag int
 	_ = a.App.DB.QueryRowContext(r.Context(), `SELECT COUNT(1) FROM users WHERE status='active'`).Scan(&users)
 	_ = a.App.DB.QueryRowContext(r.Context(), `SELECT COUNT(1) FROM mappings WHERE lifecycle_status <> 'deleted'`).Scan(&mappings)
 	_ = a.App.DB.QueryRowContext(r.Context(), `SELECT COUNT(1) FROM sessions WHERE revoked_at IS NULL AND expires_at > datetime('now')`).Scan(&sessions)
+	_ = a.App.DB.QueryRowContext(r.Context(), `SELECT COUNT(1) FROM port_leases`).Scan(&portLeases)
+	_ = a.App.DB.QueryRowContext(r.Context(), `SELECT COUNT(1) FROM domain_bindings WHERE status LIKE 'pending_%' OR status IN ('reserved','deleting')`).Scan(&pendingDomains)
+	_ = a.App.DB.QueryRowContext(r.Context(), `SELECT COUNT(1) FROM certificates WHERE status IN ('pending','renewing')`).Scan(&pendingCertificates)
+	_ = a.App.DB.QueryRowContext(r.Context(), `SELECT COUNT(1) FROM jobs WHERE status IN ('pending','running','retry_wait')`).Scan(&pendingJobs)
+	_ = a.App.DB.QueryRowContext(r.Context(), `SELECT MAX(router_config_version-router_applied_version) FROM router_state`).Scan(&routerLag)
+	walBytes := int64(0)
+	if info, err := os.Stat(a.App.Config.DBPath + "-wal"); err == nil {
+		walBytes = info.Size()
+	}
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-	fmt.Fprintf(w, "frp_panel_active_users %d\nfrp_panel_mappings %d\nfrp_panel_sessions %d\n", users, mappings, sessions)
+	_, _ = fmt.Fprintf(w, "frp_panel_active_users %d\nfrp_panel_mappings %d\nfrp_panel_sessions %d\nfrp_panel_port_leases %d\nfrp_panel_pending_domains %d\nfrp_panel_pending_certificates %d\nfrp_panel_pending_jobs %d\nfrp_panel_router_version_lag %d\nfrp_panel_sqlite_wal_bytes %d\n", users, mappings, sessions, portLeases, pendingDomains, pendingCertificates, pendingJobs, routerLag, walBytes)
 }
 
 func (a *API) adminApp(w http.ResponseWriter, r *http.Request) {
@@ -269,6 +286,7 @@ func (a *API) clientLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result.RequestID = requestID(r)
+	a.notifyUser(result.User.ID, "session_replaced", map[string]interface{}{"session_id": result.SessionID})
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -333,6 +351,7 @@ func (a *API) createMapping(w http.ResponseWriter, r *http.Request) {
 		a.mappingProblem(w, r, err)
 		return
 	}
+	a.notifyConfigChanged(authFrom(r).UserID, "mapping", item.ID)
 	writeJSON(w, http.StatusCreated, item)
 }
 
@@ -349,6 +368,7 @@ func (a *API) updateMapping(w http.ResponseWriter, r *http.Request) {
 		a.mappingProblem(w, r, err)
 		return
 	}
+	a.notifyConfigChanged(authFrom(r).UserID, "mapping", item.ID)
 	writeJSON(w, http.StatusOK, item)
 }
 
@@ -357,11 +377,13 @@ func (a *API) deleteMapping(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	force := r.URL.Query().Get("force") == "true"
-	opID, err := a.App.DeleteMapping(r.Context(), authFrom(r), chi.URLParam(r, "id"), force)
+	opID, err := a.App.DeleteMapping(r.Context(), authFrom(r), chi.URLParam(r, "id"), force, r.Header.Get("Idempotency-Key"))
 	if err != nil {
 		a.mappingProblem(w, r, err)
 		return
 	}
+	a.notifyConfigChanged(authFrom(r).UserID, "mapping", chi.URLParam(r, "id"))
+	a.notifyUser(authFrom(r).UserID, "mapping_deleted", map[string]interface{}{"mapping_id": chi.URLParam(r, "id"), "operation_id": opID})
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{"operation_id": opID, "status": "pending"})
 }
 
@@ -370,15 +392,18 @@ func (a *API) toggleMapping(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		Enabled bool `json:"enabled"`
+		Enabled               bool   `json:"enabled"`
+		ExpectedConfigVersion *int64 `json:"expected_config_version"`
+		ExpectedRevision      *int64 `json:"expected_revision"`
 	}
 	if !decodeJSON(w, r, &input) {
 		return
 	}
-	if err := a.App.ToggleMapping(r.Context(), authFrom(r), chi.URLParam(r, "id"), input.Enabled); err != nil {
+	if err := a.App.ToggleMapping(r.Context(), authFrom(r), chi.URLParam(r, "id"), input.Enabled, service.ToggleMappingOptions{ExpectedConfigVersion: input.ExpectedConfigVersion, ExpectedRevision: input.ExpectedRevision, IdempotencyKey: r.Header.Get("Idempotency-Key")}); err != nil {
 		a.mappingProblem(w, r, err)
 		return
 	}
+	a.notifyConfigChanged(authFrom(r).UserID, "mapping", chi.URLParam(r, "id"))
 	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
 }
 
@@ -404,6 +429,7 @@ func (a *API) createDomain(w http.ResponseWriter, r *http.Request) {
 		a.mappingProblem(w, r, err)
 		return
 	}
+	a.notifyConfigChanged(authFrom(r).UserID, "domain", item.ID)
 	writeJSON(w, http.StatusAccepted, item)
 }
 
@@ -411,11 +437,12 @@ func (a *API) deleteDomain(w http.ResponseWriter, r *http.Request) {
 	if mustChange(w, r, authFrom(r)) {
 		return
 	}
-	opID, err := a.App.DeleteDomain(r.Context(), authFrom(r), chi.URLParam(r, "id"))
+	opID, err := a.App.DeleteDomain(r.Context(), authFrom(r), chi.URLParam(r, "id"), r.Header.Get("Idempotency-Key"))
 	if err != nil {
 		a.mappingProblem(w, r, err)
 		return
 	}
+	a.notifyConfigChanged(authFrom(r).UserID, "domain", chi.URLParam(r, "id"))
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{"operation_id": opID, "status": "pending"})
 }
 
@@ -429,10 +456,11 @@ func (a *API) domainDNSAction(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input) {
 		return
 	}
-	if err := a.App.ResolveDomainDNS(r.Context(), authFrom(r), chi.URLParam(r, "id"), input.Action); err != nil {
+	if err := a.App.ResolveDomainDNS(r.Context(), authFrom(r), chi.URLParam(r, "id"), input.Action, r.Header.Get("Idempotency-Key")); err != nil {
 		a.mappingProblem(w, r, err)
 		return
 	}
+	a.notifyConfigChanged(authFrom(r).UserID, "domain", chi.URLParam(r, "id"))
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{"status": "pending", "action": input.Action})
 }
 
@@ -587,6 +615,11 @@ func (a *API) setUserStatus(w http.ResponseWriter, r *http.Request) {
 		a.mappingProblem(w, r, err)
 		return
 	}
+	if input.Status == "disabled" {
+		a.notifyUser(chi.URLParam(r, "id"), "user_disabled", map[string]interface{}{"reason": "admin_action"})
+	} else {
+		a.notifyUser(chi.URLParam(r, "id"), "force_full_sync", map[string]interface{}{"reason": "user_reactivated"})
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
 }
 func (a *API) resetPassword(w http.ResponseWriter, r *http.Request) {
@@ -595,6 +628,7 @@ func (a *API) resetPassword(w http.ResponseWriter, r *http.Request) {
 		a.mappingProblem(w, r, err)
 		return
 	}
+	a.notifyUser(chi.URLParam(r, "id"), "session_replaced", map[string]interface{}{"reason": "password_reset"})
 	writeJSON(w, http.StatusOK, map[string]interface{}{"initial_password": password, "warning": "只展示一次，请通过受保护渠道交付。"})
 }
 func (a *API) adminOperations(w http.ResponseWriter, r *http.Request) { a.operations(w, r) }
@@ -633,7 +667,7 @@ func (a *API) createBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := fmt.Sprintf("%s/backups/backup-%s.fppb", a.App.Config.DataDir, time.Now().UTC().Format("20060102T150405Z"))
-	if err := backup.Create(r.Context(), a.App.DB.DB, path, input.Password); err != nil {
+	if err := backup.CreateWithOptions(r.Context(), a.App.DB.DB, path, input.Password, backup.Options{DataDir: a.App.Config.DataDir}); err != nil {
 		problem(w, r, 400, "BACKUP_FAILED", "加密备份创建失败。", err)
 		return
 	}
@@ -647,18 +681,72 @@ func (a *API) websocket(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	conn.SetReadLimit(64 << 10)
 	a.mu.Lock()
 	if a.clients[ac.UserID] == nil {
 		a.clients[ac.UserID] = map[*websocket.Conn]struct{}{}
 	}
 	a.clients[ac.UserID][conn] = struct{}{}
 	a.mu.Unlock()
-	defer func() { a.mu.Lock(); delete(a.clients[ac.UserID], conn); a.mu.Unlock(); _ = conn.Close() }()
+	defer func() {
+		a.mu.Lock()
+		delete(a.clients[ac.UserID], conn)
+		if len(a.clients[ac.UserID]) == 0 {
+			delete(a.clients, ac.UserID)
+		}
+		a.mu.Unlock()
+		_ = conn.Close()
+	}()
+	_ = a.writeWS(conn, wsEnvelope{Type: "connected", Payload: map[string]interface{}{"user_id": ac.UserID}})
 	for {
-		if _, _, err := conn.ReadMessage(); err != nil {
+		_, data, err := conn.ReadMessage()
+		if err != nil {
 			return
 		}
+		var message wsEnvelope
+		if json.Unmarshal(data, &message) == nil && message.ProtocolVersion != "" && message.ProtocolVersion != "v1" {
+			_ = a.writeWS(conn, wsEnvelope{Type: "protocol_error", Payload: map[string]interface{}{"code": "UPGRADE_REQUIRED", "minimum_protocol_version": "v1"}})
+			return
+		}
+		if message.Type == "heartbeat" {
+			if err := a.App.TouchSession(r.Context(), ac); err != nil {
+				_ = a.writeWS(conn, wsEnvelope{Type: "session_expired", Payload: map[string]interface{}{"reason": "session_no_longer_valid"}})
+				return
+			}
+			_ = a.writeWS(conn, wsEnvelope{Type: "heartbeat_ack", Payload: map[string]interface{}{"server_time": time.Now().UTC()}})
+		}
 	}
+}
+
+func (a *API) writeWS(conn *websocket.Conn, message wsEnvelope) error {
+	message.MessageID = shortID()
+	message.ProtocolVersion = "v1"
+	message.Timestamp = time.Now().UTC()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	return conn.WriteJSON(message)
+}
+
+func (a *API) notifyUser(userID, messageType string, payload interface{}) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for conn := range a.clients[userID] {
+		message := wsEnvelope{MessageID: shortID(), ProtocolVersion: "v1", Timestamp: time.Now().UTC(), Type: messageType, Payload: payload}
+		_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		if err := conn.WriteJSON(message); err != nil {
+			delete(a.clients[userID], conn)
+			_ = conn.Close()
+		}
+	}
+}
+
+func (a *API) notifyConfigChanged(userID, resourceType, resourceID string) {
+	a.notifyUser(userID, "config_version_changed", map[string]interface{}{
+		"resource_type":   resourceType,
+		"resource_id":     resourceID,
+		"force_full_sync": true,
+	})
 }
 
 func (a *API) frpPlugin(w http.ResponseWriter, r *http.Request) {
@@ -692,6 +780,10 @@ func (a *API) mappingProblem(w http.ResponseWriter, r *http.Request, err error) 
 	code := "VALIDATION_FAILED"
 	detail := "请求未通过校验。"
 	switch {
+	case strings.Contains(err.Error(), "quota exceeded"):
+		status = http.StatusTooManyRequests
+		code = "QUOTA_EXCEEDED"
+		detail = "当前资源或待处理任务已达到配额，请等待现有任务完成或联系管理员。"
 	case errors.Is(err, service.ErrNotFound):
 		status = 404
 		code = "NOT_FOUND"

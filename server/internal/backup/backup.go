@@ -16,6 +16,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -30,12 +31,23 @@ type Manifest struct {
 	Files            map[string]string `json:"files"`
 }
 
+// Options controls the non-database files included in a formal backup. Files
+// are stored below the archive's files/ prefix and restored only below the
+// explicitly supplied data directory.
+type Options struct {
+	DataDir string
+}
+
 const (
 	packageMagic   = "FPPB1"
 	backupSaltSize = 16
 )
 
 func Create(ctx context.Context, database *sql.DB, output, password string) error {
+	return CreateWithOptions(ctx, database, output, password, Options{})
+}
+
+func CreateWithOptions(ctx context.Context, database *sql.DB, output, password string, options Options) error {
 	if len(password) < 12 {
 		return fmt.Errorf("backup password must be at least 12 characters")
 	}
@@ -60,14 +72,46 @@ func Create(ctx context.Context, database *sql.DB, output, password string) erro
 	if err != nil {
 		return err
 	}
-	digest := sha256.Sum256(databaseBytes)
-	manifest, _ := json.Marshal(Manifest{Format: "frp-panel-backup-v1", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), Files: map[string]string{"server.db": hex.EncodeToString(digest[:])}})
-	mw, _ := zw.Create("manifest.json")
-	_, _ = mw.Write(manifest)
-	dw, _ := zw.Create("server.db")
-	_, err = dw.Write(databaseBytes)
+	files := map[string][]byte{"server.db": databaseBytes}
+	if options.DataDir != "" {
+		additional, collectErr := collectDataFiles(options.DataDir, output)
+		if collectErr != nil {
+			return collectErr
+		}
+		for name, content := range additional {
+			files[name] = content
+		}
+	}
+	checksums := make(map[string]string, len(files))
+	for name, content := range files {
+		digest := sha256.Sum256(content)
+		checksums[name] = hex.EncodeToString(digest[:])
+	}
+	version := migrationVersion(ctx, database)
+	manifestBytes, err := json.Marshal(Manifest{Format: "frp-panel-backup-v1", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), MigrationVersion: version, Files: checksums})
 	if err != nil {
 		return err
+	}
+	mw, err := zw.Create("manifest.json")
+	if err != nil {
+		return err
+	}
+	if _, err := mw.Write(manifestBytes); err != nil {
+		return err
+	}
+	names := make([]string, 0, len(files))
+	for name := range files {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		dw, createErr := zw.Create(name)
+		if createErr != nil {
+			return createErr
+		}
+		if _, writeErr := dw.Write(files[name]); writeErr != nil {
+			return writeErr
+		}
 	}
 	if err := zw.Close(); err != nil {
 		return err
@@ -99,12 +143,26 @@ func Create(ctx context.Context, database *sql.DB, output, password string) erro
 	packageBytes := append([]byte(packageMagic), salt...)
 	packageBytes = append(packageBytes, nonce...)
 	packageBytes = append(packageBytes, ciphertext...)
-	return os.WriteFile(output, packageBytes, 0o600)
+	return writeAtomic(output, packageBytes)
 }
 
 // Decode decrypts and validates a backup without changing the target database.
 // The returned database bytes are a SQLite snapshot and must be treated as sensitive.
 func Decode(input, password string) (Manifest, []byte, error) {
+	manifest, files, err := DecodePackage(input, password)
+	if err != nil {
+		return Manifest{}, nil, err
+	}
+	database, ok := files["server.db"]
+	if !ok {
+		return Manifest{}, nil, errors.New("backup database is missing")
+	}
+	return manifest, database, nil
+}
+
+// DecodePackage decrypts and validates every file in a formal backup. The
+// returned byte slices are sensitive and must not be logged.
+func DecodePackage(input, password string) (Manifest, map[string][]byte, error) {
 	if len(password) < 12 {
 		return Manifest{}, nil, errors.New("backup password must be at least 12 characters")
 	}
@@ -144,51 +202,90 @@ func Decode(input, password string) (Manifest, []byte, error) {
 		return Manifest{}, nil, err
 	}
 	var manifest Manifest
-	var database []byte
+	files := make(map[string][]byte)
 	for _, file := range reader.File {
-		if file.Name != "manifest.json" && file.Name != "server.db" {
+		if file.Name == "manifest.json" {
+			opened, openErr := file.Open()
+			if openErr != nil {
+				return Manifest{}, nil, openErr
+			}
+			data, readErr := io.ReadAll(io.LimitReader(opened, 1<<20))
+			_ = opened.Close()
+			if readErr != nil {
+				return Manifest{}, nil, readErr
+			}
+			if err := json.Unmarshal(data, &manifest); err != nil {
+				return Manifest{}, nil, err
+			}
 			continue
+		}
+		if file.Name != "server.db" && !strings.HasPrefix(file.Name, "files/") {
+			return Manifest{}, nil, errors.New("backup contains an invalid file path")
+		}
+		if _, exists := files[file.Name]; exists {
+			return Manifest{}, nil, errors.New("backup contains duplicate file entries")
+		}
+		if file.Name != "server.db" && !validArchiveFileName(file.Name) {
+			return Manifest{}, nil, errors.New("backup contains an unsafe file path")
 		}
 		opened, err := file.Open()
 		if err != nil {
 			return Manifest{}, nil, err
 		}
-		data, readErr := io.ReadAll(io.LimitReader(opened, 512<<20))
+		limit := int64(64 << 20)
+		if file.Name == "server.db" {
+			limit = 512 << 20
+		}
+		data, readErr := io.ReadAll(io.LimitReader(opened, limit+1))
 		_ = opened.Close()
 		if readErr != nil {
 			return Manifest{}, nil, readErr
 		}
-		if file.Name == "manifest.json" {
-			if err := json.Unmarshal(data, &manifest); err != nil {
-				return Manifest{}, nil, err
-			}
-		} else {
-			database = data
+		if int64(len(data)) > limit {
+			return Manifest{}, nil, errors.New("backup file exceeds size limit")
 		}
+		files[file.Name] = data
 	}
-	if manifest.Format != "frp-panel-backup-v1" || len(database) == 0 {
+	if manifest.Format != "frp-panel-backup-v1" || len(files["server.db"]) == 0 {
 		return Manifest{}, nil, errors.New("backup manifest or database is missing")
 	}
-	if expected := manifest.Files["server.db"]; expected != "" {
-		digest := sha256.Sum256(database)
+	if manifest.Files["server.db"] == "" {
+		return Manifest{}, nil, errors.New("backup manifest does not checksum the database")
+	}
+	for name, expected := range manifest.Files {
+		content, ok := files[name]
+		if !ok {
+			return Manifest{}, nil, fmt.Errorf("backup file %q is missing", name)
+		}
+		digest := sha256.Sum256(content)
 		if !strings.EqualFold(expected, hex.EncodeToString(digest[:])) {
-			return Manifest{}, nil, errors.New("backup database checksum mismatch")
+			return Manifest{}, nil, fmt.Errorf("backup file %q checksum mismatch", name)
 		}
 	}
-	return manifest, database, nil
+	for name := range files {
+		if manifest.Files[name] == "" {
+			return Manifest{}, nil, fmt.Errorf("backup file %q is not listed in the manifest", name)
+		}
+	}
+	return manifest, files, nil
 }
 
 // Restore validates and atomically installs a decoded SQLite snapshot. The current
 // database is renamed with a timestamp so an operator can recover it if needed.
 // Stop the Server Panel before calling this function.
 func Restore(input, password, target string) (string, error) {
+	return RestoreWithOptions(input, password, target, Options{})
+}
+
+func RestoreWithOptions(input, password, target string, options Options) (string, error) {
 	if filepath.Clean(target) == "." || target == "" {
 		return "", errors.New("restore target is required")
 	}
-	_, database, err := Decode(input, password)
+	_, files, err := DecodePackage(input, password)
 	if err != nil {
 		return "", err
 	}
+	database := files["server.db"]
 	parent := filepath.Dir(target)
 	if err := os.MkdirAll(parent, 0o700); err != nil {
 		return "", err
@@ -255,7 +352,130 @@ func Restore(input, password, target string) (string, error) {
 	if closeErr != nil {
 		return "", closeErr
 	}
+	if options.DataDir != "" {
+		if err := restoreDataFiles(options.DataDir, files); err != nil {
+			return "", err
+		}
+	}
 	return previous, nil
+}
+
+func collectDataFiles(dataDir, output string) (map[string][]byte, error) {
+	root, err := filepath.Abs(dataDir)
+	if err != nil {
+		return nil, err
+	}
+	outputPath, _ := filepath.Abs(output)
+	files := make(map[string][]byte)
+	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if path != root && (filepath.Base(path) == "backups" || filepath.Base(path) == "logs") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if path == outputPath || strings.HasSuffix(path, ".tmp") || strings.HasSuffix(path, ".db") || strings.HasSuffix(path, ".db-wal") || strings.HasSuffix(path, ".db-shm") || strings.HasSuffix(path, ".log") {
+			return nil
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			return infoErr
+		}
+		if !info.Mode().IsRegular() || info.Size() > 64<<20 {
+			return nil
+		}
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return relErr
+		}
+		files["files/"+filepath.ToSlash(rel)] = content
+		return nil
+	})
+	return files, err
+}
+
+func restoreDataFiles(dataDir string, files map[string][]byte) error {
+	root, err := filepath.Abs(dataDir)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return err
+	}
+	for name, content := range files {
+		if !strings.HasPrefix(name, "files/") {
+			continue
+		}
+		rel := filepath.FromSlash(strings.TrimPrefix(name, "files/"))
+		clean := filepath.Clean(rel)
+		if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || filepath.IsAbs(clean) {
+			return errors.New("backup file path escapes data directory")
+		}
+		target := filepath.Join(root, clean)
+		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+			return err
+		}
+		if err := writeAtomic(target, content); err != nil {
+			return err
+		}
+		if err := os.Chmod(target, 0o600); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validArchiveFileName(name string) bool {
+	if !strings.HasPrefix(name, "files/") || strings.HasSuffix(name, "/") {
+		return false
+	}
+	relative := strings.TrimPrefix(name, "files/")
+	if relative == "" || strings.Contains(relative, "\\") {
+		return false
+	}
+	for _, part := range strings.Split(relative, "/") {
+		if part == "" || part == "." || part == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+func migrationVersion(ctx context.Context, database *sql.DB) int {
+	var version int
+	_ = database.QueryRowContext(ctx, `SELECT COALESCE(MAX(version),0) FROM schema_migrations`).Scan(&version)
+	return version
+}
+
+func writeAtomic(path string, content []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".backup-tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(content); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }
 
 func tableExists(database *sql.DB, table string) bool {

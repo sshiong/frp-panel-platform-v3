@@ -57,7 +57,7 @@ func TestCloudflareTokenAndDomainJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var createdRecord bool
+	var createdRecord, deletedRecord bool
 	app.CloudflareHTTPClient = &http.Client{Transport: cloudflareRoundTripper(func(req *http.Request) (*http.Response, error) {
 		var payload interface{}
 		switch {
@@ -70,6 +70,9 @@ func TestCloudflareTokenAndDomainJobs(t *testing.T) {
 		case req.Method == http.MethodPost && req.URL.Path == "/client/v4/zones/zone-1/dns_records":
 			createdRecord = true
 			payload = map[string]interface{}{"success": true, "result": map[string]interface{}{"id": "record-1", "type": "CNAME", "name": "app.example.com", "content": "frp.example.com", "ttl": 300, "proxied": false}}
+		case req.Method == http.MethodDelete && req.URL.Path == "/client/v4/zones/zone-1/dns_records/record-1":
+			deletedRecord = true
+			payload = map[string]interface{}{"success": true, "result": map[string]interface{}{}}
 		default:
 			payload = map[string]interface{}{"success": false, "errors": []map[string]string{{"message": "unexpected request"}}}
 		}
@@ -151,5 +154,75 @@ func TestCloudflareTokenAndDomainJobs(t *testing.T) {
 	}
 	if err := database.QueryRow(`SELECT status FROM domain_bindings WHERE id=?`, domain.ID).Scan(&status); err != nil || status != "active" {
 		t.Fatalf("domain status after client apply: %q %v", status, err)
+	}
+
+	deleteOperation, err := app.DeleteMapping(context.Background(), userContext, mapping.ID, false)
+	if err != nil || deleteOperation == "" {
+		t.Fatalf("mapping delete request: %q %v", deleteOperation, err)
+	}
+	if err := database.QueryRow(`SELECT status FROM domain_bindings WHERE id=?`, domain.ID).Scan(&status); err != nil || status != "deleting" {
+		t.Fatalf("domain must remain available for DNS compensation: %q %v", status, err)
+	}
+	if err := app.ApplyResult(context.Background(), userContext, ApplyResultRequest{Status: "succeeded", ConfigVersion: 3, AppliedConfigHash: "hash-3", ClientPanelVersion: "test", FRPCVersion: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	deleteJob, err := app.Jobs.Claim(context.Background())
+	if err != nil || deleteJob.Type != "domain_delete" {
+		t.Fatalf("domain cleanup job: %#v %v", deleteJob, err)
+	}
+	if err := app.handleJob(context.Background(), deleteJob); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.Jobs.Complete(context.Background(), deleteJob.ID); err != nil {
+		t.Fatal(err)
+	}
+	if !deletedRecord {
+		t.Fatal("managed DNS record was not deleted during mapping compensation")
+	}
+	var remaining int
+	if err := database.QueryRow(`SELECT COUNT(1) FROM mappings WHERE id=?`, mapping.ID).Scan(&remaining); err != nil || remaining != 0 {
+		t.Fatalf("mapping was not finalized after domain cleanup: %d %v", remaining, err)
+	}
+	if err := database.QueryRow(`SELECT status FROM operations WHERE id=?`, deleteOperation).Scan(&status); err != nil || status != "succeeded" {
+		t.Fatalf("mapping delete operation: %q %v", status, err)
+	}
+
+	remotePort := 6100
+	portMapping, err := app.CreateMapping(context.Background(), userContext, MappingRequest{Name: "tcp", ProxyType: "tcp", LocalIP: "127.0.0.1", LocalPort: 9000, RemotePort: &remotePort}, "idempotency-tcp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.ApplyResult(context.Background(), userContext, ApplyResultRequest{Status: "succeeded", ConfigVersion: 4, AppliedConfigHash: "hash-4", ClientPanelVersion: "test", FRPCVersion: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	updatedPort := 6101
+	if _, err := app.UpdateMapping(context.Background(), userContext, portMapping.ID, MappingRequest{Name: "tcp", ProxyType: "tcp", LocalIP: "127.0.0.1", LocalPort: 9000, RemotePort: &updatedPort}, "idempotency-tcp-update"); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.ApplyResult(context.Background(), userContext, ApplyResultRequest{Status: "succeeded", ConfigVersion: 5, AppliedConfigHash: "hash-5", ClientPanelVersion: "test", FRPCVersion: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	var oldPort, newPort int
+	if err := database.QueryRow(`SELECT COUNT(1) FROM port_leases WHERE mapping_id=? AND remote_port=?`, portMapping.ID, remotePort).Scan(&oldPort); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT COUNT(1) FROM port_leases WHERE mapping_id=? AND remote_port=? AND lease_role='active'`, portMapping.ID, updatedPort).Scan(&newPort); err != nil {
+		t.Fatal(err)
+	}
+	if oldPort != 0 || newPort != 1 {
+		t.Fatalf("port lease rotation was not applied: old=%d new=%d", oldPort, newPort)
+	}
+	portForIdempotency := 6102
+	idempotentMapping, err := app.CreateMapping(context.Background(), userContext, MappingRequest{Name: "idempotent-delete", ProxyType: "tcp", LocalIP: "127.0.0.1", LocalPort: 9001, RemotePort: &portForIdempotency}, "idempotency-delete-create")
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstDelete, err := app.DeleteMapping(context.Background(), userContext, idempotentMapping.ID, false, "delete-key-123456789")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondDelete, err := app.DeleteMapping(context.Background(), userContext, idempotentMapping.ID, false, "delete-key-123456789")
+	if err != nil || firstDelete != secondDelete {
+		t.Fatalf("delete idempotency failed: first=%q second=%q err=%v", firstDelete, secondDelete, err)
 	}
 }

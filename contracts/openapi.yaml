@@ -5,6 +5,15 @@ info:
   description: Versioned control-plane contract for the independent Server and Client Panels.
 servers:
   - url: https://panel.example.invalid
+x-websocket:
+  - path: /api/v1/ws
+    protocol_version: v1
+    authentication: bearerAuth
+    message_types:
+      server_to_client: [session_replaced, user_disabled, config_version_changed, force_full_sync, frp_secret_rotated, mapping_deleted, shutdown_frpc]
+      client_to_server: [heartbeat, config_apply_started, config_apply_succeeded, config_apply_failed, frpc_status_changed, local_health_changed]
+    envelope_required: [message_id, protocol_version, timestamp, type, payload]
+    semantics: notifications_only_full_sync_is_authoritative
 paths:
   /api/v1/compatibility:
     get:
@@ -140,6 +149,7 @@ paths:
         - name: force
           in: query
           schema: { type: boolean, default: false }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
       responses:
         '202': { description: Mapping deletion queued }
     post:
@@ -151,6 +161,7 @@ paths:
           in: path
           required: true
           schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
       requestBody:
         required: true
         content:
@@ -160,6 +171,8 @@ paths:
               required: [enabled]
               properties:
                 enabled: { type: boolean }
+                expected_config_version: { type: integer, format: int64 }
+                expected_revision: { type: integer, format: int64 }
       responses:
         '200': { description: Desired state updated }
   /api/v1/config/full:
@@ -230,6 +243,7 @@ paths:
           in: path
           required: true
           schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
       responses:
         '202': { description: Domain deletion queued }
   /api/v1/operations:
@@ -278,10 +292,13 @@ paths:
           application/json:
             schema:
               type: object
-              required: [config_version, result]
+              required: [config_version, status]
               properties:
                 config_version: { type: integer, format: int64 }
-                result: { type: string, enum: [success, failed] }
+                status: { type: string, enum: [succeeded, failed] }
+                applied_config_hash: { type: string }
+                client_panel_version: { type: string }
+                frpc_version: { type: string }
                 error_code: { type: string }
                 error_message: { type: string }
       responses:
@@ -389,8 +406,17 @@ paths:
     post:
       operationId: createBackup
       security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string, format: password, minLength: 12 }
       responses:
-        '202': { description: Backup created }
+        '201': { description: Encrypted backup created }
 components:
   parameters:
     IdempotencyKey:

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 	"github.com/ricardo/frp-panel-platform/client/internal/config"
 	"github.com/ricardo/frp-panel-platform/client/internal/security"
 	"github.com/ricardo/frp-panel-platform/client/internal/supervisor"
@@ -37,6 +39,10 @@ type App struct {
 	expiresAt         time.Time
 	lastDashboard     json.RawMessage
 	lastConfig        supervisor.Snapshot
+	wsMu              sync.Mutex
+	wsConn            *websocket.Conn
+	wsCancel          context.CancelFunc
+	wsGeneration      uint64
 }
 
 type ClientSession struct {
@@ -50,6 +56,14 @@ type RemoteError struct {
 	Status int
 	Code   string
 	Detail string
+}
+
+type wsEnvelope struct {
+	MessageID       string      `json:"message_id"`
+	ProtocolVersion string      `json:"protocol_version"`
+	Timestamp       time.Time   `json:"timestamp"`
+	Type            string      `json:"type"`
+	Payload         interface{} `json:"payload,omitempty"`
 }
 
 func (e RemoteError) Error() string {
@@ -82,6 +96,7 @@ func (a *App) Login(ctx context.Context, serverURL, username, password string) (
 	if response.Token == "" {
 		return ClientSession{}, fmt.Errorf("server did not return a session")
 	}
+	a.stopWebSocket()
 	local, err := randomToken()
 	if err != nil {
 		return ClientSession{}, err
@@ -109,10 +124,12 @@ func (a *App) Login(ctx context.Context, serverURL, username, password string) (
 	if snapshot, err := a.fetchConfig(ctx); err == nil {
 		_ = a.applySnapshot(ctx, snapshot)
 	}
+	a.startWebSocket()
 	return ClientSession{CSRFToken: csrf, User: response.User, ServerPanelURL: normalized, ExpiresAt: a.expiresAt}, nil
 }
 
 func (a *App) Logout(ctx context.Context) error {
+	a.stopWebSocket()
 	a.mu.RLock()
 	token, urlValue := a.serverToken, a.serverURL
 	a.mu.RUnlock()
@@ -153,7 +170,7 @@ func (a *App) Session() ClientSession {
 	return ClientSession{CSRFToken: a.csrfToken, User: a.user, ServerPanelURL: a.serverURL, ExpiresAt: a.expiresAt}
 }
 
-func (a *App) Proxy(ctx context.Context, method, path string, body interface{}, csrf string, response interface{}) error {
+func (a *App) Proxy(ctx context.Context, method, path string, body interface{}, csrf string, response interface{}, idempotencyKeys ...string) error {
 	a.mu.RLock()
 	token, urlValue := a.serverToken, a.serverURL
 	a.mu.RUnlock()
@@ -166,23 +183,11 @@ func (a *App) Proxy(ctx context.Context, method, path string, body interface{}, 
 	if method != "GET" && method != "HEAD" && !a.CSRFValid(csrf) {
 		return fmt.Errorf("local csrf validation failed")
 	}
-	err := a.serverRequest(ctx, urlValue, method, path, body, token, response)
+	err := a.serverRequest(ctx, urlValue, method, path, body, token, response, idempotencyKeys...)
 	if remote, ok := err.(RemoteError); ok && (remote.Code == "SESSION_REPLACED" || remote.Code == "SESSION_EXPIRED" || remote.Code == "AUTH_USER_DISABLED") {
 		// A replaced/revoked Server Session is a local safety event: stop FRPC
 		// before returning the error and erase all runtime-only material.
-		_ = a.Supervisor.Stop(ctx)
-		_ = a.Supervisor.ClearRuntimeSecrets()
-		a.mu.Lock()
-		a.serverToken = ""
-		a.serverURL = ""
-		a.runtimeCredential = ""
-		a.frpUsername = ""
-		a.frpSecret = ""
-		a.localSession = ""
-		a.csrfToken = ""
-		a.user = nil
-		a.expiresAt = time.Time{}
-		a.mu.Unlock()
+		a.invalidateRemoteSession(ctx)
 	}
 	if err == nil && path == "/api/v1/dashboard" {
 		a.mu.Lock()
@@ -253,7 +258,7 @@ func (a *App) applySnapshot(ctx context.Context, snapshot supervisor.Snapshot) e
 	return err
 }
 
-func (a *App) serverRequest(ctx context.Context, baseURL, method, path string, payload interface{}, token string, response interface{}) error {
+func (a *App) serverRequest(ctx context.Context, baseURL, method, path string, payload interface{}, token string, response interface{}, idempotencyKeys ...string) error {
 	var reader io.Reader
 	if payload != nil {
 		encoded, err := json.Marshal(payload)
@@ -281,7 +286,14 @@ func (a *App) serverRequest(ctx context.Context, baseURL, method, path string, p
 	}
 	req.Header.Set("X-Request-ID", uuid.NewString())
 	if method == "POST" || method == "PUT" || method == "DELETE" {
-		req.Header.Set("Idempotency-Key", uuid.NewString())
+		idempotencyKey := ""
+		if len(idempotencyKeys) > 0 {
+			idempotencyKey = strings.TrimSpace(idempotencyKeys[0])
+		}
+		if idempotencyKey == "" {
+			idempotencyKey = uuid.NewString()
+		}
+		req.Header.Set("Idempotency-Key", idempotencyKey)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -312,4 +324,265 @@ func randomToken() (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(raw), nil
+}
+
+func (a *App) startWebSocket() {
+	a.wsMu.Lock()
+	if a.wsCancel != nil {
+		a.wsCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	a.wsGeneration++
+	generation := a.wsGeneration
+	a.wsCancel = cancel
+	a.wsMu.Unlock()
+	go a.runWebSocket(ctx, generation)
+}
+
+func (a *App) stopWebSocket() {
+	a.wsMu.Lock()
+	if a.wsCancel != nil {
+		a.wsCancel()
+	}
+	a.wsCancel = nil
+	a.wsGeneration++
+	conn := a.wsConn
+	a.wsConn = nil
+	a.wsMu.Unlock()
+	if conn != nil {
+		_ = conn.Close()
+	}
+}
+
+func (a *App) currentWebSocket(generation uint64) bool {
+	a.wsMu.Lock()
+	defer a.wsMu.Unlock()
+	return a.wsGeneration == generation && a.wsCancel != nil
+}
+
+func (a *App) installWebSocket(generation uint64, conn *websocket.Conn) bool {
+	a.wsMu.Lock()
+	defer a.wsMu.Unlock()
+	if a.wsGeneration != generation || a.wsCancel == nil {
+		return false
+	}
+	a.wsConn = conn
+	return true
+}
+
+func (a *App) clearWebSocket(generation uint64, conn *websocket.Conn) {
+	a.wsMu.Lock()
+	defer a.wsMu.Unlock()
+	if a.wsGeneration == generation && a.wsConn == conn {
+		a.wsConn = nil
+	}
+}
+
+func (a *App) runWebSocket(ctx context.Context, generation uint64) {
+	backoff := time.Second
+	for {
+		if err := ctx.Err(); err != nil || !a.currentWebSocket(generation) {
+			return
+		}
+		baseURL, token := a.serverCredentials()
+		if baseURL == "" || token == "" {
+			return
+		}
+		conn, response, err := dialServerWebSocket(ctx, baseURL, token, localOrigin(a.Config))
+		if err != nil {
+			if response != nil && response.StatusCode == http.StatusUnauthorized && a.currentWebSocket(generation) {
+				a.invalidateRemoteSession(context.Background())
+				return
+			}
+			if !waitWebSocket(ctx, backoff) {
+				return
+			}
+			if backoff < 60*time.Second {
+				backoff *= 2
+				if backoff > 60*time.Second {
+					backoff = 60 * time.Second
+				}
+			}
+			continue
+		}
+		backoff = time.Second
+		if !a.installWebSocket(generation, conn) {
+			_ = conn.Close()
+			return
+		}
+		invalidated := a.runWebSocketConnection(ctx, conn, generation)
+		a.clearWebSocket(generation, conn)
+		_ = conn.Close()
+		if invalidated || ctx.Err() != nil || !a.currentWebSocket(generation) {
+			return
+		}
+		if !waitWebSocket(ctx, backoff) {
+			return
+		}
+		if backoff < 60*time.Second {
+			backoff *= 2
+			if backoff > 60*time.Second {
+				backoff = 60 * time.Second
+			}
+		}
+	}
+}
+
+func (a *App) runWebSocketConnection(ctx context.Context, conn *websocket.Conn, generation uint64) bool {
+	connectionCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var writeMu sync.Mutex
+	write := func(messageType string, payload interface{}) error {
+		message := wsEnvelope{MessageID: uuid.NewString(), ProtocolVersion: "v1", Timestamp: time.Now().UTC(), Type: messageType, Payload: payload}
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		return conn.WriteJSON(message)
+	}
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		ticker := time.NewTicker(20 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := write("heartbeat", map[string]interface{}{"client_time": time.Now().UTC()}); err != nil {
+					_ = conn.Close()
+					cancel()
+					return
+				}
+			case <-connectionCtx.Done():
+				return
+			}
+		}
+	}()
+	defer func() {
+		cancel()
+		_ = conn.Close()
+		<-writerDone
+	}()
+	for {
+		if !a.currentWebSocket(generation) {
+			return true
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(45 * time.Second))
+		var message wsEnvelope
+		if err := conn.ReadJSON(&message); err != nil {
+			return false
+		}
+		if !a.currentWebSocket(generation) {
+			return true
+		}
+		switch message.Type {
+		case "session_replaced", "session_expired", "user_disabled":
+			a.invalidateRemoteSession(context.Background())
+			return true
+		case "shutdown_frpc":
+			_ = a.Supervisor.Stop(context.Background())
+			_ = a.Supervisor.ClearRuntimeSecrets()
+		case "config_version_changed", "force_full_sync", "mapping_deleted":
+			syncCtx, syncCancel := context.WithTimeout(context.Background(), 20*time.Second)
+			_ = a.FetchConfigAndApply(syncCtx)
+			syncCancel()
+		}
+	}
+}
+
+func (a *App) invalidateRemoteSession(ctx context.Context) {
+	a.stopWebSocket()
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = a.Supervisor.Stop(cleanupCtx)
+	_ = a.Supervisor.ClearRuntimeSecrets()
+	a.mu.Lock()
+	a.serverToken = ""
+	a.serverURL = ""
+	a.runtimeCredential = ""
+	a.frpUsername = ""
+	a.frpSecret = ""
+	a.localSession = ""
+	a.csrfToken = ""
+	a.user = nil
+	a.expiresAt = time.Time{}
+	a.lastConfig = supervisor.Snapshot{}
+	a.mu.Unlock()
+	_ = ctx
+}
+
+func (a *App) serverCredentials() (string, string) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.serverURL, a.serverToken
+}
+
+func dialServerWebSocket(ctx context.Context, baseURL, token, origin string) (*websocket.Conn, *http.Response, error) {
+	wsURL, err := websocketURL(baseURL)
+	if err != nil {
+		return nil, nil, err
+	}
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer "+token)
+	if origin != "" {
+		headers.Set("Origin", origin)
+	}
+	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
+	return dialer.DialContext(ctx, wsURL, headers)
+}
+
+func websocketURL(baseURL string) (string, error) {
+	parsed, err := url.Parse(strings.TrimRight(baseURL, "/"))
+	if err != nil || parsed.Host == "" {
+		if err == nil {
+			err = fmt.Errorf("server URL has no host")
+		}
+		return "", err
+	}
+	switch parsed.Scheme {
+	case "http":
+		parsed.Scheme = "ws"
+	case "https":
+		parsed.Scheme = "wss"
+	default:
+		return "", fmt.Errorf("unsupported server URL scheme %q", parsed.Scheme)
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/api/v1/ws"
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String(), nil
+}
+
+func localOrigin(cfg config.Config) string {
+	host, port, err := net.SplitHostPort(cfg.ListenAddr)
+	if err != nil || port == "" {
+		return ""
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" || host == "[::]" {
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, port)
+}
+
+func waitWebSocket(ctx context.Context, delay time.Duration) bool {
+	delay = jitter(delay)
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func jitter(delay time.Duration) time.Duration {
+	if delay <= 0 {
+		return time.Second
+	}
+	var sample [1]byte
+	if _, err := rand.Read(sample[:]); err != nil {
+		return delay
+	}
+	// Keep reconnects within 80%-120% of the exponential delay.
+	return delay * time.Duration(80+int(sample[0])%41) / 100
 }
