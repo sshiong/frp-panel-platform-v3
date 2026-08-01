@@ -1,5 +1,7 @@
 # FRP Panel Platform v3
 
+公开仓库：[github.com/sshiong/frp-panel-platform-v3](https://github.com/sshiong/frp-panel-platform-v3)
+
 一个单仓库、双发行物的 FRP 多用户云隧道管理平台：
 
 - `server/`：公网 Server Panel，负责认证、资源权威、端口租约、配置版本、审计、Cloudflare/Router/Job 边界。
