@@ -4,6 +4,8 @@
 >
 > 本文是实现进度的单一记录入口。每次完成一个可验证的垂直切片，更新状态、证据和未决项；未通过验收的能力不得标记为完成。
 
+公开仓库：<https://github.com/sshiong/frp-panel-platform-v3>
+
 ## 当前状态
 
 | 阶段 | 状态 | 证据 |
@@ -44,6 +46,8 @@
 | 2026-08-01 | 本机临时 Server + Client API 闭环 | 通过；登录、签名配置校验、原子应用、`state=running`、`mode=simulated`、`last_good_available=true` |
 | 2026-08-01 | HTTP Mapping、IDNA Domain、冲突版本、加密备份 | 通过；端口 6000 自动租约、域名 Punycode 规范化、HTTP 409、`.fppb` 生成与恢复测试 |
 | 2026-08-01 | Client Domain Binding UI | 通过；独立域名页面、HTTPS 三模式、pending DNS 标签、删除确认，见 `output/playwright/client-domains.png` |
+| 2026-08-01 | `make test` / `make lint` / `make build` | 通过；两个 Go 模块测试/vet、两个 Vue typecheck/build、Server/Client/backup-restore 三个构建产物均成功 |
+| 2026-08-01 | Git 发布 | 单仓库 `main` 已推送公开 GitHub；源码、契约、文档和验收截图已纳入，运行数据与密钥未纳入 |
 
 ## 未决与发布阻断项
 
