@@ -15,7 +15,7 @@
 | 阶段 2：Client/FRPC 闭环 | 进行中 | Supervisor 串行队列、verify/原子写入/last-good 回滚已实现，真实 frpc 二进制兼容测试待补 |
 | 阶段 3：TCP/UDP Mapping | 进行中 | Mapping/Revision/Port Lease/幂等 API 已实现，待 FRPS Plugin E2E |
 | 阶段 4：域名和 Cloudflare | 进行中 | Domain/DNS/Token 加密模型与 Operation API 已实现，Provider 实际调用待配置 Token |
-| 阶段 5：Router 和证书 | 计划 | Snapshot/Provider 边界已预留，ACME/真实 Router 热切换未完成 |
+| 阶段 5：Router 和证书 | 进行中 | Router Snapshot control/business 分离、HMAC/last-good、DB-free Host runtime 与 ACME DNS-01 Provider 已实现；真实 TLS 监听/热切换仍需外部部署验收 |
 | 阶段 6：任务、删除、备份和发布 | 进行中 | Job/Audit/导出、加密备份 Decode/Restore 与 CI 基线已建立；SBOM、签名待完成 |
 
 ## 已实现
@@ -32,6 +32,12 @@
 - [x] 两个独立 Vue 前端，采用石墨/象牙/钢蓝/状态色视觉体系，不使用浅紫色。
 - [x] Client Panel 提供 Mapping 与 Domain Binding 独立导航，展示 IDNA 标准化结果、HTTPS 模式和 pending/active 状态。
 - [x] Cloudflare Provider HTTP 适配器支持 Verify/ListZones/UpsertDNS/DeleteDNS，并以独立单元测试覆盖请求方法与路径。
+- [x] Cloudflare Job Worker 支持 token pending 验证、Zone 分页、DNS 冲突 adopt/overwrite/cancel、幂等去重、租约接管与可重试 Operation。
+- [x] Cloudflare 401/403 权限错误与网络错误分流；ACME blocked job 重启唤醒、到期前检查、证书/chain 原子文件写入与 managed DNS 删除补偿已接入。
+- [x] Mapping Update 校验 `expected_revision` 并持久化 PUT 幂等记录；Domain 删除在 Client ACK 后进入独立 DNS 清理 Job，不会删除 adopted/unmanaged 外部记录。
+- [x] Router Snapshot 通过独立 HMAC 密钥原子写入；保存 `router_config_version`、`router_applied_version`、last-good 路径/哈希；DB-free Runtime 按 Host 选择 control/business 路由并 fail-closed。
+- [x] HTTPS 域名按模式进入 `pending_certificate`；ACME Provider 使用官方 `x/crypto/acme` 执行 DNS-01、TXT 传播检查与清理，证书私钥只使用独立 wrapping key 加密。
+- [x] FRPS 可选固定二进制托管，启动前验证配置中声明的 SHA-256；Plugin 保持 loopback-only 与 fail-closed。
 - [x] FPPB1 加密备份使用随机 per-package salt；提供解密、SQLite integrity check 和带 `.before-restore-*` 保留副本的原子恢复函数。
 - [x] `/internal/frp/plugin` 增加 loopback-only 网络边界；Cloudflare Token 替换保留旧版本直到新版本完成 pending 验证。
 
@@ -48,6 +54,8 @@
 | 2026-08-01 | Client Domain Binding UI | 通过；独立域名页面、HTTPS 三模式、pending DNS 标签、删除确认，见 `output/playwright/client-domains.png` |
 | 2026-08-01 | `make test` / `make lint` / `make build` | 通过；两个 Go 模块测试/vet、两个 Vue typecheck/build、Server/Client/backup-restore 三个构建产物均成功 |
 | 2026-08-01 | Git 发布 | 单仓库 `main` 已推送公开 GitHub；源码、契约、文档和验收截图已纳入，运行数据与密钥未纳入 |
+| 2026-08-01 | Router/ACME/FRPS vertical slice | 通过；Router Snapshot HMAC/last-good、Host 404/offline 502、ACME provider compile boundary、FRPS fixed-binary hash/start/stop、Cloudflare/Router job chain 单测通过 |
+| 2026-08-01 | Contract/lease/cleanup hardening | 通过；OpenAPI 28 路由可解析、长任务 Lease heartbeat、更新 Revision/PUT 幂等、Cloudflare 403 分类、ACME wake-up 与 Domain 删除 Job 代码回归通过 |
 
 ## 未决与发布阻断项
 
@@ -55,7 +63,7 @@
 
 1. 真实固定版本 FRPS/FRPC 二进制的 Login/NewProxy/Ping/WorkConn Plugin E2E。
 2. Cloudflare Sandbox Token 权限、DNS 三种冲突语义和超时补偿。
-3. ACME DNS-01 Staging、证书私钥独立包装密钥、Router SNI/Host 热切换。
+3. 使用真实 Cloudflare Sandbox + ACME Staging 完成 DNS-01 传播、TXT 清理、证书原子替换与 Router TLS SNI/Host 热切换；本地 Provider 已实现但未伪造外部成功。
 4. 加密归档备份恢复、灾备演练、WAL checkpoint 监控和磁盘满故障注入。
 5. OpenAPI contract test、Fuzz、SAST/SCA/secret scan、真实性能基线、SBOM/签名。
 6. 完成 P0/P1 全量验收前，仓库只能作为开发预览，不得声明生产就绪。

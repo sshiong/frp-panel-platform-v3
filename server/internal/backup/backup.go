@@ -7,13 +7,16 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/scrypt"
@@ -21,9 +24,10 @@ import (
 )
 
 type Manifest struct {
-	Format           string `json:"format"`
-	CreatedAt        string `json:"created_at"`
-	MigrationVersion int    `json:"migration_version"`
+	Format           string            `json:"format"`
+	CreatedAt        string            `json:"created_at"`
+	MigrationVersion int               `json:"migration_version"`
+	Files            map[string]string `json:"files"`
 }
 
 const (
@@ -47,16 +51,21 @@ func Create(ctx context.Context, database *sql.DB, output, password string) erro
 	}
 	archive := bytes.NewBuffer(nil)
 	zw := zip.NewWriter(archive)
-	manifest, _ := json.Marshal(Manifest{Format: "frp-panel-backup-v1", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)})
-	mw, _ := zw.Create("manifest.json")
-	_, _ = mw.Write(manifest)
 	dbFile, err := os.Open(tmpPath)
 	if err != nil {
 		return err
 	}
-	dw, _ := zw.Create("server.db")
-	_, err = io.Copy(dw, dbFile)
+	databaseBytes, err := io.ReadAll(dbFile)
 	_ = dbFile.Close()
+	if err != nil {
+		return err
+	}
+	digest := sha256.Sum256(databaseBytes)
+	manifest, _ := json.Marshal(Manifest{Format: "frp-panel-backup-v1", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), Files: map[string]string{"server.db": hex.EncodeToString(digest[:])}})
+	mw, _ := zw.Create("manifest.json")
+	_, _ = mw.Write(manifest)
+	dw, _ := zw.Create("server.db")
+	_, err = dw.Write(databaseBytes)
 	if err != nil {
 		return err
 	}
@@ -160,6 +169,12 @@ func Decode(input, password string) (Manifest, []byte, error) {
 	if manifest.Format != "frp-panel-backup-v1" || len(database) == 0 {
 		return Manifest{}, nil, errors.New("backup manifest or database is missing")
 	}
+	if expected := manifest.Files["server.db"]; expected != "" {
+		digest := sha256.Sum256(database)
+		if !strings.EqualFold(expected, hex.EncodeToString(digest[:])) {
+			return Manifest{}, nil, errors.New("backup database checksum mismatch")
+		}
+	}
 	return manifest, database, nil
 }
 
@@ -218,5 +233,32 @@ func Restore(input, password, target string) (string, error) {
 		}
 		return "", err
 	}
+	// A restored database must never resurrect a live browser/FRP session.
+	restored, err := sql.Open("sqlite", target)
+	if err != nil {
+		return "", err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if tableExists(restored, "sessions") {
+		_, err = restored.Exec(`UPDATE sessions SET revoked_at=?,revoke_reason='RESTORE' WHERE revoked_at IS NULL`, now)
+	}
+	if err == nil && tableExists(restored, "frp_runtime_credentials") {
+		_, err = restored.Exec(`UPDATE frp_runtime_credentials SET revoked_at=? WHERE revoked_at IS NULL`, now)
+	}
+	if err == nil && tableExists(restored, "system_identity") {
+		_, err = restored.Exec(`UPDATE system_identity SET restored_from_backup_at=? WHERE singleton_id=1`, now)
+	}
+	closeErr := restored.Close()
+	if err != nil {
+		return "", err
+	}
+	if closeErr != nil {
+		return "", closeErr
+	}
 	return previous, nil
+}
+
+func tableExists(database *sql.DB, table string) bool {
+	var name string
+	return database.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&name) == nil
 }

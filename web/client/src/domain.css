@@ -4,3 +4,4 @@
 .domain-list{display:grid;gap:10px;margin-top:24px}
 .domain-card{display:flex;justify-content:space-between;align-items:center;gap:18px;border:1px solid var(--line);background:#171d20;padding:21px 22px}
 .domain-main{min-width:0}.domain-title{display:flex;align-items:center;gap:12px}.domain-title h3{font:600 19px 'Space Grotesk';margin:0;letter-spacing:-.02em;word-break:break-all}.domain-meta{display:flex;gap:18px;margin-top:13px;color:var(--muted);font:10px 'DM Mono';flex-wrap:wrap}.domain-card small{display:block;margin-top:12px;color:#687879;word-break:break-all}.checkbox-label{display:flex!important;align-items:center;justify-content:space-between}.checkbox-label input{width:18px;height:18px;accent-color:var(--blue)}
+.domain-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}.domain-card>.domain-actions{margin-top:0}.domain-actions .text-button{font-size:11px}

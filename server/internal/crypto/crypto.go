@@ -14,9 +14,11 @@ import (
 )
 
 type Manager struct {
-	MasterKey []byte
-	SignKey   ed25519.PrivateKey
-	KeyID     string
+	MasterKey      []byte
+	RouterKey      []byte
+	CertificateKey []byte
+	SignKey        ed25519.PrivateKey
+	KeyID          string
 }
 
 func Load(dataDir, masterPath, signingPath string) (*Manager, error) {
@@ -32,12 +34,38 @@ func Load(dataDir, masterPath, signingPath string) (*Manager, error) {
 	if len(key) != ed25519.PrivateKeySize {
 		return nil, fmt.Errorf("invalid config signing key")
 	}
+	routerKey, err := loadOrCreate(filepath.Join(dataDir, "router-snapshot.key"), 32)
+	if err != nil {
+		return nil, fmt.Errorf("router snapshot key: %w", err)
+	}
+	certificateKey, err := loadOrCreate(filepath.Join(dataDir, "certificate-wrapping.key"), 32)
+	if err != nil {
+		return nil, fmt.Errorf("certificate wrapping key: %w", err)
+	}
 	id := sha256.Sum256(key.Public().(ed25519.PublicKey))
-	return &Manager{MasterKey: master, SignKey: key, KeyID: base64.RawURLEncoding.EncodeToString(id[:8])}, nil
+	return &Manager{MasterKey: master, RouterKey: routerKey, CertificateKey: certificateKey, SignKey: key, KeyID: base64.RawURLEncoding.EncodeToString(id[:8])}, nil
 }
 
 func (m *Manager) Encrypt(plaintext []byte, aad string) (ciphertext, nonce []byte, err error) {
-	block, err := aes.NewCipher(m.MasterKey)
+	return encryptWithKey(m.MasterKey, plaintext, aad)
+}
+
+func (m *Manager) Decrypt(ciphertext, nonce []byte, aad string) ([]byte, error) {
+	return decryptWithKey(m.MasterKey, ciphertext, nonce, aad)
+}
+
+// EncryptWithKey is used only for a purpose-specific key such as the
+// certificate wrapping key. Callers must never pass a key from user input.
+func EncryptWithKey(key, plaintext []byte, aad string) (ciphertext, nonce []byte, err error) {
+	return encryptWithKey(key, plaintext, aad)
+}
+
+func DecryptWithKey(key, ciphertext, nonce []byte, aad string) ([]byte, error) {
+	return decryptWithKey(key, ciphertext, nonce, aad)
+}
+
+func encryptWithKey(key, plaintext []byte, aad string) (ciphertext, nonce []byte, err error) {
+	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -52,8 +80,8 @@ func (m *Manager) Encrypt(plaintext []byte, aad string) (ciphertext, nonce []byt
 	return gcm.Seal(nil, nonce, plaintext, []byte(aad)), nonce, nil
 }
 
-func (m *Manager) Decrypt(ciphertext, nonce []byte, aad string) ([]byte, error) {
-	block, err := aes.NewCipher(m.MasterKey)
+func decryptWithKey(key, ciphertext, nonce []byte, aad string) ([]byte, error) {
+	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
 	}

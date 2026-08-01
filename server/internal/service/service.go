@@ -11,16 +11,19 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/ricardo/frp-panel-platform/server/internal/acme"
 	"github.com/ricardo/frp-panel-platform/server/internal/auth"
 	"github.com/ricardo/frp-panel-platform/server/internal/config"
 	"github.com/ricardo/frp-panel-platform/server/internal/crypto"
 	"github.com/ricardo/frp-panel-platform/server/internal/db"
+	"github.com/ricardo/frp-panel-platform/server/internal/jobs"
 	"golang.org/x/net/idna"
 )
 
@@ -30,15 +33,19 @@ var (
 	ErrForbidden          = errors.New("forbidden")
 	ErrNotFound           = errors.New("not found")
 	ErrConfigConflict     = errors.New("configuration version conflict")
+	ErrRevisionConflict   = errors.New("resource revision conflict")
 	ErrIdempotencyReuse   = errors.New("idempotency key reused")
 	ErrPortReserved       = errors.New("port already reserved")
 )
 
 type App struct {
-	DB      *db.DB
-	Config  config.Config
-	Crypto  *crypto.Manager
-	Started time.Time
+	DB                   *db.DB
+	Config               config.Config
+	Crypto               *crypto.Manager
+	Jobs                 *jobs.Store
+	ACMEProvider         acme.Provider
+	CloudflareHTTPClient *http.Client
+	Started              time.Time
 }
 
 type AuthContext struct {
@@ -62,11 +69,14 @@ type UserSummary struct {
 }
 
 type LoginResult struct {
-	Token          string      `json:"token"`
-	SessionID      string      `json:"-"`
-	SessionExpires time.Time   `json:"session_expires_at"`
-	User           UserSummary `json:"user"`
-	RequestID      string      `json:"request_id,omitempty"`
+	Token             string      `json:"token"`
+	SessionID         string      `json:"-"`
+	SessionExpires    time.Time   `json:"session_expires_at"`
+	User              UserSummary `json:"user"`
+	RuntimeCredential string      `json:"runtime_credential,omitempty"`
+	FRPUsername       string      `json:"frp_username,omitempty"`
+	FRPSecret         string      `json:"frp_secret,omitempty"`
+	RequestID         string      `json:"request_id,omitempty"`
 }
 
 type Mapping struct {
@@ -92,6 +102,7 @@ type MappingRequest struct {
 	LocalPort             int    `json:"local_port"`
 	RemotePort            *int   `json:"remote_port"`
 	ExpectedConfigVersion *int64 `json:"expected_config_version"`
+	ExpectedRevision      *int64 `json:"expected_revision"`
 }
 
 type Domain struct {
@@ -167,7 +178,7 @@ type UserRecord struct {
 }
 
 func New(dbConn *db.DB, cfg config.Config, secrets *crypto.Manager) *App {
-	return &App{DB: dbConn, Config: cfg, Crypto: secrets, Started: time.Now().UTC()}
+	return &App{DB: dbConn, Config: cfg, Crypto: secrets, Jobs: jobs.New(dbConn, "server-worker"), Started: time.Now().UTC()}
 }
 
 func (a *App) EnsureAdmin(ctx context.Context) (string, error) {
@@ -265,6 +276,7 @@ func (a *App) Login(ctx context.Context, username, password, channel, sourceIP, 
 		return LoginResult{}, err
 	}
 	sessionID := uuid.NewString()
+	var runtimeCredential, frpUsername, frpSecret string
 	now := time.Now().UTC()
 	expires := now.Add(time.Duration(a.Config.SessionTTLHours) * time.Hour)
 	idle := now.Add(30 * time.Minute)
@@ -276,6 +288,16 @@ func (a *App) Login(ctx context.Context, username, password, channel, sourceIP, 
 		if err != nil {
 			return LoginResult{}, err
 		}
+		runtimeCredential = runtimeToken
+		var ciphertext, nonce []byte
+		if err := tx.QueryRowContext(ctx, `SELECT frp_username,secret_ciphertext,secret_nonce FROM frp_credentials WHERE user_id=?`, user.ID).Scan(&frpUsername, &ciphertext, &nonce); err != nil {
+			return LoginResult{}, err
+		}
+		secret, err := a.Crypto.Decrypt(ciphertext, nonce, "user:"+user.ID+":frp_secret:v1")
+		if err != nil {
+			return LoginResult{}, err
+		}
+		frpSecret = string(secret)
 		if _, err := tx.ExecContext(ctx, `INSERT INTO frp_runtime_credentials(id,user_id,server_session_id,session_generation,token_hash,expires_at,created_at) VALUES(?,?,?,?,?,?,?)`, uuid.NewString(), user.ID, sessionID, generation, sha256Hex(runtimeToken), expires.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)); err != nil {
 			return LoginResult{}, err
 		}
@@ -286,7 +308,7 @@ func (a *App) Login(ctx context.Context, username, password, channel, sourceIP, 
 	if err := tx.Commit(); err != nil {
 		return LoginResult{}, err
 	}
-	return LoginResult{Token: token, SessionID: sessionID, SessionExpires: expires, User: user}, nil
+	return LoginResult{Token: token, SessionID: sessionID, SessionExpires: expires, User: user, RuntimeCredential: runtimeCredential, FRPUsername: frpUsername, FRPSecret: frpSecret}, nil
 }
 
 func (a *App) Authenticate(ctx context.Context, bearer string) (AuthContext, error) {
@@ -484,11 +506,27 @@ func (a *App) UpdateMapping(ctx context.Context, ac AuthContext, mappingID strin
 	if err := validateMapping(req); err != nil {
 		return Mapping{}, err
 	}
+	if idempotencyKey == "" {
+		idempotencyKey = uuid.NewString()
+	}
 	tx, err := a.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return Mapping{}, err
 	}
 	defer tx.Rollback()
+	bodyHash := requestHash(req)
+	normalizedPath := "/api/v1/mappings/" + mappingID
+	var existingHash, existingBody string
+	if err := tx.QueryRowContext(ctx, `SELECT request_body_hash,response_body_json FROM idempotency_records WHERE user_id=? AND session_generation=? AND http_method='PUT' AND normalized_path=? AND idempotency_key=?`, ac.UserID, ac.Generation, normalizedPath, idempotencyKey).Scan(&existingHash, &existingBody); err == nil {
+		if existingHash != bodyHash {
+			return Mapping{}, ErrIdempotencyReuse
+		}
+		var item Mapping
+		if err := json.Unmarshal([]byte(existingBody), &item); err != nil {
+			return Mapping{}, err
+		}
+		return item, nil
+	}
 	var current Mapping
 	var activeID, pendingID string
 	if err := tx.QueryRowContext(ctx, `SELECT m.id,m.user_id,m.name,m.proxy_type,m.lifecycle_status,m.desired_state,m.observed_state,COALESCE(r.revision,0),COALESCE(r.local_ip,''),COALESCE(r.local_port,0),r.remote_port,m.created_at,m.updated_at,m.active_revision_id,COALESCE(m.pending_revision_id,'') FROM mappings m LEFT JOIN mapping_revisions r ON r.id=COALESCE(m.pending_revision_id,m.active_revision_id) WHERE m.id=? AND m.user_id=? AND m.lifecycle_status <> 'deleted'`, mappingID, ac.UserID).Scan(&current.ID, &current.UserID, &current.Name, &current.ProxyType, &current.LifecycleStatus, &current.DesiredState, &current.ObservedState, &current.Revision, &current.LocalIP, &current.LocalPort, &current.RemotePort, &current.CreatedAt, &current.UpdatedAt, &activeID, &pendingID); err != nil {
@@ -500,6 +538,9 @@ func (a *App) UpdateMapping(ctx context.Context, ac AuthContext, mappingID strin
 	}
 	if req.ExpectedConfigVersion != nil && *req.ExpectedConfigVersion != desired {
 		return Mapping{}, ErrConfigConflict
+	}
+	if req.ExpectedRevision != nil && *req.ExpectedRevision != current.Revision {
+		return Mapping{}, ErrRevisionConflict
 	}
 	remotePort := req.RemotePort
 	if req.ProxyType == "tcp" || req.ProxyType == "udp" {
@@ -537,6 +578,10 @@ func (a *App) UpdateMapping(ctx context.Context, ac AuthContext, mappingID strin
 	}
 	current.Name, current.ProxyType, current.LifecycleStatus, current.LocalIP, current.LocalPort, current.RemotePort, current.Revision, current.UpdatedAt = strings.TrimSpace(req.Name), req.ProxyType, "pending_apply", req.LocalIP, req.LocalPort, remotePort, newRevision, now
 	current.ObservedState = "offline"
+	encoded, _ := json.Marshal(current)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,operation_id,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), ac.UserID, ac.Generation, "PUT", normalizedPath, idempotencyKey, bodyHash, 200, string(encoded), operationID, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
+		return Mapping{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return Mapping{}, err
 	}
@@ -607,7 +652,7 @@ func (a *App) ListDomains(ctx context.Context, userID string) ([]Domain, error) 
 	return items, rows.Err()
 }
 
-func (a *App) CreateDomain(ctx context.Context, ac AuthContext, req DomainRequest) (Domain, error) {
+func (a *App) CreateDomain(ctx context.Context, ac AuthContext, req DomainRequest, idempotencyKeys ...string) (Domain, error) {
 	if req.HTTPSMode != "auto_certificate" && req.HTTPSMode != "cloudflare_proxy" && req.HTTPSMode != "http_only" {
 		return Domain{}, fmt.Errorf("invalid https mode")
 	}
@@ -620,6 +665,25 @@ func (a *App) CreateDomain(ctx context.Context, ac AuthContext, req DomainReques
 		return Domain{}, err
 	}
 	defer tx.Rollback()
+	idempotencyKey := ""
+	if len(idempotencyKeys) > 0 {
+		idempotencyKey = strings.TrimSpace(idempotencyKeys[0])
+	}
+	if idempotencyKey == "" {
+		idempotencyKey = uuid.NewString()
+	}
+	bodyHash := requestHash(req)
+	var existingHash, existingBody string
+	if err := tx.QueryRowContext(ctx, `SELECT request_body_hash,response_body_json FROM idempotency_records WHERE user_id=? AND session_generation=? AND http_method='POST' AND normalized_path='/api/v1/domains' AND idempotency_key=?`, ac.UserID, ac.Generation, idempotencyKey).Scan(&existingHash, &existingBody); err == nil {
+		if existingHash != bodyHash {
+			return Domain{}, ErrIdempotencyReuse
+		}
+		var item Domain
+		if err := json.Unmarshal([]byte(existingBody), &item); err != nil {
+			return Domain{}, err
+		}
+		return item, nil
+	}
 	var desired int64
 	if err := tx.QueryRowContext(ctx, `SELECT desired_config_version FROM users WHERE id=? AND status='active'`, ac.UserID).Scan(&desired); err != nil {
 		return Domain{}, ErrForbidden
@@ -648,14 +712,50 @@ func (a *App) CreateDomain(ctx context.Context, ac AuthContext, req DomainReques
 		return Domain{}, err
 	}
 	opID := uuid.NewString()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO operations(id,user_id,resource_type,resource_id,operation_type,status,phase,step,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, opID, ac.UserID, "domain", domainID, "create", "pending", "dns", "awaiting_provider", now, now); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO operations(id,user_id,resource_type,resource_id,operation_type,status,phase,step,idempotency_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, opID, ac.UserID, "domain", domainID, "create", "pending", "dns", "awaiting_provider", idempotencyKey, now, now); err != nil {
+		return Domain{}, err
+	}
+	item := Domain{ID: domainID, MappingID: req.MappingID, Hostname: strings.TrimSpace(req.Hostname), Normalized: normalized, HTTPSMode: req.HTTPSMode, HTTPRedirect: req.HTTPRedirect, Status: "pending_dns", Revision: 1, CreatedAt: now, UpdatedAt: now}
+	encoded, _ := json.Marshal(item)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,operation_id,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), ac.UserID, ac.Generation, "POST", "/api/v1/domains", idempotencyKey, bodyHash, 202, string(encoded), opID, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
 		return Domain{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return Domain{}, err
 	}
 	_ = a.Audit(ctx, ac, "domain_created", "domain", domainID, "pending", map[string]interface{}{"status": "pending_dns"}, opID)
-	return Domain{ID: domainID, MappingID: req.MappingID, Hostname: strings.TrimSpace(req.Hostname), Normalized: normalized, HTTPSMode: req.HTTPSMode, HTTPRedirect: req.HTTPRedirect, Status: "pending_dns", Revision: 1, CreatedAt: now, UpdatedAt: now}, nil
+	if a.Jobs != nil {
+		if _, enqueueErr := a.Jobs.Enqueue(ctx, "domain_dns_sync", "domain", domainID, "domain:"+domainID+":dns", map[string]interface{}{"user_id": ac.UserID, "domain_id": domainID, "action": "check"}, nil); enqueueErr != nil {
+			return Domain{}, enqueueErr
+		}
+	}
+	return item, nil
+}
+
+func (a *App) ResolveDomainDNS(ctx context.Context, ac AuthContext, domainID, action string) error {
+	if action != "adopt" && action != "overwrite" && action != "cancel" {
+		return fmt.Errorf("unsupported DNS conflict action")
+	}
+	var owner string
+	if err := a.DB.QueryRowContext(ctx, `SELECT user_id FROM domain_bindings WHERE id=? AND status <> 'deleted'`, domainID).Scan(&owner); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if owner != ac.UserID && ac.Role != "admin" {
+		return ErrNotFound
+	}
+	now := nowString()
+	if _, err := a.DB.ExecContext(ctx, `UPDATE domain_bindings SET status='pending_dns',updated_at=? WHERE id=?`, now, domainID); err != nil {
+		return err
+	}
+	_, _ = a.DB.ExecContext(ctx, `UPDATE operations SET status='pending',phase='dns',step='awaiting_provider',error_code=NULL,error_message=NULL,updated_at=?,completed_at=NULL WHERE resource_type='domain' AND resource_id=? AND status IN ('failed','canceled')`, now, domainID)
+	if a.Jobs == nil {
+		return errors.New("job worker is unavailable")
+	}
+	_, err := a.Jobs.Enqueue(ctx, "domain_dns_sync", "domain", domainID, "domain:"+domainID+":dns", map[string]interface{}{"user_id": owner, "domain_id": domainID, "action": action}, nil)
+	return err
 }
 
 func (a *App) DeleteDomain(ctx context.Context, ac AuthContext, domainID string) (string, error) {
@@ -670,6 +770,11 @@ func (a *App) DeleteDomain(ctx context.Context, ac AuthContext, domainID string)
 	_, _ = a.DB.ExecContext(ctx, `UPDATE users SET desired_config_version=desired_config_version+1,updated_at=? WHERE id=?`, now, ac.UserID)
 	opID := uuid.NewString()
 	_, _ = a.DB.ExecContext(ctx, `INSERT INTO operations(id,user_id,resource_type,resource_id,operation_type,status,phase,step,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, opID, ac.UserID, "domain", domainID, "delete", "pending", "router", "awaiting_client", now, now)
+	if a.Jobs != nil {
+		if err := a.EnqueueRouterSnapshot(ctx); err != nil {
+			return "", err
+		}
+	}
 	_ = a.Audit(ctx, ac, "domain_delete_requested", "domain", domainID, "pending", nil, opID)
 	return opID, nil
 }
@@ -756,6 +861,30 @@ func (a *App) ApplyResult(ctx context.Context, ac AuthContext, req ApplyResultRe
 		if err := tx.Commit(); err != nil {
 			return err
 		}
+		// Domain deletion is a second durable step after the Client has
+		// acknowledged the config that removes the binding from FRPC.
+		rows, queryErr := a.DB.QueryContext(ctx, `SELECT id,user_id FROM domain_bindings WHERE status='deleting'`)
+		if queryErr == nil {
+			for rows.Next() {
+				var domainID, userID string
+				if scanErr := rows.Scan(&domainID, &userID); scanErr != nil {
+					_ = rows.Close()
+					return scanErr
+				}
+				if _, enqueueErr := a.Jobs.Enqueue(ctx, "domain_delete", "domain", domainID, "domain:"+domainID+":delete", map[string]interface{}{"user_id": userID, "domain_id": domainID}, nil); enqueueErr != nil {
+					_ = rows.Close()
+					return enqueueErr
+				}
+			}
+			queryErr = rows.Err()
+			_ = rows.Close()
+		}
+		if queryErr != nil {
+			return queryErr
+		}
+		// A successful Client apply changes the route's observed availability;
+		// refresh the independent Router snapshot after the short DB tx.
+		_ = a.EnqueueRouterSnapshot(ctx)
 		return a.Audit(ctx, ac, "config_apply_succeeded", "config", fmt.Sprint(req.ConfigVersion), "success", map[string]interface{}{"config_version": req.ConfigVersion}, "")
 	}
 	_, err := a.DB.ExecContext(ctx, `UPDATE users SET last_failed_config_version=?,updated_at=? WHERE id=?`, req.ConfigVersion, now, ac.UserID)
@@ -870,15 +999,17 @@ func (a *App) ResetUserPassword(ctx context.Context, ac AuthContext, userID stri
 func (a *App) CloudflareStatus(ctx context.Context, userID string) (map[string]interface{}, error) {
 	var status string
 	var version int
-	var verified string
-	err := a.DB.QueryRowContext(ctx, `SELECT status,token_version,COALESCE(verified_at,'') FROM cloudflare_credentials WHERE user_id=? AND status <> 'retired' ORDER BY token_version DESC LIMIT 1`, userID).Scan(&status, &version, &verified)
+	var verified, capabilitiesJSON string
+	err := a.DB.QueryRowContext(ctx, `SELECT status,token_version,COALESCE(verified_at,''),COALESCE(capabilities_json,'{}') FROM cloudflare_credentials WHERE user_id=? AND status <> 'retired' ORDER BY token_version DESC LIMIT 1`, userID).Scan(&status, &version, &verified, &capabilitiesJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return map[string]interface{}{"configured": false, "status": "missing"}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return map[string]interface{}{"configured": true, "status": status, "token_version": version, "verified_at": verified}, nil
+	capabilities := map[string]interface{}{}
+	_ = json.Unmarshal([]byte(capabilitiesJSON), &capabilities)
+	return map[string]interface{}{"configured": true, "status": status, "token_version": version, "verified_at": verified, "capabilities": capabilities}, nil
 }
 
 func (a *App) SaveCloudflareToken(ctx context.Context, ac AuthContext, token string) error {
@@ -898,6 +1029,10 @@ func (a *App) SaveCloudflareToken(ctx context.Context, ac AuthContext, token str
 	_, err = a.DB.ExecContext(ctx, `INSERT INTO cloudflare_credentials(id,user_id,token_version,ciphertext,nonce,status,capabilities_json,created_at) VALUES(?,?,?,?,?,'pending','{}',?)`, uuid.NewString(), ac.UserID, next, ciphertext, nonce, now)
 	if err == nil {
 		_ = a.Audit(ctx, ac, "cloudflare_token_uploaded", "cloudflare_token", fmt.Sprint(next), "pending", nil, "")
+		version := int64(next)
+		if _, enqueueErr := a.Jobs.Enqueue(ctx, "cloudflare_token_verify", "cloudflare_token", ac.UserID, fmt.Sprintf("cloudflare:%s:%d", ac.UserID, next), map[string]interface{}{"user_id": ac.UserID, "token_version": version}, &version); enqueueErr != nil {
+			return enqueueErr
+		}
 	}
 	return err
 }
@@ -989,6 +1124,78 @@ func (a *App) Operations(ctx context.Context, userID string, admin bool) ([]map[
 		result = append(result, map[string]interface{}{"id": id, "user_id": owner, "resource_type": resourceType, "resource_id": resourceID, "operation_type": opType, "status": status, "phase": phase, "step": step, "error_code": code, "error_message": message, "created_at": created, "updated_at": updated})
 	}
 	return result, rows.Err()
+}
+
+func (a *App) RetryOperation(ctx context.Context, ac AuthContext, operationID string) error {
+	var owner, resourceType, resourceID, operationType, phase, status string
+	if err := a.DB.QueryRowContext(ctx, `SELECT COALESCE(user_id,''),resource_type,COALESCE(resource_id,''),operation_type,phase,status FROM operations WHERE id=?`, operationID).Scan(&owner, &resourceType, &resourceID, &operationType, &phase, &status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if ac.Role != "admin" && owner != ac.UserID {
+		return ErrNotFound
+	}
+	if status != "failed" && status != "canceled" {
+		return fmt.Errorf("operation is not retryable")
+	}
+	if a.Jobs == nil {
+		return errors.New("job worker is unavailable")
+	}
+	jobType, payload, dedup := "", map[string]interface{}{}, ""
+	switch resourceType {
+	case "domain":
+		var domainStatus string
+		if err := a.DB.QueryRowContext(ctx, `SELECT status FROM domain_bindings WHERE id=? AND user_id=?`, resourceID, owner).Scan(&domainStatus); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+		jobType = "domain_dns_sync"
+		payload = map[string]interface{}{"user_id": owner, "domain_id": resourceID, "action": "check"}
+		if operationType == "delete" {
+			jobType = "domain_delete"
+			payload = map[string]interface{}{"user_id": owner, "domain_id": resourceID}
+			dedup = "domain:" + resourceID + ":delete"
+			break
+		}
+		if phase == "certificate" || domainStatus == "pending_certificate" {
+			jobType = "acme_certificate_issue"
+		}
+		if phase == "router" || domainStatus == "pending_router" {
+			jobType = "router_snapshot_apply"
+			payload = map[string]interface{}{}
+			dedup = "router:snapshot"
+		} else {
+			dedup = "domain:" + resourceID + ":" + jobType
+		}
+	default:
+		return fmt.Errorf("operation type %q is not retryable", resourceType)
+	}
+	now := nowString()
+	if _, err := a.DB.ExecContext(ctx, `UPDATE operations SET status='pending',error_code=NULL,error_message=NULL,completed_at=NULL,updated_at=? WHERE id=?`, now, operationID); err != nil {
+		return err
+	}
+	if resourceType == "domain" {
+		domainStatus := "pending_dns"
+		if jobType == "domain_delete" {
+			domainStatus = "deleting"
+		} else if jobType == "acme_certificate_issue" {
+			domainStatus = "pending_certificate"
+		} else if jobType == "router_snapshot_apply" {
+			domainStatus = "pending_router"
+		}
+		if _, err := a.DB.ExecContext(ctx, `UPDATE domain_bindings SET status=?,updated_at=? WHERE id=? AND user_id=?`, domainStatus, now, resourceID, owner); err != nil {
+			return err
+		}
+	}
+	if _, err := a.Jobs.Enqueue(ctx, jobType, resourceType, resourceID, dedup, payload, nil); err != nil {
+		return err
+	}
+	_ = a.Audit(ctx, ac, "operation_retried", resourceType, resourceID, "pending", map[string]interface{}{"operation_id": operationID}, operationID)
+	return nil
 }
 
 func (a *App) Audit(ctx context.Context, ac AuthContext, action, resourceType, resourceID, result string, metadata map[string]interface{}, operationID string) error {

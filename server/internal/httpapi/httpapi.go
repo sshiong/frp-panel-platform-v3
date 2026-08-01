@@ -77,11 +77,13 @@ func (a *API) Handler() http.Handler {
 			r.Get("/domains", a.listDomains)
 			r.Post("/domains", a.createDomain)
 			r.Delete("/domains/{id}", a.deleteDomain)
+			r.Post("/domains/{id}/dns-action", a.domainDNSAction)
 			r.Get("/config/full", a.fullConfig)
 			r.Get("/config/signing-key", a.signingKey)
 			r.Post("/config/apply-result", a.applyResult)
 			r.Post("/session/heartbeat", a.heartbeat)
 			r.Get("/operations", a.operations)
+			r.Post("/operations/{id}/retry", a.retryOperation)
 			r.Get("/cloudflare/status", a.cloudflareStatus)
 			r.Post("/cloudflare/token", a.cloudflareToken)
 			r.Delete("/cloudflare/token", a.clearCloudflare)
@@ -94,6 +96,8 @@ func (a *API) Handler() http.Handler {
 				r.Post("/users/{id}/reset-password", a.resetPassword)
 				r.Get("/operations", a.adminOperations)
 				r.Get("/stats", a.adminStats)
+				r.Get("/router/status", a.routerStatus)
+				r.Post("/router/rebuild", a.routerRebuild)
 				r.Post("/backups", a.createBackup)
 			})
 		})
@@ -395,7 +399,7 @@ func (a *API) createDomain(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input) {
 		return
 	}
-	item, err := a.App.CreateDomain(r.Context(), authFrom(r), input)
+	item, err := a.App.CreateDomain(r.Context(), authFrom(r), input, r.Header.Get("Idempotency-Key"))
 	if err != nil {
 		a.mappingProblem(w, r, err)
 		return
@@ -413,6 +417,23 @@ func (a *API) deleteDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{"operation_id": opID, "status": "pending"})
+}
+
+func (a *API) domainDNSAction(w http.ResponseWriter, r *http.Request) {
+	if mustChange(w, r, authFrom(r)) {
+		return
+	}
+	var input struct {
+		Action string `json:"action"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if err := a.App.ResolveDomainDNS(r.Context(), authFrom(r), chi.URLParam(r, "id"), input.Action); err != nil {
+		a.mappingProblem(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]interface{}{"status": "pending", "action": input.Action})
 }
 
 func (a *API) fullConfig(w http.ResponseWriter, r *http.Request) {
@@ -481,6 +502,17 @@ func (a *API) operations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
+}
+
+func (a *API) retryOperation(w http.ResponseWriter, r *http.Request) {
+	if mustChange(w, r, authFrom(r)) {
+		return
+	}
+	if err := a.App.RetryOperation(r.Context(), authFrom(r), chi.URLParam(r, "id")); err != nil {
+		a.mappingProblem(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]interface{}{"status": "pending", "operation_id": chi.URLParam(r, "id")})
 }
 
 func (a *API) cloudflareStatus(w http.ResponseWriter, r *http.Request) {
@@ -576,6 +608,23 @@ func (a *API) adminStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"active_users": users, "mappings": mappings, "pending": pending, "errors": errorsCount, "server_uptime_seconds": int(time.Since(a.App.Started).Seconds()), "frps_public_host": a.App.Config.FRPSPublicHost, "frps_public_port": a.App.Config.FRPSPublicPort})
 }
 
+func (a *API) routerStatus(w http.ResponseWriter, r *http.Request) {
+	status, err := a.App.RouterStatus(r.Context())
+	if err != nil {
+		problem(w, r, 500, "ROUTER_STATUS_FAILED", "无法读取 Router Snapshot 状态。", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
+func (a *API) routerRebuild(w http.ResponseWriter, r *http.Request) {
+	if err := a.App.EnqueueRouterSnapshot(r.Context()); err != nil {
+		problem(w, r, 500, "ROUTER_REBUILD_FAILED", "Router Snapshot 任务无法入队。", err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]interface{}{"status": "pending", "message": "Router Snapshot rebuild queued."})
+}
+
 func (a *API) createBackup(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Password string `json:"password"`
@@ -655,6 +704,10 @@ func (a *API) mappingProblem(w http.ResponseWriter, r *http.Request, err error) 
 		status = 409
 		code = "CONFIG_VERSION_CONFLICT"
 		detail = "配置已发生变化，请刷新后重试。"
+	case errors.Is(err, service.ErrRevisionConflict):
+		status = 409
+		code = "RESOURCE_REVISION_CONFLICT"
+		detail = "资源 Revision 已发生变化，请刷新后重试。"
 	case errors.Is(err, service.ErrIdempotencyReuse):
 		status = 409
 		code = "IDEMPOTENCY_KEY_REUSED"

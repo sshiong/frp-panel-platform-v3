@@ -44,6 +44,7 @@ func (a *API) Handler() http.Handler {
 		r.Get("/api/v1/domains", a.domains)
 		r.Post("/api/v1/domains", a.createDomain)
 		r.Delete("/api/v1/domains/{id}", a.deleteDomain)
+		r.Post("/api/v1/domains/{id}/dns-action", a.domainDNSAction)
 		r.Get("/api/v1/config", a.config)
 		r.Post("/api/v1/sync", a.sync)
 		r.Get("/api/v1/local-status", a.localStatus)
@@ -251,6 +252,20 @@ func (a *API) deleteDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = a.App.FetchConfigAndApply(r.Context())
+	writeJSON(w, 202, output)
+}
+
+func (a *API) domainDNSAction(w http.ResponseWriter, r *http.Request) {
+	var input map[string]interface{}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	var output interface{}
+	path := "/api/v1/domains/" + chi.URLParam(r, "id") + "/dns-action"
+	if err := a.App.Proxy(r.Context(), "POST", path, input, r.Header.Get("X-CSRF-Token"), &output); err != nil {
+		problem(w, r, 400, "DNS_ACTION_FAILED", err.Error(), err)
+		return
+	}
 	writeJSON(w, 202, output)
 }
 func (a *API) config(w http.ResponseWriter, r *http.Request) {

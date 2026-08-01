@@ -6,23 +6,25 @@ import (
 )
 
 type Config struct {
-	ListenAddr   string
-	DataDir      string
-	Environment  string
-	FRPCBinary   string
-	AllowedHost  string
-	ClientWebDir string
+	ListenAddr       string
+	DataDir          string
+	Environment      string
+	FRPCBinary       string
+	FRPCBinarySHA256 string
+	AllowedHost      string
+	ClientWebDir     string
 }
 
 func Load() Config {
 	dataDir := getenv("FRP_CLIENT_DATA_DIR", "./data")
 	return Config{
-		ListenAddr:   getenv("CLIENT_LISTEN_ADDR", "127.0.0.1:7410"),
-		DataDir:      filepath.Clean(dataDir),
-		Environment:  getenv("FRP_PANEL_ENV", "development"),
-		FRPCBinary:   os.Getenv("FRPC_BINARY"),
-		AllowedHost:  getenv("CLIENT_ALLOWED_HOST", "127.0.0.1"),
-		ClientWebDir: os.Getenv("FRP_CLIENT_WEB_DIR"),
+		ListenAddr:       getenv("CLIENT_LISTEN_ADDR", "127.0.0.1:7410"),
+		DataDir:          filepath.Clean(dataDir),
+		Environment:      getenv("FRP_PANEL_ENV", "development"),
+		FRPCBinary:       os.Getenv("FRPC_BINARY"),
+		FRPCBinarySHA256: os.Getenv("FRPC_BINARY_SHA256"),
+		AllowedHost:      getenv("CLIENT_ALLOWED_HOST", "127.0.0.1"),
+		ClientWebDir:     os.Getenv("FRP_CLIENT_WEB_DIR"),
 	}
 }
 

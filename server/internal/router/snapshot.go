@@ -42,10 +42,25 @@ func Build(version int64, control, business []Route, key []byte) (Snapshot, erro
 func Verify(snapshot Snapshot, key []byte) bool {
 	h := snapshot.HMAC
 	snapshot.HMAC = ""
+	if !verifyHash(snapshot) {
+		return false
+	}
 	unsigned, _ := json.Marshal(snapshot)
 	mac := hmac.New(sha256.New, key)
 	_, _ = mac.Write(unsigned)
 	return hmac.Equal([]byte(h), []byte(hex.EncodeToString(mac.Sum(nil))))
+}
+
+func verifyHash(snapshot Snapshot) bool {
+	declared := snapshot.Hash
+	snapshot.Hash = ""
+	snapshot.HMAC = ""
+	unsigned, err := json.Marshal(snapshot)
+	if err != nil {
+		return false
+	}
+	sum := sha256.Sum256(unsigned)
+	return declared == hex.EncodeToString(sum[:])
 }
 func AtomicWrite(path string, snapshot Snapshot) error {
 	if snapshot.SchemaVersion != "v1" {

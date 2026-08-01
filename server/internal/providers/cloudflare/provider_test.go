@@ -62,6 +62,29 @@ func TestHTTPProviderDNSLifecycle(t *testing.T) {
 	}
 }
 
+func TestMatchZoneUsesLongestLabelSuffix(t *testing.T) {
+	zone, ok := MatchZone("api.eu.example.com", []Zone{{ID: "root", Name: "example.com"}, {ID: "regional", Name: "eu.example.com"}, {ID: "wrong", Name: "ample.com"}})
+	if !ok || zone.ID != "regional" {
+		t.Fatalf("zone=%#v ok=%v", zone, ok)
+	}
+	if _, ok := MatchZone("notexample.com", []Zone{{ID: "root", Name: "example.com"}}); ok {
+		t.Fatal("partial suffix must not match")
+	}
+}
+
+func TestVerifyTokenClassifiesPermissionDenied(t *testing.T) {
+	provider := New("test-token")
+	provider.BaseURL = "https://api.example.test/client/v4"
+	provider.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body := `{"success":false,"errors":[{"message":"token denied"}]}`
+		return &http.Response{StatusCode: http.StatusForbidden, Body: io.NopCloser(bytes.NewBufferString(body)), Header: make(http.Header), Request: r}, nil
+	})}
+	capabilities, err := provider.VerifyToken(context.Background())
+	if err != nil || capabilities.TokenValid || len(capabilities.Missing) != 1 || capabilities.Missing[0] != "Token.Verify" {
+		t.Fatalf("capabilities=%#v err=%v", capabilities, err)
+	}
+}
+
 type urlError struct{ message string }
 
 func (e *urlError) Error() string { return e.message }

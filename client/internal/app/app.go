@@ -23,17 +23,20 @@ import (
 )
 
 type App struct {
-	Config        config.Config
-	Supervisor    *supervisor.Supervisor
-	mu            sync.RWMutex
-	serverURL     string
-	serverToken   string
-	localSession  string
-	csrfToken     string
-	user          map[string]interface{}
-	expiresAt     time.Time
-	lastDashboard json.RawMessage
-	lastConfig    supervisor.Snapshot
+	Config            config.Config
+	Supervisor        *supervisor.Supervisor
+	mu                sync.RWMutex
+	serverURL         string
+	serverToken       string
+	runtimeCredential string
+	frpUsername       string
+	frpSecret         string
+	localSession      string
+	csrfToken         string
+	user              map[string]interface{}
+	expiresAt         time.Time
+	lastDashboard     json.RawMessage
+	lastConfig        supervisor.Snapshot
 }
 
 type ClientSession struct {
@@ -57,7 +60,7 @@ func (e RemoteError) Error() string {
 }
 
 func New(cfg config.Config) *App {
-	return &App{Config: cfg, Supervisor: supervisor.New(cfg.DataDir, cfg.FRPCBinary)}
+	return &App{Config: cfg, Supervisor: supervisor.NewWithBinaryHash(cfg.DataDir, cfg.FRPCBinary, cfg.FRPCBinarySHA256)}
 }
 
 func (a *App) Login(ctx context.Context, serverURL, username, password string) (ClientSession, error) {
@@ -66,9 +69,12 @@ func (a *App) Login(ctx context.Context, serverURL, username, password string) (
 		return ClientSession{}, err
 	}
 	var response struct {
-		Token            string                 `json:"token"`
-		User             map[string]interface{} `json:"user"`
-		SessionExpiresAt time.Time              `json:"session_expires_at"`
+		Token             string                 `json:"token"`
+		User              map[string]interface{} `json:"user"`
+		SessionExpiresAt  time.Time              `json:"session_expires_at"`
+		RuntimeCredential string                 `json:"runtime_credential"`
+		FRPUsername       string                 `json:"frp_username"`
+		FRPSecret         string                 `json:"frp_secret"`
 	}
 	if err := a.serverRequest(ctx, normalized, "POST", "/api/v1/auth/client-login", map[string]string{"username": username, "password": password}, "", &response); err != nil {
 		return ClientSession{}, err
@@ -88,6 +94,9 @@ func (a *App) Login(ctx context.Context, serverURL, username, password string) (
 	oldToken := a.serverToken
 	a.serverURL = normalized
 	a.serverToken = response.Token
+	a.runtimeCredential = response.RuntimeCredential
+	a.frpUsername = response.FRPUsername
+	a.frpSecret = response.FRPSecret
 	a.localSession = local
 	a.csrfToken = csrf
 	a.user = response.User
@@ -115,6 +124,9 @@ func (a *App) Logout(ctx context.Context) error {
 	a.mu.Lock()
 	a.serverToken = ""
 	a.serverURL = ""
+	a.runtimeCredential = ""
+	a.frpUsername = ""
+	a.frpSecret = ""
 	a.localSession = ""
 	a.csrfToken = ""
 	a.user = nil
@@ -155,6 +167,23 @@ func (a *App) Proxy(ctx context.Context, method, path string, body interface{}, 
 		return fmt.Errorf("local csrf validation failed")
 	}
 	err := a.serverRequest(ctx, urlValue, method, path, body, token, response)
+	if remote, ok := err.(RemoteError); ok && (remote.Code == "SESSION_REPLACED" || remote.Code == "SESSION_EXPIRED" || remote.Code == "AUTH_USER_DISABLED") {
+		// A replaced/revoked Server Session is a local safety event: stop FRPC
+		// before returning the error and erase all runtime-only material.
+		_ = a.Supervisor.Stop(ctx)
+		_ = a.Supervisor.ClearRuntimeSecrets()
+		a.mu.Lock()
+		a.serverToken = ""
+		a.serverURL = ""
+		a.runtimeCredential = ""
+		a.frpUsername = ""
+		a.frpSecret = ""
+		a.localSession = ""
+		a.csrfToken = ""
+		a.user = nil
+		a.expiresAt = time.Time{}
+		a.mu.Unlock()
+	}
 	if err == nil && path == "/api/v1/dashboard" {
 		a.mu.Lock()
 		encoded, _ := json.Marshal(response)
@@ -194,6 +223,17 @@ func (a *App) fetchConfig(ctx context.Context) (supervisor.Snapshot, error) {
 	return snapshot, nil
 }
 func (a *App) applySnapshot(ctx context.Context, snapshot supervisor.Snapshot) error {
+	a.mu.RLock()
+	payload := make(map[string]interface{}, len(snapshot.Payload)+5)
+	for key, value := range snapshot.Payload {
+		payload[key] = value
+	}
+	payload["server_addr"] = a.serverURL
+	payload["frp_username"] = a.frpUsername
+	payload["frp_secret"] = a.frpSecret
+	payload["runtime_credential"] = a.runtimeCredential
+	a.mu.RUnlock()
+	snapshot.Payload = payload
 	a.mu.Lock()
 	a.lastConfig = snapshot
 	a.mu.Unlock()

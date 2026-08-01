@@ -14,6 +14,10 @@ flowchart LR
   clientAPI --> supervisor[FRPC Supervisor queue]
   supervisor --> frpc[Fixed FRPC binary]
   serverAPI --> router[Router snapshot boundary]
+  router --> routerRuntime[DB-free Host/SNI runtime]
+  serverAPI --> acme[ACME DNS-01 provider]
 ```
 
 There is no shared business package between `/server` and `/client`. `/contracts` only contains protocol descriptions and enums.
+
+The Server worker writes signed `control_routes` and `business_routes` snapshots to the protected data directory. The Router runtime reads only that snapshot, verifies schema/hash/HMAC, and retains its last-good in-memory route table when a new snapshot is invalid. ACME account material is encrypted separately from certificate private keys; Cloudflare DNS TXT records are created and removed only for the active ACME operation.

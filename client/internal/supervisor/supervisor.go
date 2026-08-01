@@ -7,13 +7,17 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ricardo/frp-panel-platform/client/internal/healthcheck"
 )
 
 type Snapshot struct {
@@ -59,16 +63,27 @@ type Status struct {
 }
 
 type Supervisor struct {
-	dataDir string
-	binary  string
-	queue   chan func()
-	mu      sync.RWMutex
-	status  Status
-	started bool
+	dataDir      string
+	binary       string
+	binarySHA256 string
+	queue        chan func()
+	mu           sync.RWMutex
+	status       Status
+	started      bool
+	process      *runningProcess
+}
+
+type runningProcess struct {
+	cmd  *exec.Cmd
+	done chan error
 }
 
 func New(dataDir, binary string) *Supervisor {
-	s := &Supervisor{dataDir: dataDir, binary: binary, queue: make(chan func(), 32), status: Status{State: "stopped", Mode: "simulated", UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano)}}
+	return NewWithBinaryHash(dataDir, binary, "")
+}
+
+func NewWithBinaryHash(dataDir, binary, binarySHA256 string) *Supervisor {
+	s := &Supervisor{dataDir: dataDir, binary: binary, binarySHA256: strings.ToLower(strings.TrimSpace(binarySHA256)), queue: make(chan func(), 32), status: Status{State: "stopped", Mode: "simulated", UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano)}}
 	go func() {
 		for operation := range s.queue {
 			operation()
@@ -78,11 +93,10 @@ func New(dataDir, binary string) *Supervisor {
 }
 
 func (s *Supervisor) Enqueue(operation func()) {
-	select {
-	case s.queue <- operation:
-	default:
-		go operation()
-	}
+	// Never execute a process/config mutation outside the single Supervisor
+	// queue. Backpressure is safer than allowing a second goroutine to race a
+	// restart, rollback, or secret cleanup.
+	s.queue <- operation
 }
 
 func (s *Supervisor) Apply(ctx context.Context, snapshot Snapshot) error {
@@ -110,6 +124,11 @@ func (s *Supervisor) apply(ctx context.Context, snapshot Snapshot) error {
 		return s.fail(err.Error())
 	}
 	configText := renderTOML(snapshot)
+	if s.binary != "" {
+		if err := checkLocalServices(ctx, snapshot.Payload); err != nil {
+			return s.fail("LOCAL_SERVICE_UNAVAILABLE: " + err.Error())
+		}
+	}
 	configDir := filepath.Join(s.dataDir, "config")
 	tmpPath := filepath.Join(configDir, fmt.Sprintf("frpc.toml.tmp.%d", time.Now().UnixNano()))
 	activePath := filepath.Join(configDir, "frpc.toml")
@@ -147,6 +166,26 @@ func (s *Supervisor) apply(ctx context.Context, snapshot Snapshot) error {
 	return nil
 }
 
+func checkLocalServices(ctx context.Context, payload map[string]interface{}) error {
+	mappings, ok := payload["mappings"].([]interface{})
+	if !ok {
+		return nil
+	}
+	for _, raw := range mappings {
+		item, ok := raw.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("invalid mapping payload")
+		}
+		proxyType := payloadString(item, "proxy_type")
+		host := payloadString(item, "local_ip")
+		port := payloadInt(item, "local_port", 0)
+		if err := healthcheck.Check(ctx, proxyType, host, port); err != nil {
+			return fmt.Errorf("%s %s:%d: %w", proxyType, host, port, err)
+		}
+	}
+	return nil
+}
+
 func (s *Supervisor) verify(ctx context.Context, path string) error {
 	if strings.TrimSpace(path) == "" {
 		return fmt.Errorf("config path is empty")
@@ -154,9 +193,12 @@ func (s *Supervisor) verify(ctx context.Context, path string) error {
 	if s.binary == "" {
 		return nil
 	}
+	if err := s.verifyBinary(); err != nil {
+		return err
+	}
 	commandCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(commandCtx, s.binary, "verify", "--config", path)
+	cmd := exec.CommandContext(commandCtx, s.binary, "verify", "-c", path)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("fixed frpc verify failed: %s", sanitize(string(output)))
 	}
@@ -171,31 +213,63 @@ func (s *Supervisor) restart(ctx context.Context) error {
 		s.mu.Unlock()
 		return nil
 	}
-	// A production adapter owns the process handle and validates PID/start time. The
-	// development supervisor keeps the command surface fixed to this one binary.
-	commandCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(commandCtx, s.binary, "--config", filepath.Join(s.dataDir, "config", "frpc.toml"))
+	if err := s.verifyBinary(); err != nil {
+		return err
+	}
+	if err := s.stopProcess(ctx); err != nil {
+		return err
+	}
+	// The FRPC process outlives the short apply request; Stop owns its lifetime.
+	cmd := exec.Command(s.binary, "-c", filepath.Join(s.dataDir, "config", "frpc.toml"))
+	cmd.Stdin = nil
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
 	if err := cmd.Start(); err != nil {
 		return err
 	}
+	running := &runningProcess{cmd: cmd, done: make(chan error, 1)}
 	s.mu.Lock()
+	s.process = running
 	s.status.Mode = "real"
 	s.status.PID = cmd.Process.Pid
 	s.started = true
 	s.mu.Unlock()
+	go func() {
+		err := cmd.Wait()
+		running.done <- err
+		s.mu.Lock()
+		if s.process == running {
+			s.process = nil
+			if s.status.State == "running" {
+				s.status.State = "offline"
+				s.status.LastError = sanitize("FRPC exited")
+				s.status.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+			}
+		}
+		s.mu.Unlock()
+	}()
+	select {
+	case err := <-running.done:
+		if err != nil {
+			return fmt.Errorf("frpc exited during start: %w", err)
+		}
+		return errors.New("frpc exited during start")
+	default:
+	}
 	return nil
 }
 
 func (s *Supervisor) Stop(ctx context.Context) error {
 	result := make(chan error, 1)
 	s.Enqueue(func() {
+		err := s.stopProcess(ctx)
 		s.mu.Lock()
 		s.status.State = "stopped"
 		s.status.PID = 0
+		s.status.LastGoodAvailable = false
 		s.status.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 		s.mu.Unlock()
-		result <- nil
+		result <- err
 	})
 	select {
 	case err := <-result:
@@ -206,7 +280,55 @@ func (s *Supervisor) Stop(ctx context.Context) error {
 }
 func (s *Supervisor) Status() Status { s.mu.RLock(); defer s.mu.RUnlock(); return s.status }
 func (s *Supervisor) ClearRuntimeSecrets() error {
-	return os.RemoveAll(filepath.Join(s.dataDir, "runtime", "secrets"))
+	for _, path := range []string{filepath.Join(s.dataDir, "runtime", "secrets"), filepath.Join(s.dataDir, "config", "frpc.toml"), filepath.Join(s.dataDir, "config", "frpc.last-good.toml")} {
+		if err := os.RemoveAll(path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Supervisor) stopProcess(ctx context.Context) error {
+	s.mu.Lock()
+	process := s.process
+	s.process = nil
+	s.mu.Unlock()
+	if process == nil || process.cmd.Process == nil {
+		return nil
+	}
+	_ = process.cmd.Process.Signal(os.Interrupt)
+	select {
+	case <-process.done:
+		return nil
+	case <-time.After(2 * time.Second):
+		_ = process.cmd.Process.Kill()
+		select {
+		case <-process.done:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+func (s *Supervisor) verifyBinary() error {
+	if s.binary == "" || s.binarySHA256 == "" {
+		return nil
+	}
+	file, err := os.Open(s.binary)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return err
+	}
+	actual := hex.EncodeToString(hash.Sum(nil))
+	if actual != s.binarySHA256 {
+		return fmt.Errorf("frpc binary sha256 mismatch")
+	}
+	return nil
 }
 
 func (s *Supervisor) fail(message string) error {
@@ -224,14 +346,54 @@ func renderTOML(snapshot Snapshot) string {
 	payload, _ := json.Marshal(snapshot.Payload)
 	sum := sha256.Sum256(payload)
 	fmt.Fprintf(&b, "# payload_sha256 = %s\n\n", hex.EncodeToString(sum[:]))
-	b.WriteString("serverAddr = \"runtime-secret\"\nserverPort = 7000\nloginFailExit = false\n\n")
+	serverAddr := payloadString(snapshot.Payload, "server_addr")
+	if serverAddr == "" {
+		serverAddr = payloadString(snapshot.Payload, "frps_public_host")
+	}
+	serverPort := payloadInt(snapshot.Payload, "frps_public_port", 7000)
+	fmt.Fprintf(&b, "serverAddr = %s\nserverPort = %d\nloginFailExit = false\nauth.method = \"token\"\nauth.token = %s\n\n", tomlString(serverAddr), serverPort, tomlString(payloadString(snapshot.Payload, "frp_secret")))
+	runtimeCredential := payloadString(snapshot.Payload, "runtime_credential")
 	if mappings, ok := snapshot.Payload["mappings"].([]interface{}); ok {
-		for index, raw := range mappings {
+		for _, raw := range mappings {
 			item, _ := raw.(map[string]interface{})
-			fmt.Fprintf(&b, "[proxies.%d]\nname = \"mapping-%v\"\ntype = \"%v\"\nlocalIP = \"%v\"\nlocalPort = %v\nremotePort = %v\n\n", index, item["mapping_id"], item["proxy_type"], item["local_ip"], item["local_port"], item["remote_port"])
+			mappingID := fmt.Sprint(item["mapping_id"])
+			fmt.Fprintf(&b, "[[proxies]]\nname = %s\ntype = %s\nlocalIP = %s\nlocalPort = %d\n", tomlString("mapping-"+mappingID), tomlString(fmt.Sprint(item["proxy_type"])), tomlString(fmt.Sprint(item["local_ip"])), payloadInt(item, "local_port", 0))
+			if item["proxy_type"] != "http" {
+				fmt.Fprintf(&b, "remotePort = %d\n", payloadInt(item, "remote_port", 0))
+			}
+			if domains, ok := item["custom_domains"].([]interface{}); ok && len(domains) > 0 {
+				values := make([]string, 0, len(domains))
+				for _, domain := range domains {
+					values = append(values, tomlString(fmt.Sprint(domain)))
+				}
+				fmt.Fprintf(&b, "customDomains = [%s]\n", strings.Join(values, ", "))
+			}
+			fmt.Fprintf(&b, "metadatas = { mapping_id = %s, frp_runtime_credential = %s }\n\n", tomlString(mappingID), tomlString(runtimeCredential))
 		}
 	}
 	return b.String()
+}
+
+func payloadString(payload map[string]interface{}, key string) string {
+	value, _ := payload[key].(string)
+	return value
+}
+
+func payloadInt(payload map[string]interface{}, key string, fallback int) int {
+	switch value := payload[key].(type) {
+	case float64:
+		return int(value)
+	case int:
+		return value
+	case int64:
+		return int(value)
+	}
+	return fallback
+}
+
+func tomlString(value string) string {
+	encoded, _ := json.Marshal(value)
+	return string(encoded)
 }
 func sanitize(value string) string {
 	value = strings.ReplaceAll(value, "Bearer ", "Bearer [redacted]")

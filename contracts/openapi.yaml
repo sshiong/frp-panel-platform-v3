@@ -6,6 +6,15 @@ info:
 servers:
   - url: https://panel.example.invalid
 paths:
+  /api/v1/compatibility:
+    get:
+      operationId: compatibility
+      responses:
+        '200':
+          description: Server and Client Panel compatibility metadata
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
   /api/v1/auth/client-login:
     post:
       operationId: clientLogin
@@ -40,6 +49,40 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/SessionResponse' }
         '401': { $ref: '#/components/responses/Problem' }
+  /api/v1/auth/logout:
+    post:
+      operationId: logout
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Session revoked }
+  /api/v1/auth/change-password:
+    post:
+      operationId: changePassword
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password: { type: string, format: password }
+                new_password: { type: string, format: password, minLength: 12 }
+      responses:
+        '200': { description: Password changed }
+  /api/v1/me:
+    get:
+      operationId: me
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Current authenticated principal, content: { application/json: { schema: { $ref: '#/components/schemas/UserSummary' } } } }
+  /api/v1/dashboard:
+    get:
+      operationId: dashboard
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Dashboard summary, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
   /api/v1/mappings:
     get:
       operationId: listMappings
@@ -68,6 +111,57 @@ paths:
       responses:
         '201': { description: Mapping created }
         '409': { $ref: '#/components/responses/Problem' }
+  /api/v1/mappings/{id}:
+    put:
+      operationId: updateMapping
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateMappingRequest' }
+      responses:
+        '200': { description: Mapping updated, content: { application/json: { schema: { $ref: '#/components/schemas/Mapping' } } } }
+        '409': { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: deleteMapping
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: force
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        '202': { description: Mapping deletion queued }
+    post:
+      operationId: toggleMapping
+      summary: Toggle mapping desired state
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        '200': { description: Desired state updated }
   /api/v1/config/full:
     get:
       operationId: fullConfig
@@ -78,6 +172,225 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ConfigSnapshot' }
+  /api/v1/domains:
+    get:
+      operationId: listDomains
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: User-scoped Domain Bindings
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Domain' } }
+    post:
+      operationId: createDomain
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateDomainRequest' }
+      responses:
+        '202': { description: Domain Binding created in pending state }
+        '409': { $ref: '#/components/responses/Problem' }
+  /api/v1/domains/{id}/dns-action:
+    post:
+      operationId: resolveDomainDNSConflict
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [adopt, overwrite, cancel] }
+      responses:
+        '202': { description: DNS conflict resolution queued }
+        '404': { $ref: '#/components/responses/Problem' }
+  /api/v1/domains/{id}:
+    delete:
+      operationId: deleteDomain
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '202': { description: Domain deletion queued }
+  /api/v1/operations:
+    get:
+      operationId: listOperations
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: User-scoped or administrator-scoped Operation records
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Operation' } }
+  /api/v1/operations/{id}/retry:
+    post:
+      operationId: retryOperation
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '202': { description: Operation requeued }
+        '404': { $ref: '#/components/responses/Problem' }
+  /api/v1/config/signing-key:
+    get:
+      operationId: signingKey
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Public Ed25519 verification key metadata
+          content:
+            application/json:
+              schema: { type: object, required: [algorithm, key_id, public_key], additionalProperties: false, properties: { algorithm: { type: string }, key_id: { type: string }, public_key: { type: string } } }
+  /api/v1/config/apply-result:
+    post:
+      operationId: applyResult
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [config_version, result]
+              properties:
+                config_version: { type: integer, format: int64 }
+                result: { type: string, enum: [success, failed] }
+                error_code: { type: string }
+                error_message: { type: string }
+      responses:
+        '200': { description: Apply result accepted }
+  /api/v1/session/heartbeat:
+    post:
+      operationId: sessionHeartbeat
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Session heartbeat accepted }
+  /api/v1/cloudflare/status:
+    get:
+      operationId: cloudflareStatus
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Cloudflare credential and capability state, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+  /api/v1/cloudflare/token:
+    post:
+      operationId: saveCloudflareToken
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [token], properties: { token: { type: string, minLength: 20 } } }
+      responses:
+        '202': { description: Token verification queued }
+    delete:
+      operationId: clearCloudflareToken
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Cloudflare credentials retired }
+  /api/v1/admin/router/status:
+    get:
+      operationId: routerStatus
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Router snapshot and last-good state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RouterStatus' }
+  /api/v1/admin/router/rebuild:
+    post:
+      operationId: rebuildRouter
+      security: [{ bearerAuth: [] }]
+      responses:
+        '202': { description: Router snapshot rebuild queued }
+  /api/v1/admin/users:
+    get:
+      operationId: adminListUsers
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: User list, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+    post:
+      operationId: adminCreateUser
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [username], properties: { username: { type: string }, password: { type: string, format: password } } }
+      responses:
+        '201': { description: User created }
+  /api/v1/admin/users/{id}/status:
+    post:
+      operationId: adminSetUserStatus
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [status], properties: { status: { type: string, enum: [active, disabled] } } }
+      responses:
+        '200': { description: User status updated }
+  /api/v1/admin/users/{id}/reset-password:
+    post:
+      operationId: adminResetPassword
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Temporary password generated }
+  /api/v1/admin/operations:
+    get:
+      operationId: adminOperations
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: All operation records, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+  /api/v1/admin/stats:
+    get:
+      operationId: adminStats
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Server statistics, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+  /api/v1/admin/backups:
+    post:
+      operationId: createBackup
+      security: [{ bearerAuth: [] }]
+      responses:
+        '202': { description: Backup created }
 components:
   parameters:
     IdempotencyKey:
@@ -118,6 +431,13 @@ components:
         token:
           type: string
           description: Only returned to the Client Panel backend; never stored by a browser.
+        runtime_credential:
+          type: string
+          description: Only returned to the Client Panel backend and held in memory for FRP authorization.
+        frp_username: { type: string }
+        frp_secret:
+          type: string
+          description: Only returned to the Client Panel backend; never persisted by the Client Panel.
     UserSummary:
       type: object
       required: [id, username, role, status, must_change_password]
@@ -136,6 +456,8 @@ components:
         local_ip: { type: string, maxLength: 255 }
         local_port: { type: integer, minimum: 1, maximum: 65535 }
         remote_port: { type: integer, minimum: 0, maximum: 65535 }
+        expected_config_version: { type: integer, format: int64 }
+        expected_revision: { type: integer, format: int64 }
     Mapping:
       allOf:
         - $ref: '#/components/schemas/CreateMappingRequest'
@@ -148,6 +470,52 @@ components:
             desired_state: { type: string }
             observed_state: { type: string }
             revision: { type: integer, format: int64 }
+    CreateDomainRequest:
+      type: object
+      required: [mapping_id, hostname, https_mode]
+      properties:
+        mapping_id: { type: string, format: uuid }
+        hostname: { type: string, minLength: 1, maxLength: 253 }
+        https_mode: { type: string, enum: [auto_certificate, cloudflare_proxy, http_only] }
+        http_redirect: { type: boolean, default: false }
+        expected_config_version: { type: integer, format: int64 }
+    Domain:
+      allOf:
+        - $ref: '#/components/schemas/CreateDomainRequest'
+        - type: object
+          required: [id, normalized_domain, status, revision]
+          properties:
+            id: { type: string, format: uuid }
+            normalized_domain: { type: string }
+            status: { type: string }
+            revision: { type: integer, format: int64 }
+    Operation:
+      type: object
+      required: [id, resource_type, operation_type, status, phase, step]
+      properties:
+        id: { type: string, format: uuid }
+        resource_type: { type: string }
+        resource_id: { type: string }
+        operation_type: { type: string }
+        status: { type: string, enum: [pending, running, succeeded, failed, canceled] }
+        phase: { type: string }
+        step: { type: string }
+        error_code: { type: string }
+        error_message: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    RouterStatus:
+      type: object
+      required: [router_config_version, router_applied_version, snapshot_directory, adapter]
+      properties:
+        router_config_version: { type: integer, format: int64 }
+        router_applied_version: { type: integer, format: int64 }
+        last_good_snapshot_version: { type: integer, format: int64 }
+        last_good_snapshot_path: { type: string }
+        last_good_snapshot_hash: { type: string }
+        last_router_apply_error: { type: string }
+        snapshot_directory: { type: string }
+        adapter: { type: string, enum: [file-last-good] }
     ConfigSnapshot:
       type: object
       required: [schema_version, config_version, session_generation, payload]
