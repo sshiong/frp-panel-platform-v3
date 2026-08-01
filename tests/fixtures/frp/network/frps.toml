@@ -1,0 +1,5 @@
+bindAddr = "127.0.0.1"
+bindPort = 17000
+
+auth.method = "token"
+auth.token = "network-e2e-token"

@@ -2,12 +2,15 @@ package service
 
 import (
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
+	internalcrypto "github.com/ricardo/frp-panel-platform/server/internal/crypto"
 	"github.com/ricardo/frp-panel-platform/server/internal/router"
 )
 
@@ -46,6 +49,69 @@ func (a *App) RouterStatus(ctx context.Context) (RouterStatus, error) {
 	status.SnapshotDirectory = a.routerSnapshotDir()
 	status.Adapter = "file-last-good"
 	return status, nil
+}
+
+// RouterCertificates loads only validated certificate material into the
+// control process. The returned map is handed to the DB-free Router runtime;
+// the runtime never receives the database handle or the certificate wrapping
+// key. A failed load leaves callers free to retain their previous in-memory
+// certificate set.
+func (a *App) RouterCertificates(ctx context.Context) (map[string]tls.Certificate, error) {
+	rows, err := a.DB.QueryContext(ctx, `SELECT d.id,d.normalized_domain,COALESCE(c.cert_path,''),c.private_key_ciphertext,c.private_key_nonce FROM certificates c JOIN domain_bindings d ON d.id=c.domain_binding_id WHERE c.provider='acme' AND c.status='valid' AND d.status NOT IN ('deleted','deleting')`)
+	if err != nil {
+		return nil, err
+	}
+	type certificateRow struct {
+		domainID, hostname, path string
+		ciphertext, nonce        []byte
+	}
+	rowsData := make([]certificateRow, 0)
+	for rows.Next() {
+		var item certificateRow
+		if err := rows.Scan(&item.domainID, &item.hostname, &item.path, &item.ciphertext, &item.nonce); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		rowsData = append(rowsData, item)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	root, err := filepath.Abs(a.Config.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	certificates := make(map[string]tls.Certificate, len(rowsData))
+	for _, item := range rowsData {
+		if item.path == "" || len(item.ciphertext) == 0 || len(item.nonce) == 0 {
+			return nil, fmt.Errorf("certificate material is incomplete for %s", item.hostname)
+		}
+		certPath, err := filepath.Abs(item.path)
+		if err != nil {
+			return nil, err
+		}
+		if certPath != root && !strings.HasPrefix(certPath, root+string(os.PathSeparator)) {
+			return nil, fmt.Errorf("certificate path escapes server data directory")
+		}
+		certPEM, err := os.ReadFile(certPath)
+		if err != nil {
+			return nil, err
+		}
+		privatePEM, err := internalcrypto.DecryptWithKey(a.Crypto.CertificateKey, item.ciphertext, item.nonce, "domain:"+item.domainID+":certificate_private_key:v1")
+		if err != nil {
+			return nil, fmt.Errorf("decrypt certificate key for %s: %w", item.hostname, err)
+		}
+		pair, err := tls.X509KeyPair(certPEM, privatePEM)
+		if err != nil {
+			return nil, fmt.Errorf("parse certificate for %s: %w", item.hostname, err)
+		}
+		certificates[strings.ToLower(strings.TrimSuffix(strings.TrimSpace(item.hostname), "."))] = pair
+	}
+	return certificates, nil
 }
 
 type routeSource struct {

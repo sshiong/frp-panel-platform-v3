@@ -8,12 +8,14 @@ The admin endpoint is:
 POST /api/v1/admin/backups
 Content-Type: application/json
 
-{"password":"a-long-backup-password"}
+{"password":"a-long-backup-password","reauth_ticket":"short-lived-ticket-from-/api/v1/auth/reauth"}
 ```
 
-The password is never stored in the database. The `backup.Decode` and `backup.Restore` library functions verify the package header, decrypt the archive, check every manifest checksum and SQLite integrity, and install the snapshot atomically. If a target database already exists it is renamed to a timestamped `.before-restore-*` path for recovery. Restore revokes all restored sessions and runtime credentials; the next Server startup schedules a Router rebuild. Stop the Server Panel before restore and produce a recovery report before returning the instance to service. JSON export is for non-sensitive mapping/domain previews only and is not a full restore format.
+The backup endpoint requires a session-bound reauthentication ticket. The password is never stored in the database. The `backup.Decode` and `backup.Restore` library functions verify the package header, decrypt the archive, check every manifest checksum and SQLite integrity, and install the snapshot atomically. If a target database already exists it is renamed to a timestamped `.before-restore-*` path for recovery. Restore revokes all restored sessions and runtime credentials; the next Server startup schedules a Router rebuild. Stop the Server Panel before restore and produce a recovery report before returning the instance to service. JSON export is for non-sensitive mapping/domain previews only and is not a full restore format.
 
 The package format is `FPPB1`: a random per-package scrypt salt, AES-256-GCM nonce/ciphertext, and a ZIP containing `manifest.json`, `server.db`, and protected `files/` entries from the Server data directory (master/signing/router/certificate keys, ACME account material, certificate chain and metadata). Backup output excludes the database WAL/SHM files, logs, and prior backup archives. Every entry has a SHA-256 checksum in the manifest and all entries are restored with mode `0600` below the explicitly supplied data directory. The backup password is never persisted or logged.
+
+WAL maintenance is explicit and operator-controlled. After checking that no backup or migration is using the database, run `make checkpoint` (or `server/cmd/db-checkpoint -db /path/to/server.db`) and inspect the SQLite/WAL gauges before and after. The checkpoint command is an operational source tool, not a third release binary.
 
 For a controlled restore, stop the server and run:
 

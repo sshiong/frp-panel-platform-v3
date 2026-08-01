@@ -85,6 +85,16 @@ func TestVerifyTokenClassifiesPermissionDenied(t *testing.T) {
 	}
 }
 
+func TestNewDoesNotFollowRedirects(t *testing.T) {
+	provider := New("test-token")
+	if provider.Client == nil || provider.Client.CheckRedirect == nil {
+		t.Fatal("Cloudflare provider must install a redirect policy")
+	}
+	if err := provider.Client.CheckRedirect(nil, nil); err != http.ErrUseLastResponse {
+		t.Fatalf("unexpected redirect policy error: %v", err)
+	}
+}
+
 type urlError struct{ message string }
 
 func (e *urlError) Error() string { return e.message }

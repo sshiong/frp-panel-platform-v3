@@ -537,20 +537,23 @@ func (a *App) syncDomainDNS(ctx context.Context, job jobs.Job) error {
 		return err
 	}
 	desired := cloudflare.Record{Type: "CNAME", Name: normalized, Content: a.Config.FRPSPublicHost, TTL: 300, Proxied: httpsMode == "cloudflare_proxy"}
-	var desiredProxied int
-	if err := a.DB.QueryRowContext(ctx, `SELECT COALESCE(type,'CNAME'),COALESCE(content,?),COALESCE(ttl,300),COALESCE(proxied,0) FROM dns_records WHERE domain_binding_id=? ORDER BY last_synced_at DESC LIMIT 1`, a.Config.FRPSPublicHost, domainID).Scan(&desired.Type, &desired.Content, &desired.TTL, &desiredProxied); err == nil {
+	var desiredProxied, desiredManaged int
+	if err := a.DB.QueryRowContext(ctx, `SELECT COALESCE(type,'CNAME'),COALESCE(content,?),COALESCE(ttl,300),COALESCE(proxied,0),COALESCE(managed_by_panel,0) FROM dns_records WHERE domain_binding_id=? ORDER BY last_synced_at DESC LIMIT 1`, a.Config.FRPSPublicHost, domainID).Scan(&desired.Type, &desired.Content, &desired.TTL, &desiredProxied, &desiredManaged); err == nil {
 		desired.Proxied = httpsMode == "cloudflare_proxy"
+	}
+	if action == "sync" && desiredManaged != 1 {
+		return a.markDomainDNSFailure(ctx, domainID, "DNS_RECORD_NOT_MANAGED", "Only DNS records managed by the panel can be updated by this action.")
 	}
 	managed, adopted := false, false
 	var selected cloudflare.Record
 	for _, record := range records {
-		if strings.EqualFold(record.Type, desired.Type) && strings.EqualFold(record.Content, desired.Content) && record.Proxied == desired.Proxied {
+		if strings.EqualFold(record.Type, desired.Type) && strings.EqualFold(record.Content, desired.Content) && record.Proxied == desired.Proxied && (action != "sync" || record.TTL == desired.TTL) {
 			selected = record
 			adopted = true
 			break
 		}
 	}
-	if selected.ID == "" && len(records) > 0 && action != "adopt" && action != "overwrite" {
+	if selected.ID == "" && len(records) > 0 && action != "adopt" && action != "overwrite" && action != "sync" {
 		return a.markDomainDNSFailure(ctx, domainID, "DNS_CONFLICT_REQUIRES_ACTION", "Cloudflare already has a conflicting record; choose adopt or overwrite.")
 	}
 	if selected.ID == "" && action == "adopt" {
@@ -566,7 +569,7 @@ func (a *App) syncDomainDNS(ctx context.Context, job jobs.Job) error {
 			return err
 		}
 		managed = true
-	} else if action == "overwrite" && (selected.Content != desired.Content || selected.Proxied != desired.Proxied || selected.Type != desired.Type || selected.TTL != desired.TTL) {
+	} else if (action == "overwrite" || action == "sync") && (selected.Content != desired.Content || selected.Proxied != desired.Proxied || selected.Type != desired.Type || selected.TTL != desired.TTL) {
 		selected, err = a.upsertDNSWithRecovery(ctx, provider, zone, desired)
 		if err != nil {
 			if code, message, denied := cloudflarePermissionError(err); denied {
@@ -575,6 +578,9 @@ func (a *App) syncDomainDNS(ctx context.Context, job jobs.Job) error {
 			return err
 		}
 		managed = true
+	} else if action == "sync" {
+		managed = true
+		adopted = false
 	}
 	if selected.ID == "" {
 		return errors.New("provider returned an empty DNS record id")
@@ -692,13 +698,33 @@ func nullableTime(value time.Time) interface{} {
 func writeAtomicPrivate(path string, content []byte) error {
 	tmp := path + fmt.Sprintf(".tmp.%d", time.Now().UnixNano())
 	defer os.Remove(tmp)
-	if err := os.WriteFile(tmp, content, 0o600); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(content); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
 		return err
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		return err
 	}
-	return nil
+	directory, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	return directory.Sync()
 }
 
 // upsertDNSWithRecovery handles the ambiguous window where Cloudflare may have

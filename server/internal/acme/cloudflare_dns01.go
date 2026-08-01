@@ -50,7 +50,12 @@ func NewCloudflareDNS01(config CloudflareDNS01Config, wrappingKey []byte) (*Clou
 		return nil, errors.New("ACME directory URL and email are required")
 	}
 	if config.HTTPClient == nil {
-		config.HTTPClient = &http.Client{Timeout: 30 * time.Second}
+		config.HTTPClient = &http.Client{
+			Timeout: 30 * time.Second,
+			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
 	}
 	if config.Propagation <= 0 {
 		config.Propagation = 2 * time.Minute
@@ -109,7 +114,7 @@ func (p *CloudflareDNS01Provider) IssueDNS01(ctx context.Context, domain string)
 			return Certificate{}, err
 		}
 		if record.ID == "" {
-			return Certificate{}, errors.New("Cloudflare returned an empty ACME TXT record id")
+			return Certificate{}, errors.New("cloudflare returned an empty ACME TXT record id")
 		}
 		challengeRecords = append(challengeRecords, dnsChallengeRecord{provider: provider, zone: zone, id: record.ID})
 		if err := waitTXT(ctx, "_acme-challenge."+authorization.Identifier.Value, value, p.config.Propagation); err != nil {

@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -28,6 +30,12 @@ func main() {
 		logger.Error("config", "error", err)
 		os.Exit(1)
 	}
+	transportSecret, err := config.LoadOrCreateTransportSecret(cfg.FRPSTransportSecretFile)
+	if err != nil {
+		logger.Error("frps_transport_secret", "error", err)
+		os.Exit(1)
+	}
+	cfg.FRPSTransportSecret = transportSecret
 	secrets, err := crypto.Load(cfg.DataDir, cfg.MasterKeyPath, cfg.ConfigSigningPath)
 	if err != nil {
 		logger.Error("secrets", "error", err)
@@ -93,10 +101,47 @@ func main() {
 			}
 		}()
 		routerServer = &http.Server{Addr: cfg.RouterListenAddr, Handler: runtime, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 90 * time.Second}
+		certificateStore := router.NewCertificateStore()
+		if cfg.RouterTLSEnabled {
+			if certificates, certificateErr := app.RouterCertificates(context.Background()); certificateErr != nil {
+				logger.Warn("router_tls_certificates", "error", certificateErr)
+			} else {
+				certificateStore.Replace(certificates)
+			}
+			go func() {
+				ticker := time.NewTicker(5 * time.Second)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ticker.C:
+						certificates, certificateErr := app.RouterCertificates(routerCtx)
+						if certificateErr != nil {
+							logger.Warn("router_tls_certificate_reload", "error", certificateErr)
+							continue
+						}
+						certificateStore.Replace(certificates)
+					case <-routerCtx.Done():
+						return
+					}
+				}
+			}()
+		}
 		go func() {
 			logger.Info("router_started", "addr", cfg.RouterListenAddr, "snapshot", filepath.Join(cfg.RouterSnapshotDir, "last-good.json"))
-			if err := routerServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				logger.Error("router_stopped", "error", err)
+			var serveErr error
+			if cfg.RouterTLSEnabled {
+				listener, listenErr := net.Listen("tcp", cfg.RouterListenAddr)
+				if listenErr != nil {
+					logger.Error("router_tls_listener", "error", listenErr)
+					return
+				}
+				tlsListener := tls.NewListener(listener, certificateStore.TLSConfig())
+				serveErr = routerServer.Serve(tlsListener)
+			} else {
+				serveErr = routerServer.ListenAndServe()
+			}
+			if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+				logger.Error("router_stopped", "error", serveErr)
 			}
 		}()
 	}

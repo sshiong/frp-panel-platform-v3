@@ -21,6 +21,48 @@ type Runtime struct {
 	business *url.URL
 }
 
+// CertificateStore is the Router-side, in-memory SNI certificate boundary.
+// Control code can replace the complete set after it has decrypted and
+// validated certificate material; the Router itself never reads SQLite or
+// certificate files.
+type CertificateStore struct {
+	mu           sync.RWMutex
+	certificates map[string]tls.Certificate
+}
+
+func NewCertificateStore() *CertificateStore {
+	return &CertificateStore{certificates: make(map[string]tls.Certificate)}
+}
+
+func (s *CertificateStore) Replace(certificates map[string]tls.Certificate) {
+	if s == nil {
+		return
+	}
+	copySet := make(map[string]tls.Certificate, len(certificates))
+	for hostname, certificate := range certificates {
+		copySet[normalizeSNI(hostname)] = certificate
+	}
+	s.mu.Lock()
+	s.certificates = copySet
+	s.mu.Unlock()
+}
+
+func (s *CertificateStore) certificate(serverName string) (*tls.Certificate, error) {
+	s.mu.RLock()
+	certificate, ok := s.certificates[normalizeSNI(serverName)]
+	s.mu.RUnlock()
+	if !ok {
+		return nil, errors.New("unknown SNI")
+	}
+	return &certificate, nil
+}
+
+func (s *CertificateStore) TLSConfig() *tls.Config {
+	return &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+		return s.certificate(hello.ServerName)
+	}}
+}
+
 func NewRuntime(key []byte, controlTarget, businessTarget string) (*Runtime, error) {
 	control, err := url.Parse(controlTarget)
 	if err != nil || control.Scheme == "" || control.Host == "" {
@@ -174,13 +216,13 @@ func requestClientIP(req *http.Request) string {
 // certificate storage or database access to Runtime. Unknown SNI is rejected
 // by returning an error from GetCertificate.
 func TLSConfig(certificates map[string]tls.Certificate) *tls.Config {
-	return &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-		cert, ok := certificates[strings.ToLower(strings.TrimSuffix(hello.ServerName, "."))]
-		if !ok {
-			return nil, errors.New("unknown SNI")
-		}
-		return &cert, nil
-	}}
+	store := NewCertificateStore()
+	store.Replace(certificates)
+	return store.TLSConfig()
+}
+
+func normalizeSNI(value string) string {
+	return strings.ToLower(strings.TrimSuffix(strings.TrimSpace(value), "."))
 }
 
 var _ http.Handler = (*Runtime)(nil)

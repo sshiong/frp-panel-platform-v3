@@ -1,0 +1,63 @@
+name: release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache-dependency-path: |
+            server/go.sum
+            client/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - run: npm ci
+        working-directory: web/admin
+      - run: npm ci
+        working-directory: web/client
+      - name: Download fixed FRP dependency
+        run: |
+          archive="frp_0.68.0_linux_amd64.tar.gz"
+          url="https://github.com/fatedier/frp/releases/download/v0.68.0/${archive}"
+          curl --fail --location --silent --show-error "$url" -o "/tmp/${archive}"
+          digest="$(gh api repos/fatedier/frp/releases/tags/v0.68.0 --jq ".assets[] | select(.name == \"${archive}\") | .digest")"
+          test -n "$digest" && test "${digest#sha256:}" != "$digest"
+          printf '%s  %s\n' "${digest#sha256:}" "/tmp/${archive}" | sha256sum --check --status
+          mv "/tmp/${archive}" /tmp/frp.tgz
+          tar -xzf /tmp/frp.tgz -C /tmp
+          mkdir -p build
+          cp /tmp/frp_0.68.0_linux_amd64/frps build/frps
+          cp /tmp/frp_0.68.0_linux_amd64/frpc build/frpc
+      - run: FRPS_BINARY=build/frps FRPC_BINARY=build/frpc FRPS_VERSION=0.68.0 FRPC_VERSION=0.68.0 make build sbom checksums manifest
+      - uses: sigstore/cosign-installer@v3
+      - name: Sign release metadata and binaries
+        run: |
+          for artifact in build/frp-panel-server build/frp-panel-client build/frps build/frpc build/SHA256SUMS build/sbom.spdx.json build/release-manifest.json; do
+            cosign sign-blob --yes --output-signature "${artifact}.sig" --output-certificate "${artifact}.pem" "${artifact}"
+          done
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/frp-panel-server
+            build/frp-panel-client
+            build/frps
+            build/frpc
+            build/SHA256SUMS
+            build/sbom.spdx.json
+            build/release-manifest.json
+            build/*.sig
+            build/*.pem

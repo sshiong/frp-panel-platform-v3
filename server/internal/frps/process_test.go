@@ -11,7 +11,10 @@ import (
 func TestVerifyAndStartFixedBinary(t *testing.T) {
 	root := t.TempDir()
 	binary := filepath.Join(root, "frps-test.sh")
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\nsleep 30\n"), 0o700); err != nil {
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\nif [ \"$1\" = \"verify\" ]; then exit 0; fi\nsleep 30\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "frps.toml"), []byte("bindPort = 7000\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	content, _ := os.ReadFile(binary)

@@ -55,6 +55,14 @@ func TestWebSocketHeartbeatAndUserDisable(t *testing.T) {
 	defer server.Close()
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/v1/ws"
 	dialer := websocket.Dialer{HandshakeTimeout: 5 * time.Second}
+	_, incompatibleResponse, incompatibleErr := dialer.Dial(wsURL, http.Header{
+		"Authorization":          []string{"Bearer " + clientLogin.Token},
+		"Origin":                 []string{"http://127.0.0.1:7410"},
+		"X-FRP-Protocol-Version": []string{"v0"},
+	})
+	if incompatibleErr == nil || incompatibleResponse == nil || incompatibleResponse.StatusCode != http.StatusUpgradeRequired {
+		t.Fatalf("unsupported WebSocket protocol must return 426: response=%v err=%v", incompatibleResponse, incompatibleErr)
+	}
 	conn, response, err := dialer.Dial(wsURL, http.Header{"Authorization": []string{"Bearer " + clientLogin.Token}, "Origin": []string{"http://127.0.0.1:7410"}})
 	if err != nil {
 		if response != nil {

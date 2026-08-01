@@ -24,5 +24,6 @@ export const useSessionStore = defineStore('admin-session', () => {
     catch (err) { error.value = err instanceof Error ? err.message : '登录失败'; throw err }
   }
   async function logout() { await api('/api/v1/auth/logout', { method: 'POST' }).catch(() => undefined); authenticated.value = false; user.value = null }
-  return { authenticated, user, loading, error, needsPasswordChange, restore, login, logout }
+  function markPasswordChanged() { if (user.value) user.value = { ...user.value, must_change_password: false } }
+  return { authenticated, user, loading, error, needsPasswordChange, restore, login, logout, markPasswordChanged }
 })

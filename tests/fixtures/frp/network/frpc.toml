@@ -1,0 +1,12 @@
+serverAddr = "127.0.0.1"
+serverPort = 17000
+
+auth.method = "token"
+auth.token = "network-e2e-token"
+
+[[proxies]]
+name = "network-e2e-web"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 17081
+remotePort = 17080

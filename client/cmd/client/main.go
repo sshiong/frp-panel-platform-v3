@@ -22,6 +22,10 @@ func main() {
 		logger.Error("config", "error", err)
 		os.Exit(1)
 	}
+	if err := cfg.ValidateListenSecurity(); err != nil {
+		logger.Error("client_listener_security", "error", err)
+		os.Exit(1)
+	}
 	client := app.New(cfg)
 	recoveryCtx, recoveryCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	if err := client.Supervisor.RecoverOrphan(recoveryCtx); err != nil {
@@ -31,7 +35,13 @@ func main() {
 	server := &http.Server{Addr: cfg.ListenAddr, Handler: httpapi.New(client).Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {
 		logger.Info("client_started", "addr", cfg.ListenAddr, "frpc_mode", map[bool]string{true: "fixed-binary", false: "development-simulation"}[cfg.FRPCBinary != ""])
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		var err error
+		if cfg.TLSCertFile != "" {
+			err = server.ListenAndServeTLS(cfg.TLSCertFile, cfg.TLSKeyFile)
+		} else {
+			err = server.ListenAndServe()
+		}
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("client_stopped", "error", err)
 			os.Exit(1)
 		}

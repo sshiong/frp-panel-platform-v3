@@ -27,6 +27,29 @@ func TestWebsocketURL(t *testing.T) {
 	}
 }
 
+func TestServerRequestDoesNotFollowRedirects(t *testing.T) {
+	var redirected int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/redirected" {
+			redirected++
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.Redirect(w, r, "/redirected", http.StatusFound)
+	}))
+	defer server.Close()
+
+	client := New(config.Config{DataDir: t.TempDir()})
+	err := client.serverRequest(context.Background(), server.URL, http.MethodGet, "/api/v1/dashboard", nil, "opaque-token", nil)
+	remote, ok := err.(RemoteError)
+	if !ok || remote.Status != http.StatusFound {
+		t.Fatalf("expected redirect response, got %T %v", err, err)
+	}
+	if redirected != 0 {
+		t.Fatal("server request followed a redirect")
+	}
+}
+
 func TestWebsocketConnectionStopsOnRemoteDisable(t *testing.T) {
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

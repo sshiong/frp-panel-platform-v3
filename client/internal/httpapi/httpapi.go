@@ -1,13 +1,14 @@
 package httpapi
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,13 +16,20 @@ import (
 	"github.com/ricardo/frp-panel-platform/client/internal/app"
 )
 
-type API struct{ App *app.App }
+type API struct {
+	App         *app.App
+	apiLimit    *requestRateLimiter
+	loginLimit  *requestRateLimiter
+	concurrency chan struct{}
+}
 
-func New(a *app.App) *API { return &API{App: a} }
+func New(a *app.App) *API {
+	return &API{App: a, apiLimit: newRequestRateLimiter(300, time.Minute), loginLimit: newRequestRateLimiter(10, time.Minute), concurrency: make(chan struct{}, 64)}
+}
 
 func (a *API) Handler() http.Handler {
 	r := chi.NewRouter()
-	r.Use(a.headers, a.cors, a.localAuth)
+	r.Use(a.headers, a.cors, a.rateLimit, a.concurrencyLimit, a.localAuth)
 	r.Get("/healthz", a.health)
 	r.Get("/", a.app)
 	r.Handle("/assets/*", http.StripPrefix("/assets/", http.FileServer(http.Dir(filepath.Join(a.webDir(), "assets")))))
@@ -34,6 +42,8 @@ func (a *API) Handler() http.Handler {
 		r.Use(a.sessionRequired)
 		r.Post("/api/v1/logout", a.logout)
 		r.Post("/api/v1/password", a.password)
+		r.Post("/api/v1/reauth", a.reauth)
+		r.Post("/api/v1/frp-credential/reset", a.resetFRPCredential)
 		r.Get("/api/v1/session", a.session)
 		r.Get("/api/v1/dashboard", a.dashboard)
 		r.Get("/api/v1/mappings", a.mappings)
@@ -51,6 +61,40 @@ func (a *API) Handler() http.Handler {
 		r.Get("/api/v1/logs", a.logs)
 	})
 	return r
+}
+
+func (a *API) rateLimit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if a.apiLimit != nil {
+			if ok, retry := a.apiLimit.allow(remoteIP(r), time.Now().UTC()); !ok {
+				seconds := int(retry.Seconds())
+				if seconds < 1 {
+					seconds = 1
+				}
+				w.Header().Set("Retry-After", strconv.Itoa(seconds))
+				problem(w, r, http.StatusTooManyRequests, "RATE_LIMITED", "请求过于频繁，请稍后重试。")
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (a *API) concurrencyLimit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if a.concurrency == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		select {
+		case a.concurrency <- struct{}{}:
+			defer func() { <-a.concurrency }()
+			next.ServeHTTP(w, r)
+		default:
+			w.Header().Set("Retry-After", "1")
+			problem(w, r, http.StatusTooManyRequests, "CONCURRENCY_LIMITED", "并发请求已达到上限，请稍后重试。")
+		}
+	})
 }
 
 func (a *API) headers(next http.Handler) http.Handler {
@@ -79,7 +123,35 @@ func (a *API) cors(next http.Handler) http.Handler {
 	})
 }
 func (a *API) localAuth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { next.ServeHTTP(w, r) })
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !cidrAllowed(r.RemoteAddr, a.App.Config.AllowedCIDRs) {
+			problem(w, r, http.StatusNotFound, "NOT_FOUND", "资源不存在。")
+			return
+		}
+		if !hostAllowed(r.Host, a.App.Config.AllowedHost) {
+			problem(w, r, http.StatusNotFound, "NOT_FOUND", "资源不存在。")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func cidrAllowed(remoteAddr string, configured []string) bool {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(remoteAddr))
+	if err != nil {
+		host = strings.Trim(strings.TrimSpace(remoteAddr), "[]")
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	for _, raw := range configured {
+		_, network, err := net.ParseCIDR(strings.TrimSpace(raw))
+		if err == nil && network.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 func (a *API) sessionRequired(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -127,17 +199,32 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input) {
 		return
 	}
+	limitKey := remoteIP(r) + "|" + strings.TrimSpace(input.Username)
+	if a.loginLimit != nil {
+		if ok, retry := a.loginLimit.allow(limitKey, time.Now().UTC()); !ok {
+			seconds := int(retry.Seconds())
+			if seconds < 1 {
+				seconds = 1
+			}
+			w.Header().Set("Retry-After", strconv.Itoa(seconds))
+			problem(w, r, http.StatusTooManyRequests, "AUTH_RATE_LIMITED", "登录尝试过于频繁，请稍后重试。")
+			return
+		}
+	}
 	session, err := a.App.Login(r.Context(), input.ServerPanelURL, input.Username, input.Password)
 	if err != nil {
 		problem(w, r, 401, "AUTH_INVALID_CREDENTIALS", err.Error())
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: "frp_client_session", Value: a.App.SessionCookie(), Path: "/", HttpOnly: true, Secure: false, SameSite: http.SameSiteStrictMode, MaxAge: 1800})
+	if a.loginLimit != nil {
+		a.loginLimit.reset(limitKey)
+	}
+	http.SetCookie(w, &http.Cookie{Name: "frp_client_session", Value: a.App.SessionCookie(), Path: "/", HttpOnly: true, Secure: a.App.Config.Environment == "production", SameSite: http.SameSiteStrictMode, MaxAge: 1800})
 	writeJSON(w, 200, session)
 }
 func (a *API) logout(w http.ResponseWriter, r *http.Request) {
 	_ = a.App.Logout(r.Context())
-	http.SetCookie(w, &http.Cookie{Name: "frp_client_session", Value: "", Path: "/", HttpOnly: true, MaxAge: -1, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: "frp_client_session", Value: "", Path: "/", HttpOnly: true, Secure: a.App.Config.Environment == "production", MaxAge: -1, SameSite: http.SameSiteStrictMode})
 	writeJSON(w, 200, map[string]interface{}{"ok": true})
 }
 func (a *API) password(w http.ResponseWriter, r *http.Request) {
@@ -154,6 +241,52 @@ func (a *API) password(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]interface{}{"ok": true})
+}
+
+func (a *API) reauth(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		CurrentPassword string `json:"current_password"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	var response interface{}
+	if err := a.App.Proxy(r.Context(), "POST", "/api/v1/auth/reauth", input, r.Header.Get("X-CSRF-Token"), &response); err != nil {
+		problem(w, r, 401, "AUTH_REAUTH_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, 200, response)
+}
+
+func (a *API) resetFRPCredential(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		CurrentPassword string `json:"current_password,omitempty"`
+		ReauthTicket    string `json:"reauth_ticket,omitempty"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	var output map[string]interface{}
+	if input.ReauthTicket == "" && input.CurrentPassword != "" {
+		var ticketResponse struct {
+			ReauthTicket string `json:"reauth_ticket"`
+		}
+		if err := a.App.Proxy(r.Context(), "POST", "/api/v1/auth/reauth", map[string]string{"current_password": input.CurrentPassword}, r.Header.Get("X-CSRF-Token"), &ticketResponse); err != nil {
+			problem(w, r, 401, "AUTH_REAUTH_FAILED", err.Error())
+			return
+		}
+		input.CurrentPassword = ""
+		input.ReauthTicket = ticketResponse.ReauthTicket
+	}
+	if err := a.App.Proxy(r.Context(), "POST", "/api/v1/auth/reset-frp-credential", input, r.Header.Get("X-CSRF-Token"), &output, r.Header.Get("Idempotency-Key")); err != nil {
+		problem(w, r, 400, "FRP_SECRET_RESET_FAILED", err.Error(), err)
+		return
+	}
+	// Server revokes the current session as part of the rotation. Clear the
+	// local session and all runtime material immediately after the 200 response.
+	_ = a.App.Logout(r.Context())
+	http.SetCookie(w, &http.Cookie{Name: "frp_client_session", Value: "", Path: "/", HttpOnly: true, Secure: a.App.Config.Environment == "production", MaxAge: -1, SameSite: http.SameSiteStrictMode})
+	writeJSON(w, 200, output)
 }
 func (a *API) session(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, a.App.Session()) }
 func (a *API) dashboard(w http.ResponseWriter, r *http.Request) {
@@ -290,6 +423,14 @@ func (a *API) logs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]interface{}{"items": []map[string]string{{"level": "info", "message": "本地日志由 Supervisor 脱敏收集；当前版本不展示秘密。", "time": time.Now().UTC().Format(time.RFC3339Nano)}}})
 }
 
+func remoteIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
+
 func decodeJSON(w http.ResponseWriter, r *http.Request, target interface{}) bool {
 	defer r.Body.Close()
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
@@ -298,7 +439,41 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, target interface{}) bool
 		problem(w, r, 400, "INVALID_JSON", "请求格式不正确。")
 		return false
 	}
+	var extra interface{}
+	if err := decoder.Decode(&extra); err != io.EOF {
+		problem(w, r, 400, "INVALID_JSON", "请求体只能包含一个 JSON 值。")
+		return false
+	}
 	return true
+}
+
+func hostAllowed(requestHost, configured string) bool {
+	requestHost = strings.TrimSpace(strings.TrimSuffix(requestHost, "."))
+	if requestHost == "" {
+		return false
+	}
+	requestName, requestPort, err := net.SplitHostPort(requestHost)
+	if err != nil {
+		requestName = strings.Trim(requestHost, "[]")
+		requestPort = ""
+	}
+	requestName = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(requestName), "."))
+	for _, candidate := range strings.Split(configured, ",") {
+		candidate = strings.TrimSpace(strings.TrimSuffix(candidate, "."))
+		if candidate == "" {
+			continue
+		}
+		candidateName, candidatePort, splitErr := net.SplitHostPort(candidate)
+		if splitErr != nil {
+			candidateName = strings.Trim(candidate, "[]")
+			candidatePort = ""
+		}
+		candidateName = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(candidateName), "."))
+		if candidateName == requestName && (candidatePort == "" || candidatePort == requestPort) {
+			return true
+		}
+	}
+	return false
 }
 func writeJSON(w http.ResponseWriter, status int, value interface{}) {
 	w.Header().Set("Content-Type", "application/json")
@@ -324,4 +499,3 @@ func problem(w http.ResponseWriter, r *http.Request, status int, code, detail st
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{"type": "https://docs.example.invalid/problems/" + strings.ToLower(strings.ReplaceAll(code, "_", "-")), "title": code, "status": status, "detail": detail, "instance": r.URL.Path})
 }
-func _unused(_ context.Context, _ fmt.Stringer) {}

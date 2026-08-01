@@ -69,6 +69,7 @@ type Supervisor struct {
 	dataDir      string
 	binary       string
 	binarySHA256 string
+	frpcVersion  string
 	queue        chan func()
 	mu           sync.RWMutex
 	status       Status
@@ -87,6 +88,10 @@ func New(dataDir, binary string) *Supervisor {
 }
 
 func NewWithBinaryHash(dataDir, binary, binarySHA256 string) *Supervisor {
+	return NewWithBinaryHashAndVersion(dataDir, binary, binarySHA256, "0.68.0")
+}
+
+func NewWithBinaryHashAndVersion(dataDir, binary, binarySHA256, frpcVersion string) *Supervisor {
 	mode := "simulated"
 	if strings.TrimSpace(binary) != "" {
 		mode = "real"
@@ -95,7 +100,10 @@ func NewWithBinaryHash(dataDir, binary, binarySHA256 string) *Supervisor {
 	if _, err := os.Stat(filepath.Join(dataDir, "state", "last-good-manifest.json")); err == nil {
 		lastGoodAvailable = true
 	}
-	s := &Supervisor{dataDir: dataDir, binary: binary, binarySHA256: strings.ToLower(strings.TrimSpace(binarySHA256)), queue: make(chan func(), 32), status: Status{State: "stopped", Mode: mode, LastGoodAvailable: lastGoodAvailable, UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano)}}
+	if strings.TrimSpace(frpcVersion) == "" {
+		frpcVersion = "0.68.0"
+	}
+	s := &Supervisor{dataDir: dataDir, binary: binary, binarySHA256: strings.ToLower(strings.TrimSpace(binarySHA256)), frpcVersion: strings.TrimSpace(frpcVersion), queue: make(chan func(), 32), status: Status{State: "stopped", Mode: mode, LastGoodAvailable: lastGoodAvailable, UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano)}}
 	go func() {
 		for operation := range s.queue {
 			operation()
@@ -305,7 +313,10 @@ func (s *Supervisor) apply(ctx context.Context, snapshot Snapshot) error {
 	if err := ctx.Err(); err != nil {
 		return s.fail(err.Error())
 	}
-	configText := renderTOML(snapshot)
+	configText := renderTOMLForVersion(snapshot, s.dataDir, s.frpcVersion)
+	if err := s.writeRuntimeSecrets(snapshot); err != nil {
+		return s.fail("FRPC_VERIFY_FAILED: " + err.Error())
+	}
 	if s.binary != "" {
 		if err := checkLocalServices(ctx, snapshot.Payload); err != nil {
 			return s.fail("LOCAL_SERVICE_UNAVAILABLE: " + err.Error())
@@ -315,7 +326,7 @@ func (s *Supervisor) apply(ctx context.Context, snapshot Snapshot) error {
 	tmpPath := filepath.Join(configDir, fmt.Sprintf("frpc.toml.tmp.%d", time.Now().UnixNano()))
 	activePath := filepath.Join(configDir, "frpc.toml")
 	lastGoodPath := filepath.Join(configDir, "frpc.last-good.toml")
-	if err := os.WriteFile(tmpPath, []byte(configText), 0o600); err != nil {
+	if err := writeDurableFile(tmpPath, []byte(configText), 0o600); err != nil {
 		return s.fail("FRPC_VERIFY_FAILED: write temporary config")
 	}
 	defer os.Remove(tmpPath)
@@ -324,9 +335,9 @@ func (s *Supervisor) apply(ctx context.Context, snapshot Snapshot) error {
 	}
 	oldConfig, oldConfigErr := os.ReadFile(activePath)
 	if oldConfigErr == nil {
-		_ = os.WriteFile(lastGoodPath, oldConfig, 0o600)
+		_ = atomicWriteDurable(lastGoodPath, oldConfig, 0o600)
 	}
-	if err := os.Rename(tmpPath, activePath); err != nil {
+	if err := durableRename(tmpPath, activePath); err != nil {
 		return s.fail("FRPC_VERIFY_FAILED: atomic replace")
 	}
 	useReload := s.reloadEligible(snapshot)
@@ -338,7 +349,7 @@ func (s *Supervisor) apply(ctx context.Context, snapshot Snapshot) error {
 	}
 	if runErr != nil {
 		if oldConfigErr == nil {
-			_ = os.WriteFile(activePath, oldConfig, 0o600)
+			_ = atomicWriteDurable(activePath, oldConfig, 0o600)
 			if s.binary != "" {
 				// A failed reload may have partially applied the new file; a
 				// failed restart may have stopped the old process. Restarting
@@ -353,7 +364,7 @@ func (s *Supervisor) apply(ctx context.Context, snapshot Snapshot) error {
 	manifest := map[string]interface{}{"config_version": snapshot.ConfigVersion, "config_hash": snapshot.ConfigHash, "applied_at": time.Now().UTC().Format(time.RFC3339Nano)}
 	encoded, _ := json.MarshalIndent(manifest, "", "  ")
 	_ = os.MkdirAll(filepath.Join(s.dataDir, "state"), 0o700)
-	_ = os.WriteFile(filepath.Join(s.dataDir, "state", "last-good-manifest.json"), encoded, 0o600)
+	_ = atomicWriteDurable(filepath.Join(s.dataDir, "state", "last-good-manifest.json"), encoded, 0o600)
 	s.mu.Lock()
 	snapshotCopy := snapshot
 	s.lastSnapshot = &snapshotCopy
@@ -536,6 +547,38 @@ func (s *Supervisor) ClearRuntimeSecrets() error {
 	return nil
 }
 
+func (s *Supervisor) writeRuntimeSecrets(snapshot Snapshot) error {
+	transportSecret := payloadString(snapshot.Payload, "frps_transport_secret")
+	if transportSecret == "" {
+		// Development snapshots created before the deployment transport-secret
+		// split can still be verified; production Server login always supplies
+		// the dedicated frps transport value.
+		transportSecret = payloadString(snapshot.Payload, "frp_secret")
+	}
+	userSecret := payloadString(snapshot.Payload, "frp_user_secret")
+	if userSecret == "" {
+		userSecret = payloadString(snapshot.Payload, "frp_secret")
+	}
+	runtimeCredential := payloadString(snapshot.Payload, "runtime_credential")
+	if transportSecret == "" || userSecret == "" || runtimeCredential == "" {
+		return fmt.Errorf("runtime FRP secrets are incomplete")
+	}
+	secretDir := filepath.Join(s.dataDir, "runtime", "secrets")
+	if err := os.MkdirAll(secretDir, 0o700); err != nil {
+		return err
+	}
+	for name, value := range map[string]string{
+		"transport-token": transportSecret,
+		"user-frp-secret": userSecret,
+		"runtime-token":   runtimeCredential,
+	} {
+		if err := atomicWriteDurable(filepath.Join(secretDir, name), []byte(value+"\n"), 0o600); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Supervisor) stopProcess(ctx context.Context) error {
 	s.mu.Lock()
 	process := s.process
@@ -566,16 +609,51 @@ func (s *Supervisor) pidPath() string {
 }
 
 func (s *Supervisor) writePID(pid int) error {
-	stateDir := filepath.Dir(s.pidPath())
-	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+	return atomicWriteDurable(s.pidPath(), []byte(strconv.Itoa(pid)+"\n"), 0o600)
+}
+
+func writeDurableFile(path string, content []byte, mode os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	tmpPath := fmt.Sprintf("%s.tmp.%d", s.pidPath(), time.Now().UnixNano())
-	if err := os.WriteFile(tmpPath, []byte(strconv.Itoa(pid)+"\n"), 0o600); err != nil {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
 		return err
 	}
+	if _, err := file.Write(content); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Chmod(mode); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
+}
+
+func atomicWriteDurable(path string, content []byte, mode os.FileMode) error {
+	tmpPath := fmt.Sprintf("%s.tmp.%d", path, time.Now().UnixNano())
 	defer os.Remove(tmpPath)
-	return os.Rename(tmpPath, s.pidPath())
+	if err := writeDurableFile(tmpPath, content, mode); err != nil {
+		return err
+	}
+	return durableRename(tmpPath, path)
+}
+
+func durableRename(source, target string) error {
+	if err := os.Rename(source, target); err != nil {
+		return err
+	}
+	directory, err := os.Open(filepath.Dir(target))
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	return directory.Sync()
 }
 
 func (s *Supervisor) removePIDIf(pid int) error {
@@ -623,20 +701,45 @@ func (s *Supervisor) fail(message string) error {
 	s.mu.Unlock()
 	return fmt.Errorf("%s", message)
 }
-func renderTOML(snapshot Snapshot) string {
+func renderTOMLForVersion(snapshot Snapshot, dataDir, frpcVersion string) string {
 	var b strings.Builder
 	b.WriteString("# Generated by FRP Panel Client; do not edit.\n")
 	fmt.Fprintf(&b, "# config_version = %d\n", snapshot.ConfigVersion)
 	payload, _ := json.Marshal(snapshot.Payload)
 	sum := sha256.Sum256(payload)
 	fmt.Fprintf(&b, "# payload_sha256 = %s\n\n", hex.EncodeToString(sum[:]))
-	serverAddr := payloadString(snapshot.Payload, "server_addr")
+	serverAddr := payloadString(snapshot.Payload, "frps_public_host")
 	if serverAddr == "" {
-		serverAddr = payloadString(snapshot.Payload, "frps_public_host")
+		serverAddr = payloadString(snapshot.Payload, "server_addr")
 	}
 	serverPort := payloadInt(snapshot.Payload, "frps_public_port", 7000)
-	fmt.Fprintf(&b, "serverAddr = %s\nserverPort = %d\nloginFailExit = false\nauth.method = \"token\"\nauth.token = %s\n\n", tomlString(serverAddr), serverPort, tomlString(payloadString(snapshot.Payload, "frp_secret")))
+	username := payloadString(snapshot.Payload, "frp_username")
+	if username != "" {
+		fmt.Fprintf(&b, "user = %s\n", tomlString(username))
+	}
 	runtimeCredential := payloadString(snapshot.Payload, "runtime_credential")
+	transportSecret := payloadString(snapshot.Payload, "frps_transport_secret")
+	if transportSecret == "" {
+		transportSecret = payloadString(snapshot.Payload, "frp_secret")
+	}
+	transportPath := filepath.Join("runtime", "secrets", "transport-token")
+	if strings.TrimSpace(dataDir) != "" {
+		transportPath = filepath.Join(dataDir, "runtime", "secrets", "transport-token")
+	}
+	userSecret := payloadString(snapshot.Payload, "frp_user_secret")
+	if userSecret == "" {
+		userSecret = payloadString(snapshot.Payload, "frp_secret")
+	}
+	fmt.Fprintf(&b, "serverAddr = %s\nserverPort = %d\nloginFailExit = false\nauth.method = \"token\"\n", tomlString(serverAddr), serverPort)
+	if frpcVersionAtLeast(frpcVersion, "0.64.0") {
+		fmt.Fprintf(&b, "auth.tokenSource.type = \"file\"\nauth.tokenSource.file.path = %s\n", tomlString(transportPath))
+	} else {
+		// tokenSource.file was introduced in FRP v0.64.0. Older fixed
+		// binaries remain parseable, but production releases must use the
+		// file-backed branch above so the native token is not embedded.
+		fmt.Fprintf(&b, "auth.token = %s\n", tomlString(transportSecret))
+	}
+	fmt.Fprintf(&b, "metadatas = { frp_runtime_credential = %s, session_generation = %s, frp_user_secret = %s }\n\n", tomlString(runtimeCredential), tomlString(strconv.FormatInt(snapshot.SessionGeneration, 10)), tomlString(userSecret))
 	if mappings, ok := snapshot.Payload["mappings"].([]interface{}); ok {
 		for _, raw := range mappings {
 			item, _ := raw.(map[string]interface{})
@@ -652,10 +755,49 @@ func renderTOML(snapshot Snapshot) string {
 				}
 				fmt.Fprintf(&b, "customDomains = [%s]\n", strings.Join(values, ", "))
 			}
-			fmt.Fprintf(&b, "metadatas = { mapping_id = %s, frp_runtime_credential = %s }\n\n", tomlString(mappingID), tomlString(runtimeCredential))
+			fmt.Fprintf(&b, "metadatas = { mapping_id = %s, mapping_revision = %s }\n\n", tomlString(mappingID), tomlString(strconv.Itoa(payloadInt(item, "revision", 1))))
 		}
 	}
 	return b.String()
+}
+
+func frpcVersionAtLeast(actual, minimum string) bool {
+	parse := func(value string) ([3]int, bool) {
+		var result [3]int
+		parts := strings.Split(strings.TrimSpace(value), ".")
+		if len(parts) < 2 {
+			return result, false
+		}
+		for index := 0; index < len(result) && index < len(parts); index++ {
+			part := parts[index]
+			for offset, character := range part {
+				if character < '0' || character > '9' {
+					part = part[:offset]
+					break
+				}
+			}
+			if part == "" {
+				return result, false
+			}
+			parsed, err := strconv.Atoi(part)
+			if err != nil {
+				return result, false
+			}
+			result[index] = parsed
+		}
+		return result, true
+	}
+	actualVersion, actualOK := parse(actual)
+	minimumVersion, minimumOK := parse(minimum)
+	if !actualOK || !minimumOK {
+		return false
+	}
+	for index := range actualVersion {
+		if actualVersion[index] != minimumVersion[index] {
+			return actualVersion[index] > minimumVersion[index]
+		}
+	}
+	return true
 }
 
 func payloadString(payload map[string]interface{}, key string) string {

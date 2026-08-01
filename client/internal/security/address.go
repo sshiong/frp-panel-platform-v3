@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -22,7 +23,7 @@ func NormalizeServerURL(raw string, development bool) (string, error) {
 	if u.Scheme != "https" && !(development && u.Scheme == "http") {
 		return "", fmt.Errorf("only https is allowed outside explicit development mode")
 	}
-	if u.Hostname() == "" {
+	if u.Hostname() == "" || strings.ContainsAny(u.Hostname(), "[]") {
 		return "", fmt.Errorf("server address host is required")
 	}
 	host := strings.ToLower(u.Hostname())
@@ -35,6 +36,10 @@ func NormalizeServerURL(raw string, development bool) (string, error) {
 		if u.Scheme == "http" {
 			port = "80"
 		}
+	}
+	portNumber, portErr := strconv.Atoi(port)
+	if portErr != nil || portNumber < 1 || portNumber > 65535 {
+		return "", fmt.Errorf("server address port is invalid")
 	}
 	if (u.Scheme == "https" && port == "443") || (u.Scheme == "http" && port == "80") {
 		return u.Scheme + "://" + formatHost(host), nil

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -36,6 +37,7 @@ var (
 	ErrRevisionConflict   = errors.New("resource revision conflict")
 	ErrIdempotencyReuse   = errors.New("idempotency key reused")
 	ErrPortReserved       = errors.New("port already reserved")
+	ErrReauthRequired     = errors.New("reauthentication required")
 )
 
 type App struct {
@@ -49,15 +51,16 @@ type App struct {
 }
 
 type AuthContext struct {
-	SessionID  string
-	UserID     string
-	Username   string
-	Role       string
-	Status     string
-	Generation int64
-	Channel    string
-	MustChange bool
-	ExpiresAt  time.Time
+	SessionID     string    `json:"session_id"`
+	UserID        string    `json:"user_id"`
+	Username      string    `json:"username"`
+	Role          string    `json:"role"`
+	Status        string    `json:"status"`
+	Generation    int64     `json:"generation"`
+	Channel       string    `json:"channel"`
+	MustChange    bool      `json:"must_change_password"`
+	ExpiresAt     time.Time `json:"expires_at"`
+	CSRFTokenHash string    `json:"-"`
 }
 
 type UserSummary struct {
@@ -69,14 +72,16 @@ type UserSummary struct {
 }
 
 type LoginResult struct {
-	Token             string      `json:"token"`
-	SessionID         string      `json:"-"`
-	SessionExpires    time.Time   `json:"session_expires_at"`
-	User              UserSummary `json:"user"`
-	RuntimeCredential string      `json:"runtime_credential,omitempty"`
-	FRPUsername       string      `json:"frp_username,omitempty"`
-	FRPSecret         string      `json:"frp_secret,omitempty"`
-	RequestID         string      `json:"request_id,omitempty"`
+	Token               string      `json:"token"`
+	SessionID           string      `json:"-"`
+	SessionExpires      time.Time   `json:"session_expires_at"`
+	CSRFToken           string      `json:"csrf_token,omitempty"`
+	User                UserSummary `json:"user"`
+	RuntimeCredential   string      `json:"runtime_credential,omitempty"`
+	FRPUsername         string      `json:"frp_username,omitempty"`
+	FRPSecret           string      `json:"frp_secret,omitempty"`
+	FRPSTransportSecret string      `json:"frps_transport_secret,omitempty"`
+	RequestID           string      `json:"request_id,omitempty"`
 }
 
 type Mapping struct {
@@ -126,6 +131,8 @@ type Domain struct {
 	DNSContent    string `json:"dns_content"`
 	DNSTTL        int    `json:"dns_ttl"`
 	DNSProxied    bool   `json:"dns_proxied"`
+	DNSManaged    bool   `json:"dns_managed_by_panel"`
+	DNSAdopted    bool   `json:"dns_adopted"`
 	Status        string `json:"status"`
 	Revision      int64  `json:"revision"`
 	CreatedAt     string `json:"created_at"`
@@ -154,15 +161,23 @@ type ApplyResultRequest struct {
 }
 
 type Dashboard struct {
-	User                 UserSummary `json:"user"`
-	DesiredConfigVersion int64       `json:"desired_config_version"`
-	AppliedConfigVersion int64       `json:"applied_config_version"`
-	ObservedClientStatus string      `json:"observed_client_status"`
-	LastHeartbeatAt      *string     `json:"last_heartbeat_at,omitempty"`
-	LastErrorCode        string      `json:"last_error_code,omitempty"`
-	LastErrorMessage     string      `json:"last_error_message,omitempty"`
-	Mappings             []Mapping   `json:"mappings"`
-	Counts               Counts      `json:"counts"`
+	User                 UserSummary         `json:"user"`
+	DesiredConfigVersion int64               `json:"desired_config_version"`
+	AppliedConfigVersion int64               `json:"applied_config_version"`
+	ObservedClientStatus string              `json:"observed_client_status"`
+	FRPCredential        FRPCredentialStatus `json:"frp_credential"`
+	LastHeartbeatAt      *string             `json:"last_heartbeat_at,omitempty"`
+	LastErrorCode        string              `json:"last_error_code,omitempty"`
+	LastErrorMessage     string              `json:"last_error_message,omitempty"`
+	Mappings             []Mapping           `json:"mappings"`
+	Counts               Counts              `json:"counts"`
+}
+
+type FRPCredentialStatus struct {
+	Present       bool   `json:"present"`
+	SecretVersion int64  `json:"secret_version"`
+	RotatedAt     string `json:"rotated_at,omitempty"`
+	Status        string `json:"status"`
 }
 
 type Counts struct {
@@ -188,10 +203,11 @@ type ConfigSnapshot struct {
 
 type UserRecord struct {
 	UserSummary
-	CreatedAt        string `json:"created_at"`
-	DesiredConfig    int64  `json:"desired_config_version"`
-	AppliedConfig    int64  `json:"applied_config_version"`
-	ActiveSessionGen int64  `json:"active_session_generation"`
+	CreatedAt        string              `json:"created_at"`
+	DesiredConfig    int64               `json:"desired_config_version"`
+	AppliedConfig    int64               `json:"applied_config_version"`
+	ActiveSessionGen int64               `json:"active_session_generation"`
+	FRPCredential    FRPCredentialStatus `json:"frp_credential"`
 }
 
 func New(dbConn *db.DB, cfg config.Config, secrets *crypto.Manager) *App {
@@ -293,11 +309,18 @@ func (a *App) Login(ctx context.Context, username, password, channel, sourceIP, 
 		return LoginResult{}, err
 	}
 	sessionID := uuid.NewString()
-	var runtimeCredential, frpUsername, frpSecret string
+	var runtimeCredential, frpUsername, frpSecret, frpsTransportSecret, csrfToken, csrfTokenHash string
+	if channel == "admin_panel" {
+		csrfToken, err = randomToken()
+		if err != nil {
+			return LoginResult{}, err
+		}
+		csrfTokenHash = sha256Hex(csrfToken)
+	}
 	now := time.Now().UTC()
 	expires := now.Add(time.Duration(a.Config.SessionTTLHours) * time.Hour)
 	idle := now.Add(30 * time.Minute)
-	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(id,user_id,session_hash,login_channel,session_generation,source_ip,user_agent,expires_at,idle_expires_at,last_seen_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, sessionID, user.ID, sha256Hex(token), channel, generation, sourceIP, userAgent, expires.Format(time.RFC3339Nano), idle.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(id,user_id,session_hash,login_channel,session_generation,source_ip,user_agent,expires_at,idle_expires_at,last_seen_at,csrf_token_hash,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, sessionID, user.ID, sha256Hex(token), channel, generation, sourceIP, userAgent, expires.Format(time.RFC3339Nano), idle.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), csrfTokenHash, now.Format(time.RFC3339Nano)); err != nil {
 		return LoginResult{}, err
 	}
 	if channel == "client_panel" {
@@ -315,17 +338,18 @@ func (a *App) Login(ctx context.Context, username, password, channel, sourceIP, 
 			return LoginResult{}, err
 		}
 		frpSecret = string(secret)
+		frpsTransportSecret = a.Config.FRPSTransportSecret
 		if _, err := tx.ExecContext(ctx, `INSERT INTO frp_runtime_credentials(id,user_id,server_session_id,session_generation,token_hash,expires_at,created_at) VALUES(?,?,?,?,?,?,?)`, uuid.NewString(), user.ID, sessionID, generation, sha256Hex(runtimeToken), expires.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)); err != nil {
 			return LoginResult{}, err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO user_runtime_state(user_id,active_server_session_id,observed_client_status,updated_at) VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET active_server_session_id=excluded.active_server_session_id, observed_client_status='online', updated_at=excluded.updated_at`, user.ID, sessionID, "online", now.Format(time.RFC3339Nano)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO user_runtime_state(user_id,active_server_session_id,observed_client_status,updated_at) VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET active_server_session_id=excluded.active_server_session_id, observed_client_status='offline', updated_at=excluded.updated_at`, user.ID, sessionID, "offline", now.Format(time.RFC3339Nano)); err != nil {
 		return LoginResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return LoginResult{}, err
 	}
-	return LoginResult{Token: token, SessionID: sessionID, SessionExpires: expires, User: user, RuntimeCredential: runtimeCredential, FRPUsername: frpUsername, FRPSecret: frpSecret}, nil
+	return LoginResult{Token: token, SessionID: sessionID, SessionExpires: expires, CSRFToken: csrfToken, User: user, RuntimeCredential: runtimeCredential, FRPUsername: frpUsername, FRPSecret: frpSecret, FRPSTransportSecret: frpsTransportSecret}, nil
 }
 
 func (a *App) Authenticate(ctx context.Context, bearer string) (AuthContext, error) {
@@ -336,7 +360,7 @@ func (a *App) Authenticate(ctx context.Context, bearer string) (AuthContext, err
 	var ac AuthContext
 	var mustChange int
 	var expires, idle, revokedAt string
-	if err := a.DB.QueryRowContext(ctx, `SELECT s.id,s.user_id,u.username,u.role,u.status,u.must_change_password,s.session_generation,s.login_channel,s.expires_at,s.idle_expires_at,COALESCE(s.revoked_at,'') FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.session_hash=?`, sha256Hex(bearer)).Scan(&ac.SessionID, &ac.UserID, &ac.Username, &ac.Role, &ac.Status, &mustChange, &ac.Generation, &ac.Channel, &expires, &idle, &revokedAt); err != nil {
+	if err := a.DB.QueryRowContext(ctx, `SELECT s.id,s.user_id,u.username,u.role,u.status,u.must_change_password,s.session_generation,s.login_channel,s.expires_at,s.idle_expires_at,COALESCE(s.revoked_at,''),COALESCE(s.csrf_token_hash,'') FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.session_hash=?`, sha256Hex(bearer)).Scan(&ac.SessionID, &ac.UserID, &ac.Username, &ac.Role, &ac.Status, &mustChange, &ac.Generation, &ac.Channel, &expires, &idle, &revokedAt, &ac.CSRFTokenHash); err != nil {
 		return AuthContext{}, ErrSessionInvalid
 	}
 	if revokedAt != "" {
@@ -355,6 +379,16 @@ func (a *App) Authenticate(ctx context.Context, bearer string) (AuthContext, err
 	}
 	_, _ = a.DB.ExecContext(ctx, `UPDATE sessions SET last_seen_at=?, idle_expires_at=? WHERE id=? AND revoked_at IS NULL`, now.Format(time.RFC3339Nano), now.Add(30*time.Minute).Format(time.RFC3339Nano), ac.SessionID)
 	return ac, nil
+}
+
+// ValidateCSRF binds a browser-supplied token to the authenticated Server
+// session. Bearer-only Client Panel calls do not use this check; browser
+// cookies must present the token issued for the same session.
+func ValidateCSRF(ac AuthContext, token string) bool {
+	if ac.CSRFTokenHash == "" || strings.TrimSpace(token) == "" {
+		return false
+	}
+	return hmac.Equal([]byte(ac.CSRFTokenHash), []byte(sha256Hex(token)))
 }
 
 func (a *App) Logout(ctx context.Context, ac AuthContext, reason string) error {
@@ -386,13 +420,84 @@ func (a *App) ChangePassword(ctx context.Context, ac AuthContext, currentPasswor
 	return err
 }
 
+// IssueReauthTicket turns a password check into a short-lived, session-bound
+// proof for sensitive writes. The ticket is stored only as a hash and is
+// intentionally reusable until expiry so an idempotent network retry cannot
+// fail solely because the first response was lost.
+func (a *App) IssueReauthTicket(ctx context.Context, ac AuthContext, currentPassword string) (string, time.Time, error) {
+	if strings.TrimSpace(currentPassword) == "" {
+		return "", time.Time{}, ErrInvalidCredentials
+	}
+	var passwordHash string
+	if err := a.DB.QueryRowContext(ctx, `SELECT password_hash FROM users WHERE id=? AND status='active'`, ac.UserID).Scan(&passwordHash); err != nil || !auth.VerifyPassword(passwordHash, currentPassword) {
+		return "", time.Time{}, ErrInvalidCredentials
+	}
+	ticket, err := randomToken()
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	expires := time.Now().UTC().Add(5 * time.Minute)
+	if _, err := a.DB.ExecContext(ctx, `DELETE FROM reauth_tickets WHERE expires_at <= ?`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		return "", time.Time{}, err
+	}
+	if _, err := a.DB.ExecContext(ctx, `INSERT INTO reauth_tickets(id,user_id,session_generation,token_hash,expires_at,created_at) VALUES(?,?,?,?,?,?)`, uuid.NewString(), ac.UserID, ac.Generation, sha256Hex(ticket), expires.Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		return "", time.Time{}, err
+	}
+	return ticket, expires, nil
+}
+
+func (a *App) requireReauth(ctx context.Context, ac AuthContext, proof string) error {
+	proof = strings.TrimSpace(proof)
+	if proof == "" {
+		return ErrReauthRequired
+	}
+	if err := a.RequireReauthTicket(ctx, ac, proof); err == nil {
+		return nil
+	}
+	// Keep direct service callers source-compatible during migration. HTTP
+	// handlers use the named reauth_ticket field; a direct password remains an
+	// explicit password re-authentication rather than a bypass.
+	var passwordHash string
+	if err := a.DB.QueryRowContext(ctx, `SELECT password_hash FROM users WHERE id=? AND status='active'`, ac.UserID).Scan(&passwordHash); err == nil && auth.VerifyPassword(passwordHash, proof) {
+		return nil
+	}
+	return ErrInvalidCredentials
+}
+
+// RequireReauthTicket is the strict HTTP boundary for sensitive writes. It
+// accepts only an opaque ticket issued for this user and current session
+// generation; direct service callers may still use requireReauth's explicit
+// password compatibility path during the migration window.
+func (a *App) RequireReauthTicket(ctx context.Context, ac AuthContext, ticket string) error {
+	ticket = strings.TrimSpace(ticket)
+	if ticket == "" {
+		return ErrReauthRequired
+	}
+	var valid int
+	if err := a.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM reauth_tickets WHERE user_id=? AND session_generation=? AND token_hash=? AND expires_at>?`, ac.UserID, ac.Generation, sha256Hex(ticket), time.Now().UTC().Format(time.RFC3339Nano)).Scan(&valid); err != nil {
+		return err
+	}
+	if valid != 1 {
+		return ErrReauthRequired
+	}
+	return nil
+}
+
 func (a *App) Dashboard(ctx context.Context, ac AuthContext) (Dashboard, error) {
 	var out Dashboard
-	var mustChange int
+	var mustChange, secretVersion int
+	var rotatedAt string
 	if err := a.DB.QueryRowContext(ctx, `SELECT id,username,role,status,must_change_password,desired_config_version,applied_config_version FROM users WHERE id=?`, ac.UserID).Scan(&out.User.ID, &out.User.Username, &out.User.Role, &out.User.Status, &mustChange, &out.DesiredConfigVersion, &out.AppliedConfigVersion); err != nil {
 		return out, err
 	}
 	out.User.MustChangePassword = mustChange == 1
+	if err := a.DB.QueryRowContext(ctx, `SELECT secret_version,COALESCE(rotated_at,'') FROM frp_credentials WHERE user_id=?`, ac.UserID).Scan(&secretVersion, &rotatedAt); err == nil {
+		out.FRPCredential = FRPCredentialStatus{Present: true, SecretVersion: int64(secretVersion), RotatedAt: rotatedAt, Status: "active"}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return out, err
+	} else {
+		out.FRPCredential = FRPCredentialStatus{Status: "missing"}
+	}
 	var lastHeartbeat, lastErrorCode, lastErrorMessage string
 	_ = a.DB.QueryRowContext(ctx, `SELECT observed_client_status,COALESCE(last_heartbeat_at,''),COALESCE(last_error_code,''),COALESCE(last_error_message,'') FROM user_runtime_state WHERE user_id=?`, ac.UserID).Scan(&out.ObservedClientStatus, &lastHeartbeat, &lastErrorCode, &lastErrorMessage)
 	if lastHeartbeat != "" {
@@ -801,7 +906,7 @@ func (a *App) ToggleMapping(ctx context.Context, ac AuthContext, mappingID strin
 }
 
 func (a *App) ListDomains(ctx context.Context, userID string) ([]Domain, error) {
-	rows, err := a.DB.QueryContext(ctx, `SELECT b.id,b.mapping_id,b.hostname,b.normalized_domain,b.https_mode,b.http_redirect,b.status,b.revision,b.created_at,b.updated_at,COALESCE((SELECT type FROM dns_records WHERE domain_binding_id=b.id ORDER BY last_synced_at DESC LIMIT 1),'CNAME'),COALESCE((SELECT content FROM dns_records WHERE domain_binding_id=b.id ORDER BY last_synced_at DESC LIMIT 1),''),COALESCE((SELECT ttl FROM dns_records WHERE domain_binding_id=b.id ORDER BY last_synced_at DESC LIMIT 1),300),COALESCE((SELECT proxied FROM dns_records WHERE domain_binding_id=b.id ORDER BY last_synced_at DESC LIMIT 1),0) FROM domain_bindings b WHERE b.user_id=? AND b.status <> 'deleted' ORDER BY b.created_at DESC`, userID)
+	rows, err := a.DB.QueryContext(ctx, `SELECT b.id,b.mapping_id,b.hostname,b.normalized_domain,b.https_mode,b.http_redirect,b.status,b.revision,b.created_at,b.updated_at,COALESCE((SELECT type FROM dns_records WHERE domain_binding_id=b.id ORDER BY last_synced_at DESC LIMIT 1),'CNAME'),COALESCE((SELECT content FROM dns_records WHERE domain_binding_id=b.id ORDER BY last_synced_at DESC LIMIT 1),''),COALESCE((SELECT ttl FROM dns_records WHERE domain_binding_id=b.id ORDER BY last_synced_at DESC LIMIT 1),300),COALESCE((SELECT proxied FROM dns_records WHERE domain_binding_id=b.id ORDER BY last_synced_at DESC LIMIT 1),0),COALESCE((SELECT managed_by_panel FROM dns_records WHERE domain_binding_id=b.id ORDER BY last_synced_at DESC LIMIT 1),0),COALESCE((SELECT adopted FROM dns_records WHERE domain_binding_id=b.id ORDER BY last_synced_at DESC LIMIT 1),0) FROM domain_bindings b WHERE b.user_id=? AND b.status <> 'deleted' ORDER BY b.created_at DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -809,12 +914,14 @@ func (a *App) ListDomains(ctx context.Context, userID string) ([]Domain, error) 
 	items := make([]Domain, 0)
 	for rows.Next() {
 		var item Domain
-		var redirect, proxied int
-		if err := rows.Scan(&item.ID, &item.MappingID, &item.Hostname, &item.Normalized, &item.HTTPSMode, &redirect, &item.Status, &item.Revision, &item.CreatedAt, &item.UpdatedAt, &item.DNSRecordType, &item.DNSContent, &item.DNSTTL, &proxied); err != nil {
+		var redirect, proxied, managed, adopted int
+		if err := rows.Scan(&item.ID, &item.MappingID, &item.Hostname, &item.Normalized, &item.HTTPSMode, &redirect, &item.Status, &item.Revision, &item.CreatedAt, &item.UpdatedAt, &item.DNSRecordType, &item.DNSContent, &item.DNSTTL, &proxied, &managed, &adopted); err != nil {
 			return nil, err
 		}
 		item.HTTPRedirect = redirect == 1
 		item.DNSProxied = proxied == 1
+		item.DNSManaged = managed == 1
+		item.DNSAdopted = adopted == 1
 		items = append(items, item)
 	}
 	return items, rows.Err()
@@ -924,7 +1031,7 @@ func (a *App) CreateDomain(ctx context.Context, ac AuthContext, req DomainReques
 }
 
 func (a *App) ResolveDomainDNS(ctx context.Context, ac AuthContext, domainID, action string, idempotencyKeys ...string) error {
-	if action != "adopt" && action != "overwrite" && action != "cancel" {
+	if action != "adopt" && action != "overwrite" && action != "cancel" && action != "sync" {
 		return fmt.Errorf("unsupported DNS conflict action")
 	}
 	if a.Jobs == nil {
@@ -964,6 +1071,34 @@ func (a *App) ResolveDomainDNS(ctx context.Context, ac AuthContext, domainID, ac
 		return ErrNotFound
 	}
 	now := nowString()
+	if action == "sync" {
+		var managed int
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(managed_by_panel,0) FROM dns_records WHERE domain_binding_id=? ORDER BY last_synced_at DESC LIMIT 1`, domainID).Scan(&managed); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("DNS record is not managed by panel")
+			}
+			return err
+		}
+		if managed != 1 {
+			return fmt.Errorf("DNS record is not managed by panel")
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE domain_bindings SET status='pending_dns',updated_at=? WHERE id=?`, now, domainID); err != nil {
+			return err
+		}
+		opID := uuid.NewString()
+		if _, err := tx.ExecContext(ctx, `INSERT INTO operations(id,user_id,resource_type,resource_id,operation_type,status,phase,step,idempotency_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, opID, owner, "domain", domainID, "dns_sync", "pending", "dns", "awaiting_provider", idempotencyKey, now, now); err != nil {
+			return err
+		}
+		responseBody, _ := json.Marshal(map[string]string{"operation_id": opID, "status": "pending", "action": action})
+		if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,operation_id,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), ac.UserID, ac.Generation, "POST", normalizedPath, idempotencyKey, bodyHash, 202, string(responseBody), opID, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		_, err = a.Jobs.Enqueue(ctx, "domain_dns_sync", "domain", domainID, "domain:"+domainID+":dns", map[string]interface{}{"user_id": owner, "domain_id": domainID, "action": action}, nil)
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE domain_bindings SET status='pending_dns',updated_at=? WHERE id=?`, now, domainID); err != nil {
 		return err
 	}
@@ -1077,6 +1212,13 @@ func (a *App) ApplyResult(ctx context.Context, ac AuthContext, req ApplyResultRe
 	if req.Status != "succeeded" && req.Status != "failed" {
 		return fmt.Errorf("invalid apply status")
 	}
+	var desiredVersion int64
+	if err := a.DB.QueryRowContext(ctx, `SELECT desired_config_version FROM users WHERE id=? AND status='active'`, ac.UserID).Scan(&desiredVersion); err != nil {
+		return err
+	}
+	if req.ConfigVersion != desiredVersion {
+		return ErrConfigConflict
+	}
 	now := nowString()
 	if req.Status == "succeeded" {
 		tx, err := a.DB.BeginTx(ctx, nil)
@@ -1177,7 +1319,7 @@ func (a *App) TouchSession(ctx context.Context, ac AuthContext) error {
 }
 
 func (a *App) AdminUsers(ctx context.Context) ([]UserRecord, error) {
-	rows, err := a.DB.QueryContext(ctx, `SELECT id,username,role,status,must_change_password,created_at,desired_config_version,applied_config_version,active_session_generation FROM users WHERE status <> 'deleted' ORDER BY created_at DESC`)
+	rows, err := a.DB.QueryContext(ctx, `SELECT u.id,u.username,u.role,u.status,u.must_change_password,u.created_at,u.desired_config_version,u.applied_config_version,u.active_session_generation,COALESCE(fc.secret_version,0),COALESCE(fc.rotated_at,'') FROM users u LEFT JOIN frp_credentials fc ON fc.user_id=u.id WHERE u.status <> 'deleted' ORDER BY u.created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -1186,10 +1328,16 @@ func (a *App) AdminUsers(ctx context.Context) ([]UserRecord, error) {
 	for rows.Next() {
 		var item UserRecord
 		var must int
-		if err := rows.Scan(&item.ID, &item.Username, &item.Role, &item.Status, &must, &item.CreatedAt, &item.DesiredConfig, &item.AppliedConfig, &item.ActiveSessionGen); err != nil {
+		var secretVersion int
+		var rotatedAt string
+		if err := rows.Scan(&item.ID, &item.Username, &item.Role, &item.Status, &must, &item.CreatedAt, &item.DesiredConfig, &item.AppliedConfig, &item.ActiveSessionGen, &secretVersion, &rotatedAt); err != nil {
 			return nil, err
 		}
 		item.MustChangePassword = must == 1
+		item.FRPCredential = FRPCredentialStatus{Present: secretVersion > 0, SecretVersion: int64(secretVersion), RotatedAt: rotatedAt, Status: "active"}
+		if item.Status != "active" {
+			item.FRPCredential.Status = item.Status
+		}
 		result = append(result, item)
 	}
 	return result, rows.Err()
@@ -1245,6 +1393,7 @@ func (a *App) SetUserStatus(ctx context.Context, ac AuthContext, userID, status 
 		_, _ = a.DB.ExecContext(ctx, `UPDATE sessions SET revoked_at=?,revoke_reason='USER_DISABLED' WHERE user_id=? AND revoked_at IS NULL`, nowString(), userID)
 		_, _ = a.DB.ExecContext(ctx, `UPDATE frp_runtime_credentials SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL`, nowString(), userID)
 	}
+	_, _ = a.DB.ExecContext(ctx, `UPDATE user_runtime_state SET active_server_session_id=NULL,observed_client_status='offline',updated_at=? WHERE user_id=?`, nowString(), userID)
 	return a.Audit(ctx, ac, "user_status_changed", "user", userID, "success", map[string]interface{}{"status": status}, "")
 }
 
@@ -1266,8 +1415,117 @@ func (a *App) ResetUserPassword(ctx context.Context, ac AuthContext, userID stri
 	}
 	_, _ = a.DB.ExecContext(ctx, `UPDATE sessions SET revoked_at=?,revoke_reason='PASSWORD_RESET' WHERE user_id=? AND revoked_at IS NULL`, nowString(), userID)
 	_, _ = a.DB.ExecContext(ctx, `UPDATE frp_runtime_credentials SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL`, nowString(), userID)
+	_, _ = a.DB.ExecContext(ctx, `UPDATE user_runtime_state SET active_server_session_id=NULL,observed_client_status='offline',updated_at=? WHERE user_id=?`, nowString(), userID)
 	_ = a.Audit(ctx, ac, "user_password_reset", "user", userID, "success", nil, "")
 	return password, nil
+}
+
+type FRPSecretResetResult struct {
+	Status            string `json:"status"`
+	SecretVersion     int64  `json:"secret_version"`
+	SessionGeneration int64  `json:"session_generation"`
+}
+
+// ResetFRPCredential rotates the per-user FRP secret without ever returning
+// the new secret. The next Client login receives it in memory, while every
+// current session and runtime credential is revoked in the same short DB
+// transaction. The idempotency record makes an admin retry observationally
+// safe even after the target session has been revoked.
+func (a *App) ResetFRPCredential(ctx context.Context, ac AuthContext, targetUserID, currentPassword, idempotencyKey string) (FRPSecretResetResult, error) {
+	targetUserID = strings.TrimSpace(targetUserID)
+	normalizedPath := "/api/v1/auth/reset-frp-credential"
+	if ac.Role == "user" {
+		if targetUserID == "" {
+			targetUserID = ac.UserID
+		}
+		if targetUserID != ac.UserID {
+			return FRPSecretResetResult{}, ErrForbidden
+		}
+	} else if ac.Role == "admin" {
+		if targetUserID == "" || targetUserID == ac.UserID {
+			return FRPSecretResetResult{}, ErrForbidden
+		}
+		normalizedPath = "/api/v1/admin/users/" + targetUserID + "/reset-frp-credential"
+	} else {
+		return FRPSecretResetResult{}, ErrForbidden
+	}
+	if strings.TrimSpace(currentPassword) == "" {
+		return FRPSecretResetResult{}, ErrInvalidCredentials
+	}
+	if err := a.requireReauth(ctx, ac, currentPassword); err != nil {
+		return FRPSecretResetResult{}, err
+	}
+
+	if strings.TrimSpace(idempotencyKey) == "" {
+		idempotencyKey = uuid.NewString()
+	}
+	bodyHash := requestHash(map[string]string{"target_user_id": targetUserID, "current_password": currentPassword})
+	tx, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return FRPSecretResetResult{}, err
+	}
+	defer tx.Rollback()
+	var existingHash, existingBody string
+	if err := tx.QueryRowContext(ctx, `SELECT request_body_hash,response_body_json FROM idempotency_records WHERE user_id=? AND session_generation=? AND http_method='POST' AND normalized_path=? AND idempotency_key=?`, ac.UserID, ac.Generation, normalizedPath, idempotencyKey).Scan(&existingHash, &existingBody); err == nil {
+		if existingHash != bodyHash {
+			return FRPSecretResetResult{}, ErrIdempotencyReuse
+		}
+		var result FRPSecretResetResult
+		if err := json.Unmarshal([]byte(existingBody), &result); err != nil {
+			return FRPSecretResetResult{}, err
+		}
+		return result, nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return FRPSecretResetResult{}, err
+	}
+
+	var targetRole, targetStatus string
+	var currentSecretVersion int64
+	if err := tx.QueryRowContext(ctx, `SELECT u.role,u.status,fc.secret_version FROM users u JOIN frp_credentials fc ON fc.user_id=u.id WHERE u.id=?`, targetUserID).Scan(&targetRole, &targetStatus, &currentSecretVersion); err != nil {
+		return FRPSecretResetResult{}, ErrNotFound
+	}
+	if targetRole != "user" || targetStatus == "deleted" {
+		return FRPSecretResetResult{}, ErrForbidden
+	}
+	secret, err := randomSecret()
+	if err != nil {
+		return FRPSecretResetResult{}, err
+	}
+	ciphertext, nonce, err := a.Crypto.Encrypt([]byte(secret), "user:"+targetUserID+":frp_secret:v1")
+	if err != nil {
+		return FRPSecretResetResult{}, err
+	}
+	nextSecretVersion := currentSecretVersion + 1
+	now := nowString()
+	if _, err := tx.ExecContext(ctx, `UPDATE frp_credentials SET secret_hash=?,secret_ciphertext=?,secret_nonce=?,secret_version=?,rotated_at=? WHERE user_id=?`, sha256Hex(secret), ciphertext, nonce, nextSecretVersion, now, targetUserID); err != nil {
+		return FRPSecretResetResult{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET active_session_generation=active_session_generation+1,desired_config_version=desired_config_version+1,updated_at=? WHERE id=?`, now, targetUserID); err != nil {
+		return FRPSecretResetResult{}, err
+	}
+	var nextGeneration int64
+	if err := tx.QueryRowContext(ctx, `SELECT active_session_generation FROM users WHERE id=?`, targetUserID).Scan(&nextGeneration); err != nil {
+		return FRPSecretResetResult{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET revoked_at=?,revoke_reason='FRP_SECRET_RESET' WHERE user_id=? AND revoked_at IS NULL`, now, targetUserID); err != nil {
+		return FRPSecretResetResult{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE frp_runtime_credentials SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL`, now, targetUserID); err != nil {
+		return FRPSecretResetResult{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE user_runtime_state SET active_server_session_id=NULL,observed_client_status='offline',updated_at=? WHERE user_id=?`, now, targetUserID); err != nil {
+		return FRPSecretResetResult{}, err
+	}
+	result := FRPSecretResetResult{Status: "rotated", SecretVersion: nextSecretVersion, SessionGeneration: nextGeneration}
+	encoded, _ := json.Marshal(result)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), ac.UserID, ac.Generation, "POST", normalizedPath, idempotencyKey, bodyHash, 200, string(encoded), time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
+		return FRPSecretResetResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return FRPSecretResetResult{}, err
+	}
+	_ = a.Audit(ctx, ac, "frp_secret_reset", "user", targetUserID, "success", map[string]interface{}{"secret_version": nextSecretVersion, "session_generation": nextGeneration}, "")
+	return result, nil
 }
 
 // DeleteUser starts the compensating user-removal workflow. Local resources
@@ -1388,6 +1646,9 @@ func (a *App) DeleteUser(ctx context.Context, ac AuthContext, userID string, for
 	if _, err := tx.ExecContext(ctx, `UPDATE frp_runtime_credentials SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL`, now, userID); err != nil {
 		return "", err
 	}
+	if _, err := tx.ExecContext(ctx, `UPDATE user_runtime_state SET active_server_session_id=NULL,observed_client_status='offline',updated_at=? WHERE user_id=?`, now, userID); err != nil {
+		return "", err
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE domain_bindings SET status='deleting',updated_at=? WHERE user_id=? AND status <> 'deleted'`, now, userID); err != nil {
 		return "", err
 	}
@@ -1464,7 +1725,14 @@ func (a *App) CloudflareStatus(ctx context.Context, userID string) (map[string]i
 	return map[string]interface{}{"configured": true, "status": status, "token_version": version, "verified_at": verified, "capabilities": capabilities}, nil
 }
 
-func (a *App) SaveCloudflareToken(ctx context.Context, ac AuthContext, token string) error {
+func (a *App) SaveCloudflareToken(ctx context.Context, ac AuthContext, token string, reauthProof ...string) error {
+	proof := ""
+	if len(reauthProof) > 0 {
+		proof = reauthProof[0]
+	}
+	if err := a.requireReauth(ctx, ac, proof); err != nil {
+		return err
+	}
 	if len(strings.TrimSpace(token)) < 20 {
 		return fmt.Errorf("cloudflare token is too short")
 	}
@@ -1489,7 +1757,10 @@ func (a *App) SaveCloudflareToken(ctx context.Context, ac AuthContext, token str
 	return err
 }
 
-func (a *App) ClearCloudflareToken(ctx context.Context, ac AuthContext) error {
+func (a *App) ClearCloudflareToken(ctx context.Context, ac AuthContext, currentPassword string) error {
+	if err := a.requireReauth(ctx, ac, currentPassword); err != nil {
+		return err
+	}
 	_, err := a.DB.ExecContext(ctx, `UPDATE cloudflare_credentials SET status='retired',retired_at=? WHERE user_id=? AND status <> 'retired'`, nowString(), ac.UserID)
 	if err == nil {
 		_ = a.Audit(ctx, ac, "cloudflare_token_cleared", "cloudflare_token", ac.UserID, "success", nil, "")
@@ -1501,11 +1772,32 @@ func (a *App) ClearCloudflareToken(ctx context.Context, ac AuthContext) error {
 // checks the session generation and mapping revision on every operation, so a transport
 // secret alone can never create a user proxy.
 func (a *App) AuthorizeFRP(ctx context.Context, operation, frpUsername, runtimeCredential string, generation int64, mappingID string, mappingRevision int64, remotePort int, hostname string) (bool, string, string) {
-	var userID, status string
+	return a.authorizeFRP(ctx, operation, frpUsername, runtimeCredential, "", generation, mappingID, mappingRevision, remotePort, hostname, "")
+}
+
+// AuthorizeFRPWithProxyType adds the proxy type carried by the real FRP
+// NewProxy request. The compatibility wrapper above remains for older
+// internal callers that only provide the original authorization fields.
+func (a *App) AuthorizeFRPWithProxyType(ctx context.Context, operation, frpUsername, runtimeCredential string, generation int64, mappingID string, mappingRevision int64, remotePort int, hostname, requestedProxyType string) (bool, string, string) {
+	return a.authorizeFRP(ctx, operation, frpUsername, runtimeCredential, "", generation, mappingID, mappingRevision, remotePort, hostname, requestedProxyType)
+}
+
+// AuthorizeFRPWithCredentials is the full FRPS plugin boundary. The native
+// FRPS transport token is checked by frps; this second user secret check binds
+// the plugin request to the platform-managed per-user FRP credential too.
+func (a *App) AuthorizeFRPWithCredentials(ctx context.Context, operation, frpUsername, runtimeCredential, userFRPSecret string, generation int64, mappingID string, mappingRevision int64, remotePort int, hostname, requestedProxyType string) (bool, string, string) {
+	return a.authorizeFRP(ctx, operation, frpUsername, runtimeCredential, userFRPSecret, generation, mappingID, mappingRevision, remotePort, hostname, requestedProxyType)
+}
+
+func (a *App) authorizeFRP(ctx context.Context, operation, frpUsername, runtimeCredential, userFRPSecret string, generation int64, mappingID string, mappingRevision int64, remotePort int, hostname, requestedProxyType string) (bool, string, string) {
+	var userID, status, userFRPSecretHash string
 	var currentGeneration, sessionGeneration int64
 	var expires string
-	if err := a.DB.QueryRowContext(ctx, `SELECT u.id,u.status,u.active_session_generation,s.session_generation,rc.expires_at FROM frp_credentials fc JOIN users u ON u.id=fc.user_id JOIN frp_runtime_credentials rc ON rc.user_id=u.id JOIN sessions s ON s.id=rc.server_session_id WHERE fc.frp_username=? AND rc.token_hash=? AND rc.revoked_at IS NULL AND s.revoked_at IS NULL`, frpUsername, sha256Hex(runtimeCredential)).Scan(&userID, &status, &currentGeneration, &sessionGeneration, &expires); err != nil {
+	if err := a.DB.QueryRowContext(ctx, `SELECT u.id,u.status,u.active_session_generation,s.session_generation,fc.secret_hash,rc.expires_at FROM frp_credentials fc JOIN users u ON u.id=fc.user_id JOIN frp_runtime_credentials rc ON rc.user_id=u.id JOIN sessions s ON s.id=rc.server_session_id WHERE fc.frp_username=? AND rc.token_hash=? AND rc.revoked_at IS NULL AND s.revoked_at IS NULL`, frpUsername, sha256Hex(runtimeCredential)).Scan(&userID, &status, &currentGeneration, &sessionGeneration, &userFRPSecretHash, &expires); err != nil {
 		return false, "FRP_RUNTIME_CREDENTIAL_INVALID", "FRP runtime credential is invalid."
+	}
+	if userFRPSecret != "" && !hmac.Equal([]byte(userFRPSecretHash), []byte(sha256Hex(userFRPSecret))) {
+		return false, "FRP_USER_CREDENTIAL_INVALID", "User FRP credential is invalid."
 	}
 	if status != "active" {
 		return false, "AUTH_USER_DISABLED", "User is not active."
@@ -1517,7 +1809,7 @@ func (a *App) AuthorizeFRP(ctx context.Context, operation, frpUsername, runtimeC
 	if time.Now().UTC().After(expiresAt) {
 		return false, "SESSION_EXPIRED", "Runtime credential has expired."
 	}
-	if operation == "Login" || operation == "Ping" || operation == "NewWorkConn" || operation == "NewUserConn" {
+	if operation == "Login" || operation == "Ping" || operation == "NewWorkConn" || operation == "NewUserConn" || operation == "CloseProxy" {
 		return true, "", ""
 	}
 	if operation != "NewProxy" {
@@ -1532,6 +1824,9 @@ func (a *App) AuthorizeFRP(ctx context.Context, operation, frpUsername, runtimeC
 	if owner != userID || desired == "disabled" || lifecycle == "disabled" || lifecycle == "deleting" || lifecycle == "deleted" {
 		return false, "MAPPING_NOT_AUTHORIZED", "Mapping is not authorized."
 	}
+	if requestedProxyType != "" && !strings.EqualFold(requestedProxyType, proxyType) {
+		return false, "PROXY_TYPE_NOT_ALLOWED", "Proxy type is not authorized."
+	}
 	if revision != mappingRevision {
 		return false, "RESOURCE_REVISION_CONFLICT", "Mapping revision is stale."
 	}
@@ -1543,8 +1838,8 @@ func (a *App) AuthorizeFRP(ctx context.Context, operation, frpUsername, runtimeC
 		if normalizeErr != nil {
 			return false, "DOMAIN_NOT_AUTHORIZED", "Hostname is not authorized."
 		}
-		var domainOwner, domainStatus string
-		if err := a.DB.QueryRowContext(ctx, `SELECT user_id,status FROM domain_bindings WHERE normalized_domain=?`, normalizedHostname).Scan(&domainOwner, &domainStatus); err != nil || domainOwner != userID || domainStatus == "deleted" {
+		var domainOwner, domainMappingID, domainStatus string
+		if err := a.DB.QueryRowContext(ctx, `SELECT user_id,mapping_id,status FROM domain_bindings WHERE normalized_domain=?`, normalizedHostname).Scan(&domainOwner, &domainMappingID, &domainStatus); err != nil || domainOwner != userID || domainMappingID != mappingID || domainStatus == "deleted" {
 			return false, "DOMAIN_NOT_AUTHORIZED", "Hostname is not authorized."
 		}
 	}
@@ -1631,7 +1926,8 @@ func (a *App) RetryOperation(ctx context.Context, ac AuthContext, operationID st
 	if a.Jobs == nil {
 		return errors.New("job worker is unavailable")
 	}
-	jobType, payload, dedup := "", map[string]interface{}{}, ""
+	jobType, dedup := "", ""
+	var payload map[string]interface{}
 	switch resourceType {
 	case "user":
 		if ac.Role != "admin" {

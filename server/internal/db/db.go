@@ -15,6 +15,14 @@ var migrationFS embed.FS
 
 type DB struct{ *sql.DB }
 
+// Checkpoint performs an operator-controlled WAL checkpoint. It is kept out
+// of request handlers so a busy production database is never truncated as a
+// side effect of ordinary API traffic.
+func (d *DB) Checkpoint(ctx context.Context) error {
+	var busy, frames, checkpointed int
+	return d.QueryRowContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`).Scan(&busy, &frames, &checkpointed)
+}
+
 func Open(path string) (*DB, error) {
 	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=busy_timeout(5000)&_pragma=synchronous(FULL)", path)
 	conn, err := sql.Open("sqlite", dsn)

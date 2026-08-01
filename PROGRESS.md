@@ -1,6 +1,6 @@
 # FRP Cloudflare Platform v3 进度跟踪
 
-> 最后更新：2026-08-01
+> 最后更新：2026-08-02
 >
 > 本文是实现进度的单一记录入口。每次完成一个可验证的垂直切片，更新状态、证据和未决项；未通过验收的能力不得标记为完成。
 
@@ -10,13 +10,13 @@
 
 | 阶段 | 状态 | 证据 |
 |---|---|---|
-| 阶段 0：技术验证 | 进行中 | Server/Client Supervisor 与 Router/Provider 接口已建立；Provider 无监听单测通过，真实 FRPS/Cloudflare/ACME E2E 待外部环境 |
-| 阶段 1：身份与基础安全 | 进行中 | Argon2id、单活动 Client Session、审计、地址规范化 API 已实现，待自动化验收 |
-| 阶段 2：Client/FRPC 闭环 | 进行中 | Supervisor 串行队列、verify/原子写入/last-good 回滚、Server/Client WebSocket 心跳/退避/全量恢复已实现，真实 frpc 二进制兼容测试待补 |
-| 阶段 3：TCP/UDP Mapping | 进行中 | Mapping/Revision/Port Lease/幂等 API 已实现，待 FRPS Plugin E2E |
-| 阶段 4：域名和 Cloudflare | 进行中 | Domain/DNS/Token 加密模型与 Operation API 已实现，Provider 实际调用待配置 Token |
-| 阶段 5：Router 和证书 | 进行中 | Router Snapshot control/business 分离、HMAC/last-good、DB-free Host runtime 与 ACME DNS-01 Provider 已实现；真实 TLS 监听/热切换仍需外部部署验收 |
-| 阶段 6：任务、删除、备份和发布 | 进行中 | Job/Audit、pending 配额、删除补偿、全数据加密备份 Decode/Restore、OpenAPI 校验、本地 SBOM 与校验和目标已建立；正式签名和第三方扫描待完成 |
+| 阶段 0：技术验证 | 本地实现完成，外部验证待执行 | Server/Client Supervisor、Router/Provider、固定 FRP v0.68.0 配置验证和真实 FRPS/FRPC + Server Plugin TCP 网络 E2E 已通过；Cloudflare/ACME 仍需隔离环境 |
+| 阶段 1：身份与基础安全 | 本地实现完成 | Argon2id、单活动 Client Session、审计、地址规范化、Server Cookie CSRF、敏感写入再认证、登录/API 限速和 LAN 安全边界已通过 race/vet/staticcheck 测试 |
+| 阶段 2：Client/FRPC 闭环 | 本地实现完成，外部矩阵待执行 | Supervisor 串行队列、verify/原子写入/last-good 回滚、Server/Client WebSocket 心跳/退避/全量恢复、固定 FRPC v0.68.0 兼容性和真实 Plugin 网络链路已验证 |
+| 阶段 3：TCP/UDP Mapping | 本地实现完成，平台矩阵待执行 | Mapping/Revision/Port Lease/幂等 API、真实 FRP Plugin envelope 与固定 v0.68.0 FRPS/FRPC + loopback Plugin metadata 网络 E2E 已通过 |
+| 阶段 4：域名和 Cloudflare | 本地实现完成，外部 Sandbox 待执行 | Domain/DNS/Token 加密模型、权限分流、冲突语义、补偿 Job 和重定向隔离已实现；真实测试 Zone/Token 尚未配置 |
+| 阶段 5：Router 和证书 | 本地实现完成，ACME/TLS 待执行 | Router Snapshot control/business 分离、HMAC/last-good、DB-free Host runtime 与 ACME DNS-01 Provider 已实现；真实 ACME Staging、TLS/SNI 热切换仍需外部部署验收 |
+| 阶段 6：任务、删除、备份和发布 | 本地门禁完成，发布签署待执行 | Job/Audit、pending 配额、删除补偿、全数据加密备份 Decode/Restore、OpenAPI 34/39 路由校验、SPDX SBOM、SHA-256 清单已通过；正式签名和第三方扫描待完成 |
 
 ## 已实现
 
@@ -42,13 +42,15 @@
 - [x] FRPS 可选固定二进制托管，启动前验证配置中声明的 SHA-256；Plugin 保持 loopback-only 与 fail-closed。
 - [x] FPPB1 加密备份使用随机 per-package salt；提供解密、SQLite integrity check 和带 `.before-restore-*` 保留副本的原子恢复函数。
 - [x] `/internal/frp/plugin` 增加 loopback-only 网络边界；Cloudflare Token 替换保留旧版本直到新版本完成 pending 验证。
+- [x] Server 管理员 Cookie Session 使用会话绑定的 CSRF hash；Cloudflare、用户生命周期、Router rebuild、加密备份和 FRP 凭证重置等敏感操作要求短期 `reauth_ticket`，只存 hash，不记录明文。
+- [x] Client 非 loopback 监听必须显式开启 LAN、配置 CIDR/Host allowlist 和 TLS 证书；Server/Client 登录/API 具备有界限速、并发上限和服务间 HTTP 重定向隔离。
 - [x] Server/Client WebSocket 使用固定 v1 envelope；Client 心跳续租、指数退避抖动重连、Session 替换/停用安全停机和配置事件全量同步已实现。
 - [x] Pending 配额检查覆盖 Mapping、端口租约、Domain Operation 和证书任务；指标端点增加 Port Lease、Job、Certificate、Router lag 与 SQLite WAL gauges。
 - [x] Mapping 删除保留 Domain Binding 直到 managed DNS 清理完成；Domain 删除失败可重试，Mapping 删除操作在补偿完成后才成功；端口更新成功后释放旧租约。
 - [x] 管理员用户删除进入 `deleting` 状态并立即撤销 Session/运行时凭据；Domain、Mapping 按依赖顺序进入持久化补偿队列，强制删除会记录 `external_residues`，本地用户删除后保留用户级 Operation 证据。
 - [x] Client 固定 FRPC 进程写入受保护 PID 标记；启动时只回收命令行匹配固定二进制的孤儿进程，PID 复用时拒绝终止并清除运行时秘密。
 - [x] 正式 FPPB1 包包含数据库、受保护数据目录密钥/证书/ACME 文件，逐文件校验并安全恢复；Server 启动会重新排队 Router 快照。
-- [x] OpenAPI 3.1 路径/operationId/WebSocket 元数据校验脚本、双模块 CI contract job、`make sbom` 与 `make checksums` 已加入；正式发布仍需签名和第三方扫描。
+- [x] OpenAPI 3.1 路径/operationId/WebSocket 元数据校验脚本、双模块 CI contract job、`make sbom`、`make checksums`、固定 FRP 版本下载归档校验和发布清单已加入；正式发布仍需签名和第三方扫描。
 
 ## 验证记录
 
@@ -68,17 +70,19 @@
 | 2026-08-01 | WebSocket/backup/quota/compensation hardening | 通过；Client WebSocket 集成测试、Server 全量 Go 测试、备份逐文件校验/恢复、DNS 删除补偿和端口租约轮换测试通过；真实外部依赖仍未签收 |
 | 2026-08-01 | Contract and release helpers | 通过；Ruby OpenAPI 结构校验与 `make checksums` 目标已加入，CI 仍需在 GitHub Actions 实际运行并补齐外部扫描工具 |
 | 2026-08-01 | Final hardening regression | 通过；Server/Client `go test -race ./...`、用户删除补偿与孤儿 FRPC 回收测试、`make test lint build contract sbom checksums`、`git diff --check` 和敏感凭据模式扫描均通过；发行构建为 Server/Client 两个产物，前端仅保留 Vite 大 chunk 警告 |
+| 2026-08-02 | Security and release gates | 通过；OpenAPI 34 paths/39 operations、Server/Client 全量 race、go vet/staticcheck、Vue typecheck/build、secret scan、3 个 2 秒 fuzz、PERF-001/002、官方 FRPC/FRPS v0.68.0 verify、带归档 SHA-256 的原生 transport E2E、真实 FRPS/FRPC + loopback Plugin metadata E2E、SPDX SBOM、产物校验和与 release manifest 均通过 |
 
 ## 未决与发布阻断项
 
 以下不是“已实现”的替代品，必须在发布前完成：
 
-1. 真实固定版本 FRPS/FRPC 二进制的 Login/NewProxy/Ping/WorkConn Plugin E2E。
-2. Cloudflare Sandbox Token 权限、DNS 三种冲突语义和超时补偿。
+1. 在 Linux release matrix/目标部署环境重复真实固定版本 FRPS/FRPC + loopback Plugin metadata E2E，并验证正式 FRPS 配置和权限边界。
+2. Cloudflare Sandbox Token 权限、DNS 三种冲突语义、超时补偿和真实外部残留验证。
 3. 使用真实 Cloudflare Sandbox + ACME Staging 完成 DNS-01 传播、TXT 清理、证书原子替换与 Router TLS SNI/Host 热切换；本地 Provider 已实现但未伪造外部成功。
-4. 加密归档备份恢复的 clean-host 灾备演练、WAL checkpoint 受控执行和磁盘满故障注入。
-5. OpenAPI 与实现的自动 Contract test、SAST/SCA/secret scan、真实性能基线、SBOM/签名；本地已加入结构校验与 fuzz seed，但尚未替代正式工具链。
-6. 完成 P0/P1 全量验收前，仓库只能作为开发预览，不得声明生产就绪。
+4. 加密归档备份恢复的 clean-host 灾备演练、WAL checkpoint 受控执行和磁盘满/时钟偏差故障注入。
+5. 1000 Mapping/2000 Domain、200 Mapping、配置同步和会话替换等 PERF-003~007 的目标环境基线；当前 PERF-001/002 已通过。
+6. GitHub Actions 实际运行、正式 SAST/SCA/依赖扫描、cosign 签名及发布负责人/安全负责人/测试负责人签字。
+7. 完成上述 P0/P1 外部验收前，仓库只能作为开发预览，不得声明生产就绪。
 
 ## 更新规则
 

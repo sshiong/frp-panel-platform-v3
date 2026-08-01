@@ -103,6 +103,55 @@ func TestRealBinaryVerifyRestartAndStop(t *testing.T) {
 	}
 }
 
+func TestRenderTOMLIsAcceptedByFixedFRPCWhenConfigured(t *testing.T) {
+	binary := os.Getenv("FRPC_VERIFY_BINARY")
+	if binary == "" {
+		t.Skip("set FRPC_VERIFY_BINARY to run fixed FRPC config compatibility verification")
+	}
+	version := os.Getenv("FRPC_VERIFY_VERSION")
+	if version == "" {
+		version = "0.68.0"
+	}
+	root := t.TempDir()
+	remotePort := 6000
+	snapshot := Snapshot{ConfigVersion: 7, SessionGeneration: 3, Payload: map[string]interface{}{
+		"server_addr":        "panel.example.com",
+		"frps_public_host":   "frp.example.com",
+		"frps_public_port":   7000,
+		"frp_username":       "user-alice",
+		"frp_secret":         "frp-secret",
+		"runtime_credential": "runtime-credential",
+		"mappings": []interface{}{map[string]interface{}{
+			"mapping_id":     "mapping-1",
+			"proxy_type":     "tcp",
+			"local_ip":       "127.0.0.1",
+			"local_port":     8080,
+			"remote_port":    remotePort,
+			"revision":       2,
+			"custom_domains": []interface{}{},
+		}},
+	}}
+	configPath := filepath.Join(root, "frpc.toml")
+	supervisor := NewWithBinaryHashAndVersion(root, binary, "", version)
+	if err := supervisor.writeRuntimeSecrets(snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte(renderTOMLForVersion(snapshot, root, version)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), `serverAddr = "panel.example.com"`) || !strings.Contains(string(encoded), `serverAddr = "frp.example.com"`) {
+		t.Fatalf("generated FRPC config used the Server Panel address instead of FRPS public host:\n%s", encoded)
+	}
+	output, err := exec.Command(binary, "verify", "-c", configPath).CombinedOutput()
+	if err != nil {
+		t.Fatalf("fixed FRPC rejected generated TOML: %v\n%s", err, output)
+	}
+}
+
 func TestReloadFailureRestoresAndRestartsLastGood(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "config"), 0o700); err != nil {

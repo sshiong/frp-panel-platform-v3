@@ -24,7 +24,9 @@ make dev-client
 - Server Panel API/UI：`http://127.0.0.1:7400`
 - Client Panel API/UI：`http://127.0.0.1:7410`
 
-首次启动的管理员初始凭据写入 `server/data/initial-admin.txt`（权限 0600）。正式部署时必须配置 HTTPS、密钥文件、FRPS 公网地址和外部 Provider。
+首次启动的管理员初始凭据写入 `server/data/initial-admin.txt`（权限 0600）。正式部署时必须配置 HTTPS、密钥文件、FRPS 公网地址、固定版本二进制、`FRPS_TRANSPORT_SECRET_FILE` 和外部 Provider；Router 可用 `FRP_ROUTER_TLS_ENABLED=true` 启用进程内 SNI TLS 热加载。FRPS Plugin/固定 FRPC 的配置和验证见 [docs/frp-plugin-e2e.md](docs/frp-plugin-e2e.md)。
+
+Client 默认只监听回环地址。局域网部署必须显式设置 `CLIENT_ALLOW_LAN=true`，绑定具体 LAN IP，配置 `CLIENT_ALLOWED_CIDRS`/`CLIENT_ALLOWED_HOST`，并提供 `CLIENT_TLS_CERT_FILE` 与 `CLIENT_TLS_KEY_FILE`；不完整的非回环配置会被 Client 拒绝启动。
 
 ## 合规边界
 

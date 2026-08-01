@@ -25,24 +25,25 @@ import (
 )
 
 type App struct {
-	Config            config.Config
-	Supervisor        *supervisor.Supervisor
-	mu                sync.RWMutex
-	serverURL         string
-	serverToken       string
-	runtimeCredential string
-	frpUsername       string
-	frpSecret         string
-	localSession      string
-	csrfToken         string
-	user              map[string]interface{}
-	expiresAt         time.Time
-	lastDashboard     json.RawMessage
-	lastConfig        supervisor.Snapshot
-	wsMu              sync.Mutex
-	wsConn            *websocket.Conn
-	wsCancel          context.CancelFunc
-	wsGeneration      uint64
+	Config              config.Config
+	Supervisor          *supervisor.Supervisor
+	mu                  sync.RWMutex
+	serverURL           string
+	serverToken         string
+	runtimeCredential   string
+	frpUsername         string
+	frpSecret           string
+	frpsTransportSecret string
+	localSession        string
+	csrfToken           string
+	user                map[string]interface{}
+	expiresAt           time.Time
+	lastDashboard       json.RawMessage
+	lastConfig          supervisor.Snapshot
+	wsMu                sync.Mutex
+	wsConn              *websocket.Conn
+	wsCancel            context.CancelFunc
+	wsGeneration        uint64
 }
 
 type ClientSession struct {
@@ -66,6 +67,16 @@ type wsEnvelope struct {
 	Payload         interface{} `json:"payload,omitempty"`
 }
 
+// serverHTTPClient deliberately does not follow redirects. The Server URL is
+// configured by the user and requests may carry the opaque session token; a
+// redirect should be surfaced as an error response rather than becoming a
+// second request to an unexpected endpoint.
+var serverHTTPClient = &http.Client{
+	CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
+
 func (e RemoteError) Error() string {
 	if e.Detail != "" {
 		return e.Detail
@@ -74,7 +85,7 @@ func (e RemoteError) Error() string {
 }
 
 func New(cfg config.Config) *App {
-	return &App{Config: cfg, Supervisor: supervisor.NewWithBinaryHash(cfg.DataDir, cfg.FRPCBinary, cfg.FRPCBinarySHA256)}
+	return &App{Config: cfg, Supervisor: supervisor.NewWithBinaryHashAndVersion(cfg.DataDir, cfg.FRPCBinary, cfg.FRPCBinarySHA256, cfg.FRPCVersion)}
 }
 
 func (a *App) Login(ctx context.Context, serverURL, username, password string) (ClientSession, error) {
@@ -83,12 +94,13 @@ func (a *App) Login(ctx context.Context, serverURL, username, password string) (
 		return ClientSession{}, err
 	}
 	var response struct {
-		Token             string                 `json:"token"`
-		User              map[string]interface{} `json:"user"`
-		SessionExpiresAt  time.Time              `json:"session_expires_at"`
-		RuntimeCredential string                 `json:"runtime_credential"`
-		FRPUsername       string                 `json:"frp_username"`
-		FRPSecret         string                 `json:"frp_secret"`
+		Token               string                 `json:"token"`
+		User                map[string]interface{} `json:"user"`
+		SessionExpiresAt    time.Time              `json:"session_expires_at"`
+		RuntimeCredential   string                 `json:"runtime_credential"`
+		FRPUsername         string                 `json:"frp_username"`
+		FRPSecret           string                 `json:"frp_secret"`
+		FRPSTransportSecret string                 `json:"frps_transport_secret"`
 	}
 	if err := a.serverRequest(ctx, normalized, "POST", "/api/v1/auth/client-login", map[string]string{"username": username, "password": password}, "", &response); err != nil {
 		return ClientSession{}, err
@@ -112,6 +124,7 @@ func (a *App) Login(ctx context.Context, serverURL, username, password string) (
 	a.runtimeCredential = response.RuntimeCredential
 	a.frpUsername = response.FRPUsername
 	a.frpSecret = response.FRPSecret
+	a.frpsTransportSecret = response.FRPSTransportSecret
 	a.localSession = local
 	a.csrfToken = csrf
 	a.user = response.User
@@ -144,6 +157,7 @@ func (a *App) Logout(ctx context.Context) error {
 	a.runtimeCredential = ""
 	a.frpUsername = ""
 	a.frpSecret = ""
+	a.frpsTransportSecret = ""
 	a.localSession = ""
 	a.csrfToken = ""
 	a.user = nil
@@ -233,9 +247,10 @@ func (a *App) applySnapshot(ctx context.Context, snapshot supervisor.Snapshot) e
 	for key, value := range snapshot.Payload {
 		payload[key] = value
 	}
-	payload["server_addr"] = a.serverURL
 	payload["frp_username"] = a.frpUsername
 	payload["frp_secret"] = a.frpSecret
+	payload["frp_user_secret"] = a.frpSecret
+	payload["frps_transport_secret"] = a.frpsTransportSecret
 	payload["runtime_credential"] = a.runtimeCredential
 	a.mu.RUnlock()
 	snapshot.Payload = payload
@@ -243,7 +258,7 @@ func (a *App) applySnapshot(ctx context.Context, snapshot supervisor.Snapshot) e
 	a.lastConfig = snapshot
 	a.mu.Unlock()
 	err := a.Supervisor.Apply(ctx, snapshot)
-	input := map[string]interface{}{"status": "succeeded", "config_version": snapshot.ConfigVersion, "applied_config_hash": snapshot.ConfigHash, "client_panel_version": "0.1.0", "frpc_version": "0.52.3"}
+	input := map[string]interface{}{"status": "succeeded", "config_version": snapshot.ConfigVersion, "applied_config_hash": snapshot.ConfigHash, "client_panel_version": "0.1.0", "frpc_version": a.Config.FRPCVersion}
 	if err != nil {
 		input["status"] = "failed"
 		input["error_code"] = "FRPC_VERIFY_FAILED"
@@ -295,7 +310,7 @@ func (a *App) serverRequest(ctx context.Context, baseURL, method, path string, p
 		}
 		req.Header.Set("Idempotency-Key", idempotencyKey)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := serverHTTPClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -475,7 +490,7 @@ func (a *App) runWebSocketConnection(ctx context.Context, conn *websocket.Conn, 
 			return true
 		}
 		switch message.Type {
-		case "session_replaced", "session_expired", "user_disabled":
+		case "session_replaced", "session_expired", "user_disabled", "frp_secret_rotated":
 			a.invalidateRemoteSession(context.Background())
 			return true
 		case "shutdown_frpc":
@@ -523,6 +538,7 @@ func dialServerWebSocket(ctx context.Context, baseURL, token, origin string) (*w
 	}
 	headers := http.Header{}
 	headers.Set("Authorization", "Bearer "+token)
+	headers.Set("X-FRP-Protocol-Version", "v1")
 	if origin != "" {
 		headers.Set("Origin", origin)
 	}

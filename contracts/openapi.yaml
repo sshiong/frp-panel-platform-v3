@@ -8,6 +8,7 @@ servers:
 x-websocket:
   - path: /api/v1/ws
     protocol_version: v1
+    upgrade_status: 426
     authentication: bearerAuth
     message_types:
       server_to_client: [session_replaced, user_disabled, config_version_changed, force_full_sync, frp_secret_rotated, mapping_deleted, shutdown_frpc]
@@ -15,6 +16,20 @@ x-websocket:
     envelope_required: [message_id, protocol_version, timestamp, type, payload]
     semantics: notifications_only_full_sync_is_authoritative
 paths:
+  /api/v1/ws:
+    get:
+      operationId: websocket
+      summary: Authenticated Server-to-Client notification WebSocket
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: X-FRP-Protocol-Version
+          in: header
+          required: false
+          schema: { type: string, default: v1 }
+      responses:
+        '101': { description: WebSocket connection established }
+        '401': { $ref: '#/components/responses/Problem' }
+        '426': { $ref: '#/components/responses/Problem' }
   /api/v1/compatibility:
     get:
       operationId: compatibility
@@ -80,6 +95,44 @@ paths:
                 new_password: { type: string, format: password, minLength: 12 }
       responses:
         '200': { description: Password changed }
+  /api/v1/auth/reauth:
+    post:
+      operationId: issueReauthTicket
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReauthRequest' }
+      responses:
+        '200':
+          description: Short-lived session-bound reauthentication ticket
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReauthResponse' }
+        '401': { $ref: '#/components/responses/Problem' }
+  /api/v1/auth/reset-frp-credential:
+    post:
+      operationId: resetOwnFRPCredential
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reauth_ticket]
+              properties:
+                reauth_ticket: { type: string, minLength: 32 }
+      responses:
+        '200':
+          description: FRP credential rotated; secret is not returned
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FRPSecretResetResult' }
+        '401': { $ref: '#/components/responses/Problem' }
   /api/v1/me:
     get:
       operationId: me
@@ -91,7 +144,11 @@ paths:
       operationId: dashboard
       security: [{ bearerAuth: [] }]
       responses:
-        '200': { description: Dashboard summary, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        '200':
+          description: Dashboard summary
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Dashboard' }
   /api/v1/mappings:
     get:
       operationId: listMappings
@@ -152,6 +209,7 @@ paths:
         - { $ref: '#/components/parameters/IdempotencyKey' }
       responses:
         '202': { description: Mapping deletion queued }
+  /api/v1/mappings/{id}/toggle:
     post:
       operationId: toggleMapping
       summary: Toggle mapping desired state
@@ -230,7 +288,7 @@ paths:
               type: object
               required: [action]
               properties:
-                action: { type: string, enum: [adopt, overwrite, cancel] }
+                action: { type: string, enum: [adopt, overwrite, cancel, sync] }
       responses:
         '202': { description: DNS conflict resolution queued }
         '404': { $ref: '#/components/responses/Problem' }
@@ -323,12 +381,26 @@ paths:
         required: true
         content:
           application/json:
-            schema: { type: object, required: [token], properties: { token: { type: string, minLength: 20 } } }
+            schema:
+              type: object
+              required: [token, reauth_ticket]
+              properties:
+                token: { type: string, minLength: 20 }
+                reauth_ticket: { type: string, minLength: 32 }
       responses:
         '202': { description: Token verification queued }
     delete:
       operationId: clearCloudflareToken
       security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reauth_ticket]
+              properties:
+                reauth_ticket: { type: string, minLength: 32 }
       responses:
         '200': { description: Cloudflare credentials retired }
   /api/v1/admin/router/status:
@@ -345,6 +417,11 @@ paths:
     post:
       operationId: rebuildRouter
       security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [reauth_ticket], properties: { reauth_ticket: { type: string, minLength: 32 } } }
       responses:
         '202': { description: Router snapshot rebuild queued }
   /api/v1/admin/users:
@@ -352,7 +429,15 @@ paths:
       operationId: adminListUsers
       security: [{ bearerAuth: [] }]
       responses:
-        '200': { description: User list, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        '200':
+          description: User list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/UserRecord' } }
     post:
       operationId: adminCreateUser
       security: [{ bearerAuth: [] }]
@@ -360,7 +445,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: { type: object, required: [username], properties: { username: { type: string }, password: { type: string, format: password } } }
+            schema: { type: object, required: [username, reauth_ticket], properties: { username: { type: string }, reauth_ticket: { type: string, minLength: 32 } } }
       responses:
         '201': { description: User created }
   /api/v1/admin/users/{id}:
@@ -376,6 +461,11 @@ paths:
           in: query
           schema: { type: boolean, default: false }
         - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [reauth_ticket], properties: { reauth_ticket: { type: string, minLength: 32 } } }
       responses:
         '202': { description: User deletion compensation operation queued }
         '409': { $ref: '#/components/responses/Problem' }
@@ -392,7 +482,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: { type: object, required: [status], properties: { status: { type: string, enum: [active, disabled] } } }
+            schema: { type: object, required: [status, reauth_ticket], properties: { status: { type: string, enum: [active, disabled] }, reauth_ticket: { type: string, minLength: 32 } } }
       responses:
         '200': { description: User status updated }
   /api/v1/admin/users/{id}/reset-password:
@@ -404,8 +494,34 @@ paths:
           in: path
           required: true
           schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [reauth_ticket], properties: { reauth_ticket: { type: string, minLength: 32 } } }
       responses:
         '200': { description: Temporary password generated }
+  /api/v1/admin/users/{id}/reset-frp-credential:
+    post:
+      operationId: adminResetFRPCredential
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reauth_ticket]
+              properties:
+                reauth_ticket: { type: string, minLength: 32 }
+      responses:
+        '200': { description: Target user FRP credential rotated; secret is not returned }
   /api/v1/admin/operations:
     get:
       operationId: adminOperations
@@ -428,9 +544,10 @@ paths:
           application/json:
             schema:
               type: object
-              required: [password]
+              required: [password, reauth_ticket]
               properties:
                 password: { type: string, format: password, minLength: 12 }
+                reauth_ticket: { type: string, minLength: 32 }
       responses:
         '201': { description: Encrypted backup created }
 components:
@@ -469,6 +586,9 @@ components:
       properties:
         request_id: { type: string }
         session_expires_at: { type: string, format: date-time }
+        csrf_token:
+          type: string
+          description: Only returned to the Server Panel browser and stored in the CSRF cookie.
         user: { $ref: '#/components/schemas/UserSummary' }
         token:
           type: string
@@ -479,7 +599,28 @@ components:
         frp_username: { type: string }
         frp_secret:
           type: string
-          description: Only returned to the Client Panel backend; never persisted by the Client Panel.
+          description: Per-user FRP plugin credential; only returned to the Client Panel backend and held in memory.
+        frps_transport_secret:
+          type: string
+          description: Deployment-scoped FRPS native token; only returned to the Client Panel backend and written to its 0600 runtime secret file.
+    ReauthRequest:
+      type: object
+      required: [current_password]
+      properties:
+        current_password: { type: string, format: password }
+    ReauthResponse:
+      type: object
+      required: [reauth_ticket, expires_at]
+      properties:
+        reauth_ticket: { type: string, minLength: 32 }
+        expires_at: { type: string, format: date-time }
+    FRPSecretResetResult:
+      type: object
+      required: [status, secret_version, session_generation]
+      properties:
+        status: { type: string, enum: [rotated] }
+        secret_version: { type: integer, format: int64 }
+        session_generation: { type: integer, format: int64 }
     UserSummary:
       type: object
       required: [id, username, role, status, must_change_password]
@@ -489,6 +630,36 @@ components:
         role: { type: string, enum: [admin, user] }
         status: { type: string, enum: [active, disabled, deleting, deleted] }
         must_change_password: { type: boolean }
+    FRPCredentialStatus:
+      type: object
+      required: [present, secret_version, status]
+      properties:
+        present: { type: boolean }
+        secret_version: { type: integer, format: int64 }
+        rotated_at: { type: string, format: date-time }
+        status: { type: string }
+    Dashboard:
+      type: object
+      required: [user, desired_config_version, applied_config_version, observed_client_status, frp_credential, mappings, counts]
+      properties:
+        user: { $ref: '#/components/schemas/UserSummary' }
+        desired_config_version: { type: integer, format: int64 }
+        applied_config_version: { type: integer, format: int64 }
+        observed_client_status: { type: string }
+        frp_credential: { $ref: '#/components/schemas/FRPCredentialStatus' }
+        mappings: { type: array, items: { $ref: '#/components/schemas/Mapping' } }
+        counts: { type: object, additionalProperties: true }
+    UserRecord:
+      allOf:
+        - $ref: '#/components/schemas/UserSummary'
+        - type: object
+          required: [created_at, desired_config_version, applied_config_version, active_session_generation, frp_credential]
+          properties:
+            created_at: { type: string, format: date-time }
+            desired_config_version: { type: integer, format: int64 }
+            applied_config_version: { type: integer, format: int64 }
+            active_session_generation: { type: integer, format: int64 }
+            frp_credential: { $ref: '#/components/schemas/FRPCredentialStatus' }
     CreateMappingRequest:
       type: object
       required: [name, proxy_type, local_ip, local_port]
@@ -528,11 +699,13 @@ components:
       allOf:
         - $ref: '#/components/schemas/CreateDomainRequest'
         - type: object
-          required: [id, normalized_domain, status, revision]
+          required: [id, normalized_domain, dns_managed_by_panel, dns_adopted, status, revision]
           properties:
             id: { type: string, format: uuid }
             normalized_domain: { type: string }
             dns_proxied: { type: boolean }
+            dns_managed_by_panel: { type: boolean }
+            dns_adopted: { type: boolean }
             status: { type: string }
             revision: { type: integer, format: int64 }
     Operation:

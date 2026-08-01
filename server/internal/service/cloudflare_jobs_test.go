@@ -81,7 +81,11 @@ func TestCloudflareTokenAndDomainJobs(t *testing.T) {
 		encoded, _ := json.Marshal(payload)
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(encoded)), Header: make(http.Header), Request: req}, nil
 	})}
-	if err := app.SaveCloudflareToken(context.Background(), userContext, "cf-token-with-enough-length"); err != nil {
+	reauthTicket, _, err := app.IssueReauthTicket(context.Background(), userContext, "Alice-Password-2026!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.SaveCloudflareToken(context.Background(), userContext, "cf-token-with-enough-length", reauthTicket); err != nil {
 		t.Fatal(err)
 	}
 	tokenJob, err := app.Jobs.Claim(context.Background())
@@ -229,5 +233,14 @@ func TestCloudflareTokenAndDomainJobs(t *testing.T) {
 	secondDelete, err := app.DeleteMapping(context.Background(), userContext, idempotentMapping.ID, false, "delete-key-123456789")
 	if err != nil || firstDelete != secondDelete {
 		t.Fatalf("delete idempotency failed: first=%q second=%q err=%v", firstDelete, secondDelete, err)
+	}
+	if err := app.ClearCloudflareToken(context.Background(), userContext, "wrong-password"); err != ErrInvalidCredentials {
+		t.Fatalf("cloudflare clear accepted an invalid re-authentication: %v", err)
+	}
+	if err := app.ClearCloudflareToken(context.Background(), userContext, "Alice-Password-2026!"); err != nil {
+		t.Fatalf("cloudflare clear with current password failed: %v", err)
+	}
+	if status, err := app.CloudflareStatus(context.Background(), user.ID); err != nil || status["configured"] != false {
+		t.Fatalf("cloudflare status remained configured after clear: %#v %v", status, err)
 	}
 }

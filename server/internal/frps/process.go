@@ -44,12 +44,31 @@ func VerifyBinary(path, expectedSHA256 string) error {
 	return nil
 }
 
+func VerifyConfig(binary, configPath string) error {
+	if strings.TrimSpace(binary) == "" || strings.TrimSpace(configPath) == "" {
+		return errors.New("FRPS binary and config path are required")
+	}
+	command := exec.Command(binary, "verify", "-c", configPath)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		message := strings.TrimSpace(string(output))
+		if len(message) > 240 {
+			message = message[:240]
+		}
+		return fmt.Errorf("FRPS config verification failed: %s", message)
+	}
+	return nil
+}
+
 func Start(config Config) (*Process, error) {
 	if err := VerifyBinary(config.Binary, config.SHA256); err != nil {
 		return nil, err
 	}
 	if config.Config == "" {
 		return nil, errors.New("FRPS config path is required")
+	}
+	if err := VerifyConfig(config.Binary, config.Config); err != nil {
+		return nil, err
 	}
 	cmd := exec.Command(config.Binary, "-c", config.Config)
 	cmd.Stdin = nil

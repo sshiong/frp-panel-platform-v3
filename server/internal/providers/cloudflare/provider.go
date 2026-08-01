@@ -64,7 +64,16 @@ type HTTPProvider struct {
 }
 
 func New(token string) *HTTPProvider {
-	return &HTTPProvider{BaseURL: "https://api.cloudflare.com/client/v4", Token: token, Client: &http.Client{Timeout: 15 * time.Second}}
+	return &HTTPProvider{
+		BaseURL: "https://api.cloudflare.com/client/v4",
+		Token:   token,
+		Client: &http.Client{
+			Timeout: 15 * time.Second,
+			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
+	}
 }
 
 func NewAt(token, baseURL string) *HTTPProvider {
