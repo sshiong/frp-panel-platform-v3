@@ -15,7 +15,6 @@ build:
 	cd web/client && npm run build
 	mkdir -p build
 	cd server && $(GO_ENV) go build -o ../build/frp-panel-server ./cmd/server
-	cd server && $(GO_ENV) go build -o ../build/frp-panel-backup-restore ./cmd/backup-restore
 	cd client && $(GO_ENV) go build -o ../build/frp-panel-client ./cmd/client
 
 test:
@@ -35,7 +34,7 @@ sbom: build
 	ruby scripts/generate-sbom.rb
 
 checksums: build
-	shasum -a 256 build/frp-panel-server build/frp-panel-client build/frp-panel-backup-restore > build/SHA256SUMS
+	shasum -a 256 build/frp-panel-server build/frp-panel-client > build/SHA256SUMS
 
 dev-server:
 	cd server && $(GO_ENV) go run ./cmd/server

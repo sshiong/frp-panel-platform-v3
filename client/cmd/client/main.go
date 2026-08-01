@@ -23,6 +23,11 @@ func main() {
 		os.Exit(1)
 	}
 	client := app.New(cfg)
+	recoveryCtx, recoveryCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := client.Supervisor.RecoverOrphan(recoveryCtx); err != nil {
+		logger.Error("frpc_orphan_recovery", "error", err)
+	}
+	recoveryCancel()
 	server := &http.Server{Addr: cfg.ListenAddr, Handler: httpapi.New(client).Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {
 		logger.Info("client_started", "addr", cfg.ListenAddr, "frpc_mode", map[bool]string{true: "fixed-binary", false: "development-simulation"}[cfg.FRPCBinary != ""])

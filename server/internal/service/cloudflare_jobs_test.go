@@ -58,6 +58,7 @@ func TestCloudflareTokenAndDomainJobs(t *testing.T) {
 	}
 
 	var createdRecord, deletedRecord bool
+	var createdPayload map[string]interface{}
 	app.CloudflareHTTPClient = &http.Client{Transport: cloudflareRoundTripper(func(req *http.Request) (*http.Response, error) {
 		var payload interface{}
 		switch {
@@ -69,7 +70,8 @@ func TestCloudflareTokenAndDomainJobs(t *testing.T) {
 			payload = map[string]interface{}{"success": true, "result": []interface{}{}}
 		case req.Method == http.MethodPost && req.URL.Path == "/client/v4/zones/zone-1/dns_records":
 			createdRecord = true
-			payload = map[string]interface{}{"success": true, "result": map[string]interface{}{"id": "record-1", "type": "CNAME", "name": "app.example.com", "content": "frp.example.com", "ttl": 300, "proxied": false}}
+			_ = json.NewDecoder(req.Body).Decode(&createdPayload)
+			payload = map[string]interface{}{"success": true, "result": map[string]interface{}{"id": "record-1", "type": "A", "name": "app.example.com", "content": "192.0.2.10", "ttl": 120, "proxied": false}}
 		case req.Method == http.MethodDelete && req.URL.Path == "/client/v4/zones/zone-1/dns_records/record-1":
 			deletedRecord = true
 			payload = map[string]interface{}{"success": true, "result": map[string]interface{}{}}
@@ -101,7 +103,7 @@ func TestCloudflareTokenAndDomainJobs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	domain, err := app.CreateDomain(context.Background(), userContext, DomainRequest{MappingID: mapping.ID, Hostname: "APP.Example.com.", HTTPSMode: "http_only"})
+	domain, err := app.CreateDomain(context.Background(), userContext, DomainRequest{MappingID: mapping.ID, Hostname: "APP.Example.com.", HTTPSMode: "http_only", DNSRecordType: "A", DNSContent: "192.0.2.10", DNSTTL: 120})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,6 +123,9 @@ func TestCloudflareTokenAndDomainJobs(t *testing.T) {
 	}
 	if !createdRecord {
 		t.Fatal("expected DNS create request")
+	}
+	if createdPayload["type"] != "A" || createdPayload["content"] != "192.0.2.10" || int(createdPayload["ttl"].(float64)) != 120 || createdPayload["proxied"] != false {
+		t.Fatalf("unexpected DNS payload: %#v", createdPayload)
 	}
 	var dnsCount int
 	if err := database.QueryRow(`SELECT COUNT(1) FROM dns_records WHERE domain_binding_id=? AND managed_by_panel=1`, domain.ID).Scan(&dnsCount); err != nil || dnsCount != 1 {

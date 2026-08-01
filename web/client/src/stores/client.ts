@@ -3,7 +3,7 @@ import { defineStore } from 'pinia'
 import { api } from '../api'
 
 export type Mapping = { id: string; name: string; proxy_type: 'tcp' | 'udp' | 'http'; lifecycle_status: string; desired_state: string; observed_state: string; revision: number; local_ip: string; local_port: number; remote_port?: number }
-export type Domain = { id: string; mapping_id: string; hostname: string; normalized_domain: string; https_mode: string; http_redirect: boolean; status: string; revision: number }
+export type Domain = { id: string; mapping_id: string; hostname: string; normalized_domain: string; https_mode: string; http_redirect: boolean; dns_type: 'A' | 'AAAA' | 'CNAME'; dns_content: string; dns_ttl: number; dns_proxied: boolean; status: string; revision: number }
 export type Dashboard = { user: { username: string; must_change_password: boolean }; desired_config_version: number; applied_config_version: number; observed_client_status: string; mappings: Mapping[]; counts: { total_mappings: number; running: number; pending: number; offline: number; errors: number } }
 
 export const useClientStore = defineStore('client', () => {

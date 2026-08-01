@@ -100,6 +100,7 @@ func (a *API) Handler() http.Handler {
 				r.Use(a.requireAdmin)
 				r.Get("/users", a.adminUsers)
 				r.Post("/users", a.createUser)
+				r.Delete("/users/{id}", a.deleteUser)
 				r.Post("/users/{id}/status", a.setUserStatus)
 				r.Post("/users/{id}/reset-password", a.resetPassword)
 				r.Get("/operations", a.adminOperations)
@@ -602,6 +603,18 @@ func (a *API) createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]interface{}{"user": user, "initial_password": password, "warning": "只展示一次，请通过受保护渠道交付。"})
+}
+
+func (a *API) deleteUser(w http.ResponseWriter, r *http.Request) {
+	force := r.URL.Query().Get("force") == "true"
+	opID, err := a.App.DeleteUser(r.Context(), authFrom(r), chi.URLParam(r, "id"), force, r.Header.Get("Idempotency-Key"))
+	if err != nil {
+		a.mappingProblem(w, r, err)
+		return
+	}
+	a.notifyUser(chi.URLParam(r, "id"), "user_disabled", map[string]interface{}{"reason": "user_delete_requested"})
+	a.notifyUser(chi.URLParam(r, "id"), "shutdown_frpc", map[string]interface{}{"reason": "user_delete_requested"})
+	writeJSON(w, http.StatusAccepted, map[string]interface{}{"operation_id": opID, "status": "pending", "force": force})
 }
 
 func (a *API) setUserStatus(w http.ResponseWriter, r *http.Request) {

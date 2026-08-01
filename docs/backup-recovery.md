@@ -24,3 +24,10 @@ export FRP_BACKUP_PASSWORD='provided-out-of-band'
   -target /var/lib/frp-panel-server/server.db \
   -data-dir /var/lib/frp-panel-server
 ```
+
+The restore helper is intentionally kept as a Server-side operational source command and is not a third release artifact. Build it from the checked-out Server module for a controlled maintenance window:
+
+```bash
+cd server
+go build -o ../build/frp-panel-backup-restore ./cmd/backup-restore
+```

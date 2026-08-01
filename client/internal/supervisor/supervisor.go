@@ -13,8 +13,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/ricardo/frp-panel-platform/client/internal/healthcheck"
@@ -71,6 +74,7 @@ type Supervisor struct {
 	status       Status
 	started      bool
 	process      *runningProcess
+	lastSnapshot *Snapshot
 }
 
 type runningProcess struct {
@@ -83,7 +87,15 @@ func New(dataDir, binary string) *Supervisor {
 }
 
 func NewWithBinaryHash(dataDir, binary, binarySHA256 string) *Supervisor {
-	s := &Supervisor{dataDir: dataDir, binary: binary, binarySHA256: strings.ToLower(strings.TrimSpace(binarySHA256)), queue: make(chan func(), 32), status: Status{State: "stopped", Mode: "simulated", UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano)}}
+	mode := "simulated"
+	if strings.TrimSpace(binary) != "" {
+		mode = "real"
+	}
+	lastGoodAvailable := false
+	if _, err := os.Stat(filepath.Join(dataDir, "state", "last-good-manifest.json")); err == nil {
+		lastGoodAvailable = true
+	}
+	s := &Supervisor{dataDir: dataDir, binary: binary, binarySHA256: strings.ToLower(strings.TrimSpace(binarySHA256)), queue: make(chan func(), 32), status: Status{State: "stopped", Mode: mode, LastGoodAvailable: lastGoodAvailable, UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano)}}
 	go func() {
 		for operation := range s.queue {
 			operation()
@@ -108,6 +120,176 @@ func (s *Supervisor) Apply(ctx context.Context, snapshot Snapshot) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// RecoverOrphan runs once during client startup. A previous client process may
+// have exited without stopping FRPC; in that case the PID marker is the only
+// safe way to identify the process that this client owns. The command line is
+// checked before any signal is sent so a reused PID is never treated as FRPC.
+func (s *Supervisor) RecoverOrphan(ctx context.Context) error {
+	result := make(chan error, 1)
+	s.Enqueue(func() { result <- s.recoverOrphan(ctx) })
+	select {
+	case err := <-result:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *Supervisor) recoverOrphan(ctx context.Context) error {
+	pidPath := s.pidPath()
+	encoded, err := os.ReadFile(pidPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// No valid Server Session exists during startup. Even without a
+			// marker, remove stale runtime files; the manifest remains as a
+			// non-secret read-only status record.
+			return s.clearRecoveredRuntime()
+		}
+		return err
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(encoded)))
+	if err != nil || pid < 1 {
+		return fmt.Errorf("invalid frpc pid marker")
+	}
+	if pid == os.Getpid() {
+		return fmt.Errorf("refusing to terminate current client process")
+	}
+
+	// Development simulation has no configured binary with which to prove
+	// ownership. Remove only the stale marker and secrets; never signal an
+	// unknown process.
+	if strings.TrimSpace(s.binary) == "" {
+		if err := s.removePIDIf(pid); err != nil {
+			return err
+		}
+		return s.clearRecoveredRuntime()
+	}
+
+	commandLine, commandErr := s.processCommandLine(ctx, pid)
+	if commandErr != nil {
+		process, findErr := os.FindProcess(pid)
+		if findErr == nil && !processAlive(process) {
+			if err := s.removePIDIf(pid); err != nil {
+				return err
+			}
+			return s.clearRecoveredRuntime()
+		}
+		return fmt.Errorf("cannot inspect orphan frpc pid %d: %w", pid, commandErr)
+	}
+	if processCommandGone(commandLine) {
+		// The process already exited. Runtime credentials are still unsafe to
+		// retain after an unclean client shutdown.
+		if err := s.removePIDIf(pid); err != nil {
+			return err
+		}
+		return s.clearRecoveredRuntime()
+	}
+	configuredBinary, err := filepath.Abs(s.binary)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(commandLine, configuredBinary) {
+		return fmt.Errorf("frpc pid %d command does not match configured binary", pid)
+	}
+
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	if err := s.terminateOrphan(ctx, process, pid); err != nil {
+		return err
+	}
+	if err := s.removePIDIf(pid); err != nil {
+		return err
+	}
+	return s.clearRecoveredRuntime()
+}
+
+func (s *Supervisor) processCommandLine(ctx context.Context, pid int) (string, error) {
+	commandCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(commandCtx, "ps", "-p", strconv.Itoa(pid), "-o", "command=").CombinedOutput()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+func (s *Supervisor) terminateOrphan(ctx context.Context, process *os.Process, pid int) error {
+	if err := process.Signal(os.Interrupt); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		if !processAlive(process) {
+			return nil
+		}
+		return err
+	}
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if !processAlive(process) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			// Re-check the process identity immediately before force-killing it;
+			// this closes the PID-reuse window as far as the platform permits.
+			commandLine, err := s.processCommandLine(ctx, pid)
+			if err != nil {
+				if !processAlive(process) {
+					return nil
+				}
+				return fmt.Errorf("cannot revalidate orphan frpc pid %d: %w", pid, err)
+			}
+			if processCommandGone(commandLine) {
+				return nil
+			}
+			configuredBinary, absErr := filepath.Abs(s.binary)
+			if absErr != nil {
+				return absErr
+			}
+			if !strings.Contains(commandLine, configuredBinary) {
+				return fmt.Errorf("frpc pid %d command changed before force kill: %q", pid, commandLine)
+			}
+			if err := process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+				return err
+			}
+			return nil
+		case <-ticker.C:
+		}
+	}
+}
+
+func processAlive(process *os.Process) bool {
+	if process == nil {
+		return false
+	}
+	err := process.Signal(syscall.Signal(0))
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
+func processCommandGone(commandLine string) bool {
+	trimmed := strings.TrimSpace(commandLine)
+	return trimmed == "" || strings.Contains(strings.ToLower(trimmed), "<defunct>")
+}
+
+func (s *Supervisor) clearRecoveredRuntime() error {
+	if err := s.ClearRuntimeSecrets(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.status.State = "stopped"
+	s.status.Mode = map[bool]string{true: "real", false: "simulated"}[s.binary != ""]
+	s.status.PID = 0
+	_, manifestErr := os.Stat(filepath.Join(s.dataDir, "state", "last-good-manifest.json"))
+	s.status.LastGoodAvailable = manifestErr == nil
+	s.status.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	s.mu.Unlock()
+	return nil
 }
 
 func (s *Supervisor) apply(ctx context.Context, snapshot Snapshot) error {
@@ -140,22 +322,41 @@ func (s *Supervisor) apply(ctx context.Context, snapshot Snapshot) error {
 	if err := s.verify(ctx, tmpPath); err != nil {
 		return s.fail("FRPC_VERIFY_FAILED: " + err.Error())
 	}
-	if old, err := os.ReadFile(activePath); err == nil {
-		_ = os.WriteFile(lastGoodPath, old, 0o600)
+	oldConfig, oldConfigErr := os.ReadFile(activePath)
+	if oldConfigErr == nil {
+		_ = os.WriteFile(lastGoodPath, oldConfig, 0o600)
 	}
 	if err := os.Rename(tmpPath, activePath); err != nil {
 		return s.fail("FRPC_VERIFY_FAILED: atomic replace")
 	}
+	useReload := s.reloadEligible(snapshot)
+	runErr := error(nil)
+	if useReload {
+		runErr = s.reload(ctx)
+	} else {
+		runErr = s.restart(ctx)
+	}
+	if runErr != nil {
+		if oldConfigErr == nil {
+			_ = os.WriteFile(activePath, oldConfig, 0o600)
+			if s.binary != "" {
+				// A failed reload may have partially applied the new file; a
+				// failed restart may have stopped the old process. Restarting
+				// from the restored file makes the last-good guarantee explicit.
+				if rollbackErr := s.restart(ctx); rollbackErr != nil {
+					return s.fail("FRPC_RESTART_FAILED: " + runErr.Error() + "; rollback failed: " + rollbackErr.Error())
+				}
+			}
+		}
+		return s.fail("FRPC_RESTART_FAILED: " + runErr.Error())
+	}
 	manifest := map[string]interface{}{"config_version": snapshot.ConfigVersion, "config_hash": snapshot.ConfigHash, "applied_at": time.Now().UTC().Format(time.RFC3339Nano)}
 	encoded, _ := json.MarshalIndent(manifest, "", "  ")
+	_ = os.MkdirAll(filepath.Join(s.dataDir, "state"), 0o700)
 	_ = os.WriteFile(filepath.Join(s.dataDir, "state", "last-good-manifest.json"), encoded, 0o600)
-	if err := s.restart(ctx); err != nil {
-		if old, readErr := os.ReadFile(lastGoodPath); readErr == nil {
-			_ = os.WriteFile(activePath, old, 0o600)
-		}
-		return s.fail("FRPC_RESTART_FAILED: " + err.Error())
-	}
 	s.mu.Lock()
+	snapshotCopy := snapshot
+	s.lastSnapshot = &snapshotCopy
 	s.status.State = "running"
 	s.status.AppliedVersion = snapshot.ConfigVersion
 	s.status.ConfigHash = snapshot.ConfigHash
@@ -163,6 +364,46 @@ func (s *Supervisor) apply(ctx context.Context, snapshot Snapshot) error {
 	s.status.LastError = ""
 	s.status.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	s.mu.Unlock()
+	return nil
+}
+
+func (s *Supervisor) reloadEligible(snapshot Snapshot) bool {
+	if s.binary == "" {
+		return false
+	}
+	s.mu.RLock()
+	previous := s.lastSnapshot
+	active := s.process != nil
+	s.mu.RUnlock()
+	if previous == nil || !active || previous.UserID != snapshot.UserID || previous.SessionGeneration != snapshot.SessionGeneration {
+		return false
+	}
+	for key, value := range previous.Payload {
+		if key != "mappings" && !reflect.DeepEqual(value, snapshot.Payload[key]) {
+			return false
+		}
+	}
+	for key, value := range snapshot.Payload {
+		if key != "mappings" && !reflect.DeepEqual(value, previous.Payload[key]) {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Supervisor) reload(ctx context.Context) error {
+	if err := s.verifyBinary(); err != nil {
+		return err
+	}
+	commandCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(commandCtx, s.binary, "reload", "-c", filepath.Join(s.dataDir, "config", "frpc.toml"))
+	cmd.Stdin = nil
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("frpc reload failed: %w", err)
+	}
 	return nil
 }
 
@@ -227,6 +468,11 @@ func (s *Supervisor) restart(ctx context.Context) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
+	if err := s.writePID(cmd.Process.Pid); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return fmt.Errorf("write frpc pid: %w", err)
+	}
 	running := &runningProcess{cmd: cmd, done: make(chan error, 1)}
 	s.mu.Lock()
 	s.process = running
@@ -237,9 +483,11 @@ func (s *Supervisor) restart(ctx context.Context) error {
 	go func() {
 		err := cmd.Wait()
 		running.done <- err
+		_ = s.removePIDIf(cmd.Process.Pid)
 		s.mu.Lock()
 		if s.process == running {
 			s.process = nil
+			s.status.PID = 0
 			if s.status.State == "running" {
 				s.status.State = "offline"
 				s.status.LastError = sanitize("FRPC exited")
@@ -299,16 +547,52 @@ func (s *Supervisor) stopProcess(ctx context.Context) error {
 	_ = process.cmd.Process.Signal(os.Interrupt)
 	select {
 	case <-process.done:
+		_ = s.removePIDIf(process.cmd.Process.Pid)
 		return nil
 	case <-time.After(2 * time.Second):
 		_ = process.cmd.Process.Kill()
 		select {
 		case <-process.done:
+			_ = s.removePIDIf(process.cmd.Process.Pid)
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
+}
+
+func (s *Supervisor) pidPath() string {
+	return filepath.Join(s.dataDir, "state", "frpc.pid")
+}
+
+func (s *Supervisor) writePID(pid int) error {
+	stateDir := filepath.Dir(s.pidPath())
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		return err
+	}
+	tmpPath := fmt.Sprintf("%s.tmp.%d", s.pidPath(), time.Now().UnixNano())
+	if err := os.WriteFile(tmpPath, []byte(strconv.Itoa(pid)+"\n"), 0o600); err != nil {
+		return err
+	}
+	defer os.Remove(tmpPath)
+	return os.Rename(tmpPath, s.pidPath())
+}
+
+func (s *Supervisor) removePIDIf(pid int) error {
+	encoded, err := os.ReadFile(s.pidPath())
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if strings.TrimSpace(string(encoded)) != strconv.Itoa(pid) {
+		return nil
+	}
+	if err := os.Remove(s.pidPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 func (s *Supervisor) verifyBinary() error {

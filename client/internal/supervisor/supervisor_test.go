@@ -9,7 +9,10 @@ import (
 	"encoding/json"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -31,13 +34,27 @@ func TestVerifySnapshot(t *testing.T) {
 	}
 }
 
+func TestStartupLoadsLastGoodAvailability(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "state"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "state", "last-good-manifest.json"), []byte(`{"config_version":7}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	status := NewWithBinaryHash(root, "/usr/local/bin/frpc", "").Status()
+	if !status.LastGoodAvailable || status.State != "stopped" || status.Mode != "real" {
+		t.Fatalf("last-good state should be readable before login: %#v", status)
+	}
+}
+
 func TestRealBinaryVerifyRestartAndStop(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "config"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	binary := filepath.Join(root, "fake-frpc")
-	script := []byte("#!/bin/sh\nif [ \"$1\" = \"verify\" ]; then exit 0; fi\ntrap 'exit 0' INT TERM\nwhile true; do sleep 1; done\n")
+	script := []byte("#!/bin/sh\nif [ \"$1\" = \"verify\" ] || [ \"$1\" = \"reload\" ]; then exit 0; fi\ntrap 'exit 0' INT TERM\nwhile true; do sleep 1; done\n")
 	if err := os.WriteFile(binary, script, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -67,6 +84,13 @@ func TestRealBinaryVerifyRestartAndStop(t *testing.T) {
 	if err != nil || string(config) == "" {
 		t.Fatalf("config was not written: %v", err)
 	}
+	secondSnapshot := Snapshot{SchemaVersion: "v1", ConfigVersion: 2, UserID: "user-1", SessionGeneration: 1, ConfigHash: "hash-2", Payload: map[string]interface{}{"frps_public_host": "frp.example.com", "frps_public_port": 7000, "frp_secret": "secret", "frp_username": "user-1", "runtime_credential": "runtime", "mappings": []interface{}{map[string]interface{}{"mapping_id": "mapping-1", "proxy_type": "tcp", "local_ip": "127.0.0.1", "local_port": localPort, "remote_port": 6001}}}}
+	if err := supervisor.Apply(t.Context(), secondSnapshot); err != nil {
+		t.Fatal(err)
+	}
+	if reloaded := supervisor.Status(); reloaded.PID != status.PID || reloaded.AppliedVersion != 2 {
+		t.Fatalf("proxy-only update should reload in place: before=%#v after=%#v", status, reloaded)
+	}
 	if err := supervisor.Stop(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -76,6 +100,86 @@ func TestRealBinaryVerifyRestartAndStop(t *testing.T) {
 	}
 	if status := supervisor.Status(); status.State != "stopped" || status.PID != 0 {
 		t.Fatalf("unexpected stopped status: %#v", status)
+	}
+}
+
+func TestReloadFailureRestoresAndRestartsLastGood(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "config"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(root, "fake-frpc")
+	script := []byte("#!/bin/sh\nif [ \"$1\" = \"verify\" ]; then exit 0; fi\nif [ \"$1\" = \"reload\" ]; then exit 1; fi\ntrap 'exit 0' INT TERM\nwhile true; do sleep 1; done\n")
+	if err := os.WriteFile(binary, script, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	s := New(root, binary)
+	basePayload := map[string]interface{}{"frps_public_host": "frp.example.com", "frps_public_port": 7000, "frp_secret": "secret", "frp_username": "user-1", "runtime_credential": "runtime", "mappings": []interface{}{}}
+	first := Snapshot{SchemaVersion: "v1", ConfigVersion: 1, UserID: "user-1", SessionGeneration: 1, ConfigHash: "hash-1", Payload: basePayload}
+	if err := s.Apply(t.Context(), first); err != nil {
+		t.Fatal(err)
+	}
+	second := Snapshot{SchemaVersion: "v1", ConfigVersion: 2, UserID: "user-1", SessionGeneration: 1, ConfigHash: "hash-2", Payload: basePayload}
+	if err := s.Apply(t.Context(), second); err == nil {
+		t.Fatal("failed reload should be reported")
+	}
+	config, err := os.ReadFile(filepath.Join(root, "config", "frpc.toml"))
+	if err != nil || !strings.Contains(string(config), "config_version = 1") {
+		t.Fatalf("last-good config was not restored: %q err=%v", config, err)
+	}
+	if status := s.Status(); status.PID == 0 {
+		t.Fatalf("last-good process should be restarted: %#v", status)
+	}
+	if err := s.Stop(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRecoverOrphanStopsOwnedProcessAndClearsRuntime(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "config"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "state"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "runtime", "secrets"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(root, "fake-frpc")
+	script := []byte("#!/bin/sh\ntrap 'exit 0' INT TERM\nwhile true; do sleep 1; done\n")
+	if err := os.WriteFile(binary, script, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(root, "config", "frpc.toml")
+	secretPath := filepath.Join(root, "runtime", "secrets", "runtime.token")
+	if err := os.WriteFile(configPath, []byte("auth.token = \\\"secret\\\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secretPath, []byte("runtime-secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(binary, "-c", configPath)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "state", "frpc.pid"), []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o600); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		t.Fatal(err)
+	}
+
+	s := New(root, binary)
+	if err := s.RecoverOrphan(t.Context()); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		t.Fatal(err)
+	}
+	_ = cmd.Wait()
+	for _, path := range []string{filepath.Join(root, "state", "frpc.pid"), configPath, secretPath} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("runtime artifact should be removed: %s (err=%v)", path, err)
+		}
 	}
 }
 

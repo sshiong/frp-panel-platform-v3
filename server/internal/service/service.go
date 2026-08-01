@@ -116,16 +116,20 @@ type ToggleMappingOptions struct {
 }
 
 type Domain struct {
-	ID           string `json:"id"`
-	MappingID    string `json:"mapping_id"`
-	Hostname     string `json:"hostname"`
-	Normalized   string `json:"normalized_domain"`
-	HTTPSMode    string `json:"https_mode"`
-	HTTPRedirect bool   `json:"http_redirect"`
-	Status       string `json:"status"`
-	Revision     int64  `json:"revision"`
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
+	ID            string `json:"id"`
+	MappingID     string `json:"mapping_id"`
+	Hostname      string `json:"hostname"`
+	Normalized    string `json:"normalized_domain"`
+	HTTPSMode     string `json:"https_mode"`
+	HTTPRedirect  bool   `json:"http_redirect"`
+	DNSRecordType string `json:"dns_type"`
+	DNSContent    string `json:"dns_content"`
+	DNSTTL        int    `json:"dns_ttl"`
+	DNSProxied    bool   `json:"dns_proxied"`
+	Status        string `json:"status"`
+	Revision      int64  `json:"revision"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
 }
 
 type DomainRequest struct {
@@ -133,6 +137,9 @@ type DomainRequest struct {
 	Hostname              string `json:"hostname"`
 	HTTPSMode             string `json:"https_mode"`
 	HTTPRedirect          bool   `json:"http_redirect"`
+	DNSRecordType         string `json:"dns_type"`
+	DNSContent            string `json:"dns_content"`
+	DNSTTL                int    `json:"dns_ttl"`
 	ExpectedConfigVersion *int64 `json:"expected_config_version"`
 }
 
@@ -794,7 +801,7 @@ func (a *App) ToggleMapping(ctx context.Context, ac AuthContext, mappingID strin
 }
 
 func (a *App) ListDomains(ctx context.Context, userID string) ([]Domain, error) {
-	rows, err := a.DB.QueryContext(ctx, `SELECT id,mapping_id,hostname,normalized_domain,https_mode,http_redirect,status,revision,created_at,updated_at FROM domain_bindings WHERE user_id=? AND status <> 'deleted' ORDER BY created_at DESC`, userID)
+	rows, err := a.DB.QueryContext(ctx, `SELECT b.id,b.mapping_id,b.hostname,b.normalized_domain,b.https_mode,b.http_redirect,b.status,b.revision,b.created_at,b.updated_at,COALESCE((SELECT type FROM dns_records WHERE domain_binding_id=b.id ORDER BY last_synced_at DESC LIMIT 1),'CNAME'),COALESCE((SELECT content FROM dns_records WHERE domain_binding_id=b.id ORDER BY last_synced_at DESC LIMIT 1),''),COALESCE((SELECT ttl FROM dns_records WHERE domain_binding_id=b.id ORDER BY last_synced_at DESC LIMIT 1),300),COALESCE((SELECT proxied FROM dns_records WHERE domain_binding_id=b.id ORDER BY last_synced_at DESC LIMIT 1),0) FROM domain_bindings b WHERE b.user_id=? AND b.status <> 'deleted' ORDER BY b.created_at DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -802,11 +809,12 @@ func (a *App) ListDomains(ctx context.Context, userID string) ([]Domain, error) 
 	items := make([]Domain, 0)
 	for rows.Next() {
 		var item Domain
-		var redirect int
-		if err := rows.Scan(&item.ID, &item.MappingID, &item.Hostname, &item.Normalized, &item.HTTPSMode, &redirect, &item.Status, &item.Revision, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		var redirect, proxied int
+		if err := rows.Scan(&item.ID, &item.MappingID, &item.Hostname, &item.Normalized, &item.HTTPSMode, &redirect, &item.Status, &item.Revision, &item.CreatedAt, &item.UpdatedAt, &item.DNSRecordType, &item.DNSContent, &item.DNSTTL, &proxied); err != nil {
 			return nil, err
 		}
 		item.HTTPRedirect = redirect == 1
+		item.DNSProxied = proxied == 1
 		items = append(items, item)
 	}
 	return items, rows.Err()
@@ -817,6 +825,10 @@ func (a *App) CreateDomain(ctx context.Context, ac AuthContext, req DomainReques
 		return Domain{}, fmt.Errorf("invalid https mode")
 	}
 	normalized, err := normalizeDomain(req.Hostname)
+	if err != nil {
+		return Domain{}, err
+	}
+	dnsType, dnsContent, dnsTTL, dnsProxied, err := normalizeDNSIntent(a.Config.FRPSPublicHost, req)
 	if err != nil {
 		return Domain{}, err
 	}
@@ -883,6 +895,9 @@ func (a *App) CreateDomain(ctx context.Context, ac AuthContext, req DomainReques
 		}
 		return Domain{}, err
 	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO dns_records(id,user_id,domain_binding_id,type,name,normalized_name,content,ttl,proxied,managed_by_panel,adopted,locked,sync_status) VALUES(?,?,?,?,?,?,?,?,?,0,0,0,'pending')`, uuid.NewString(), ac.UserID, domainID, dnsType, normalized, normalized, dnsContent, dnsTTL, boolInt(dnsProxied)); err != nil {
+		return Domain{}, err
+	}
 	newVersion := desired + 1
 	if _, err := tx.ExecContext(ctx, `UPDATE users SET desired_config_version=?,updated_at=? WHERE id=?`, newVersion, now, ac.UserID); err != nil {
 		return Domain{}, err
@@ -891,7 +906,7 @@ func (a *App) CreateDomain(ctx context.Context, ac AuthContext, req DomainReques
 	if _, err := tx.ExecContext(ctx, `INSERT INTO operations(id,user_id,resource_type,resource_id,operation_type,status,phase,step,idempotency_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, opID, ac.UserID, "domain", domainID, "create", "pending", "dns", "awaiting_provider", idempotencyKey, now, now); err != nil {
 		return Domain{}, err
 	}
-	item := Domain{ID: domainID, MappingID: req.MappingID, Hostname: strings.TrimSpace(req.Hostname), Normalized: normalized, HTTPSMode: req.HTTPSMode, HTTPRedirect: req.HTTPRedirect, Status: "pending_dns", Revision: 1, CreatedAt: now, UpdatedAt: now}
+	item := Domain{ID: domainID, MappingID: req.MappingID, Hostname: strings.TrimSpace(req.Hostname), Normalized: normalized, HTTPSMode: req.HTTPSMode, HTTPRedirect: req.HTTPRedirect, DNSRecordType: dnsType, DNSContent: dnsContent, DNSTTL: dnsTTL, DNSProxied: dnsProxied, Status: "pending_dns", Revision: 1, CreatedAt: now, UpdatedAt: now}
 	encoded, _ := json.Marshal(item)
 	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,operation_id,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), ac.UserID, ac.Generation, "POST", "/api/v1/domains", idempotencyKey, bodyHash, 202, string(encoded), opID, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
 		return Domain{}, err
@@ -1255,6 +1270,184 @@ func (a *App) ResetUserPassword(ctx context.Context, ac AuthContext, userID stri
 	return password, nil
 }
 
+// DeleteUser starts the compensating user-removal workflow. Local resources
+// enter deleting first, sessions and runtime credentials are revoked
+// immediately, and a durable user_delete job owns external DNS cleanup before
+// the final local row is removed. Force mode records external residue rather
+// than claiming that a failed provider cleanup succeeded.
+func (a *App) DeleteUser(ctx context.Context, ac AuthContext, userID string, force bool, requestedKey string) (string, error) {
+	if ac.Role != "admin" {
+		return "", ErrForbidden
+	}
+	idempotencyKey := strings.TrimSpace(requestedKey)
+	if idempotencyKey == "" {
+		idempotencyKey = uuid.NewString()
+	}
+	normalizedPath := "/api/v1/admin/users/" + userID
+	bodyHash := requestHash(map[string]bool{"force": force})
+	tx, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	var existingHash, existingOperation string
+	if err := tx.QueryRowContext(ctx, `SELECT request_body_hash,COALESCE(operation_id,'') FROM idempotency_records WHERE user_id=? AND session_generation=? AND http_method='DELETE' AND normalized_path=? AND idempotency_key=?`, ac.UserID, ac.Generation, normalizedPath, idempotencyKey).Scan(&existingHash, &existingOperation); err == nil {
+		if existingHash != bodyHash {
+			return "", ErrIdempotencyReuse
+		}
+		return existingOperation, nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	var role, status string
+	if err := tx.QueryRowContext(ctx, `SELECT role,status FROM users WHERE id=?`, userID).Scan(&role, &status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", err
+	}
+	if role != "user" {
+		return "", ErrNotFound
+	}
+	if status == "deleting" {
+		var compensationStatus string
+		if err := tx.QueryRowContext(ctx, `SELECT id,COALESCE(compensation_status,'not_required') FROM operations WHERE resource_type='user' AND resource_id=? AND operation_type='delete' AND status IN ('pending','running','failed') ORDER BY created_at DESC LIMIT 1`, userID).Scan(&existingOperation, &compensationStatus); err != nil {
+			return "", err
+		}
+		operationForce := force || compensationStatus == "force_requested" || compensationStatus == "external_residue"
+		if _, err := tx.ExecContext(ctx, `UPDATE operations SET status=CASE WHEN status='failed' THEN 'pending' ELSE status END,phase=CASE WHEN status='failed' THEN 'external' ELSE phase END,step=CASE WHEN status='failed' THEN 'deleting_domains' ELSE step END,compensation_status=CASE WHEN ? THEN 'force_requested' ELSE compensation_status END,error_code=CASE WHEN status='failed' THEN NULL ELSE error_code END,error_message=CASE WHEN status='failed' THEN NULL ELSE error_message END,completed_at=CASE WHEN status='failed' THEN NULL ELSE completed_at END,updated_at=? WHERE id=?`, boolInt(force), nowString(), existingOperation); err != nil {
+			return "", err
+		}
+		responseBody, _ := json.Marshal(map[string]string{"operation_id": existingOperation, "status": "pending"})
+		if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,operation_id,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), ac.UserID, ac.Generation, "DELETE", normalizedPath, idempotencyKey, bodyHash, 202, string(responseBody), existingOperation, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), nowString()); err != nil {
+			return "", err
+		}
+		if err := tx.Commit(); err != nil {
+			return "", err
+		}
+		if a.Jobs == nil {
+			return existingOperation, errors.New("job worker is unavailable")
+		}
+		if _, err := a.enqueueUserDeleteJob(ctx, userID, existingOperation, operationForce); err != nil {
+			return existingOperation, err
+		}
+		_ = a.Audit(ctx, ac, "user_delete_requeued", "user", userID, "pending", map[string]interface{}{"force": operationForce}, existingOperation)
+		return existingOperation, nil
+	}
+	if status == "deleted" {
+		return "", ErrNotFound
+	}
+
+	now := nowString()
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM domain_bindings WHERE user_id=? AND status <> 'deleted'`, userID)
+	if err != nil {
+		return "", err
+	}
+	domainIDs := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return "", err
+		}
+		domainIDs = append(domainIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return "", err
+	}
+	if err := rows.Close(); err != nil {
+		return "", err
+	}
+	rows, err = tx.QueryContext(ctx, `SELECT id FROM mappings WHERE user_id=? AND lifecycle_status <> 'deleted'`, userID)
+	if err != nil {
+		return "", err
+	}
+	mappingIDs := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return "", err
+		}
+		mappingIDs = append(mappingIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return "", err
+	}
+	if err := rows.Close(); err != nil {
+		return "", err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET status='deleting',active_session_generation=active_session_generation+1,desired_config_version=desired_config_version+1,updated_at=? WHERE id=? AND role='user'`, now, userID); err != nil {
+		return "", err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET revoked_at=?,revoke_reason='USER_DELETING' WHERE user_id=? AND revoked_at IS NULL`, now, userID); err != nil {
+		return "", err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE frp_runtime_credentials SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL`, now, userID); err != nil {
+		return "", err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE domain_bindings SET status='deleting',updated_at=? WHERE user_id=? AND status <> 'deleted'`, now, userID); err != nil {
+		return "", err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE mappings SET lifecycle_status='deleting',desired_state='disabled',updated_at=? WHERE user_id=? AND lifecycle_status <> 'deleted'`, now, userID); err != nil {
+		return "", err
+	}
+	operationID := uuid.NewString()
+	compensationStatus := "not_required"
+	if force {
+		compensationStatus = "force_requested"
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO operations(id,user_id,resource_type,resource_id,operation_type,status,phase,step,idempotency_key,compensation_status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, operationID, ac.UserID, "user", userID, "delete", "pending", "external", "deleting_domains", idempotencyKey, compensationStatus, now, now); err != nil {
+		return "", err
+	}
+	for _, domainID := range domainIDs {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO operations(id,user_id,resource_type,resource_id,operation_type,status,phase,step,idempotency_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), userID, "domain", domainID, "delete", "pending", "dns", "awaiting_external", "user-delete:"+operationID+":"+domainID, now, now); err != nil {
+			return "", err
+		}
+	}
+	for _, mappingID := range mappingIDs {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO operations(id,user_id,resource_type,resource_id,operation_type,status,phase,step,idempotency_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), userID, "mapping", mappingID, "delete", "pending", "user", "awaiting_domains", "user-delete:"+operationID+":"+mappingID, now, now); err != nil {
+			return "", err
+		}
+	}
+	responseBody, _ := json.Marshal(map[string]string{"operation_id": operationID, "status": "pending"})
+	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,operation_id,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), ac.UserID, ac.Generation, "DELETE", normalizedPath, idempotencyKey, bodyHash, 202, string(responseBody), operationID, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
+		return "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+	if a.Jobs == nil {
+		return operationID, errors.New("job worker is unavailable")
+	}
+	if _, err := a.enqueueUserDeleteJob(ctx, userID, operationID, force); err != nil {
+		return operationID, err
+	}
+	_ = a.EnqueueRouterSnapshot(ctx)
+	_ = a.Audit(ctx, ac, "user_delete_requested", "user", userID, "pending", map[string]interface{}{"force": force, "domain_count": len(domainIDs), "mapping_count": len(mappingIDs)}, operationID)
+	return operationID, nil
+}
+
+func (a *App) enqueueUserDeleteJob(ctx context.Context, userID, operationID string, force bool) (string, error) {
+	if a.Jobs == nil {
+		return "", errors.New("job worker is unavailable")
+	}
+	payload := map[string]interface{}{"user_id": userID, "operation_id": operationID, "force": force}
+	jobID, err := a.Jobs.Enqueue(ctx, "user_delete", "user", userID, "user:"+userID+":delete", payload, nil)
+	if err != nil {
+		return "", err
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	now := nowString()
+	_, err = a.DB.ExecContext(ctx, `UPDATE jobs SET payload_json=?,run_after=?,last_error=NULL,updated_at=?,status=CASE WHEN status='retry_wait' THEN 'pending' ELSE status END WHERE id=? AND status IN ('pending','retry_wait','running')`, string(encoded), now, now, jobID)
+	return jobID, err
+}
+
 func (a *App) CloudflareStatus(ctx context.Context, userID string) (map[string]interface{}, error) {
 	var status string
 	var version int
@@ -1362,7 +1555,7 @@ func (a *App) AuthorizeFRP(ctx context.Context, operation, frpUsername, runtimeC
 }
 
 func (a *App) Operations(ctx context.Context, userID string, admin bool) ([]map[string]interface{}, error) {
-	query := `SELECT id,COALESCE(user_id,''),resource_type,COALESCE(resource_id,''),operation_type,status,phase,step,COALESCE(error_code,''),COALESCE(error_message,''),created_at,updated_at FROM operations`
+	query := `SELECT o.id,COALESCE(o.user_id,''),o.resource_type,COALESCE(o.resource_id,''),o.operation_type,o.status,o.phase,o.step,COALESCE(o.error_code,''),COALESCE(o.error_message,''),o.created_at,o.updated_at,COALESCE(o.compensation_status,'not_required'),(SELECT COUNT(1) FROM external_residues er WHERE er.operation_id=o.id AND er.resolved_at IS NULL) FROM operations o`
 	args := []interface{}{}
 	if !admin {
 		query += ` WHERE user_id=?`
@@ -1373,21 +1566,57 @@ func (a *App) Operations(ctx context.Context, userID string, admin bool) ([]map[
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	result := make([]map[string]interface{}, 0)
+	type operationRow struct {
+		id, owner, resourceType, resourceID, opType, status, phase, step, code, message, created, updated, compensationStatus string
+		residueCount                                                                                                          int
+	}
+	rowsData := make([]operationRow, 0)
 	for rows.Next() {
-		var id, owner, resourceType, resourceID, opType, status, phase, step, code, message, created, updated string
-		if err := rows.Scan(&id, &owner, &resourceType, &resourceID, &opType, &status, &phase, &step, &code, &message, &created, &updated); err != nil {
+		var item operationRow
+		if err := rows.Scan(&item.id, &item.owner, &item.resourceType, &item.resourceID, &item.opType, &item.status, &item.phase, &item.step, &item.code, &item.message, &item.created, &item.updated, &item.compensationStatus, &item.residueCount); err != nil {
+			_ = rows.Close()
 			return nil, err
 		}
-		result = append(result, map[string]interface{}{"id": id, "user_id": owner, "resource_type": resourceType, "resource_id": resourceID, "operation_type": opType, "status": status, "phase": phase, "step": step, "error_code": code, "error_message": message, "created_at": created, "updated_at": updated})
+		rowsData = append(rowsData, item)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	result := make([]map[string]interface{}, 0)
+	for _, item := range rowsData {
+		residues, err := a.externalResidues(ctx, item.id)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, map[string]interface{}{"id": item.id, "user_id": item.owner, "resource_type": item.resourceType, "resource_id": item.resourceID, "operation_type": item.opType, "status": item.status, "phase": item.phase, "step": item.step, "error_code": item.code, "error_message": item.message, "compensation_status": item.compensationStatus, "external_residue_count": item.residueCount, "external_residues": residues, "created_at": item.created, "updated_at": item.updated})
+	}
+	return result, nil
+}
+
+func (a *App) externalResidues(ctx context.Context, operationID string) ([]map[string]interface{}, error) {
+	rows, err := a.DB.QueryContext(ctx, `SELECT resource_type,resource_id,provider,identifier,reason,created_at,COALESCE(resolved_at,'') FROM external_residues WHERE operation_id=? ORDER BY created_at ASC`, operationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]map[string]interface{}, 0)
+	for rows.Next() {
+		var resourceType, resourceID, provider, identifier, reason, createdAt, resolvedAt string
+		if err := rows.Scan(&resourceType, &resourceID, &provider, &identifier, &reason, &createdAt, &resolvedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, map[string]interface{}{"resource_type": resourceType, "resource_id": resourceID, "provider": provider, "identifier": identifier, "reason": reason, "created_at": createdAt, "resolved_at": resolvedAt})
+	}
+	return items, rows.Err()
 }
 
 func (a *App) RetryOperation(ctx context.Context, ac AuthContext, operationID string) error {
-	var owner, resourceType, resourceID, operationType, phase, status string
-	if err := a.DB.QueryRowContext(ctx, `SELECT COALESCE(user_id,''),resource_type,COALESCE(resource_id,''),operation_type,phase,status FROM operations WHERE id=?`, operationID).Scan(&owner, &resourceType, &resourceID, &operationType, &phase, &status); err != nil {
+	var owner, resourceType, resourceID, operationType, phase, status, compensationStatus string
+	if err := a.DB.QueryRowContext(ctx, `SELECT COALESCE(user_id,''),resource_type,COALESCE(resource_id,''),operation_type,phase,status,COALESCE(compensation_status,'not_required') FROM operations WHERE id=?`, operationID).Scan(&owner, &resourceType, &resourceID, &operationType, &phase, &status, &compensationStatus); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -1404,6 +1633,13 @@ func (a *App) RetryOperation(ctx context.Context, ac AuthContext, operationID st
 	}
 	jobType, payload, dedup := "", map[string]interface{}{}, ""
 	switch resourceType {
+	case "user":
+		if ac.Role != "admin" {
+			return ErrNotFound
+		}
+		jobType = "user_delete"
+		payload = map[string]interface{}{"user_id": resourceID, "operation_id": operationID, "force": compensationStatus == "force_requested" || compensationStatus == "external_residue"}
+		dedup = "user:" + resourceID + ":delete"
 	case "domain":
 		var domainStatus string
 		if err := a.DB.QueryRowContext(ctx, `SELECT status FROM domain_bindings WHERE id=? AND user_id=?`, resourceID, owner).Scan(&domainStatus); err != nil {
@@ -1503,6 +1739,51 @@ func validateMapping(req MappingRequest) error {
 	return nil
 }
 
+func normalizeDNSIntent(defaultContent string, req DomainRequest) (string, string, int, bool, error) {
+	recordType := strings.ToUpper(strings.TrimSpace(req.DNSRecordType))
+	if recordType == "" {
+		recordType = "CNAME"
+	}
+	if recordType != "A" && recordType != "AAAA" && recordType != "CNAME" {
+		return "", "", 0, false, fmt.Errorf("invalid DNS record type")
+	}
+	ttl := req.DNSTTL
+	if ttl == 0 {
+		ttl = 300
+	}
+	if ttl < 60 || ttl > 86400 {
+		return "", "", 0, false, fmt.Errorf("DNS TTL must be between 60 and 86400 seconds")
+	}
+	content := strings.TrimSpace(req.DNSContent)
+	switch recordType {
+	case "A":
+		ip := net.ParseIP(content)
+		if ip == nil || ip.To4() == nil {
+			return "", "", 0, false, fmt.Errorf("DNS A content must be an IPv4 address")
+		}
+		content = ip.To4().String()
+	case "AAAA":
+		ip := net.ParseIP(content)
+		if ip == nil || ip.To4() != nil {
+			return "", "", 0, false, fmt.Errorf("DNS AAAA content must be an IPv6 address")
+		}
+		content = ip.String()
+	case "CNAME":
+		if content == "" {
+			content = defaultContent
+		}
+		if content == "" {
+			content = "frp.example.com"
+		}
+		var err error
+		content, err = normalizeDomain(content)
+		if err != nil {
+			return "", "", 0, false, fmt.Errorf("invalid DNS CNAME content: %w", err)
+		}
+	}
+	return recordType, content, ttl, req.HTTPSMode == "cloudflare_proxy", nil
+}
+
 func normalizeDomain(raw string) (string, error) {
 	raw = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(raw)), ".")
 	if raw == "" || len(raw) > 253 || strings.ContainsAny(raw, "/*\\") {
@@ -1579,7 +1860,7 @@ func validUsername(value string) bool {
 }
 func allowedAuditField(value string) bool {
 	switch value {
-	case "proxy_type", "revision", "enabled", "status", "username", "config_version", "error_code":
+	case "proxy_type", "revision", "enabled", "status", "username", "config_version", "error_code", "force", "domain_count", "mapping_count", "residue_count", "provider":
 		return true
 	default:
 		return false

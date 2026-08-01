@@ -42,20 +42,46 @@ func (a *App) RunJobs(ctx context.Context) error {
 }
 
 func (a *App) seedPendingJobs(ctx context.Context) error {
+	userDeleteRows, err := a.DB.QueryContext(ctx, `SELECT resource_id,id,compensation_status FROM operations WHERE resource_type='user' AND operation_type='delete' AND status IN ('pending','running')`)
+	if err != nil {
+		return err
+	}
+	type userDeleteSeed struct{ userID, operationID, compensationStatus string }
+	userDeleteSeeds := make([]userDeleteSeed, 0)
+	for userDeleteRows.Next() {
+		var userID, operationID, compensationStatus string
+		if err := userDeleteRows.Scan(&userID, &operationID, &compensationStatus); err != nil {
+			_ = userDeleteRows.Close()
+			return err
+		}
+		userDeleteSeeds = append(userDeleteSeeds, userDeleteSeed{userID: userID, operationID: operationID, compensationStatus: compensationStatus})
+	}
+	if err := userDeleteRows.Err(); err != nil {
+		_ = userDeleteRows.Close()
+		return err
+	}
+	if err := userDeleteRows.Close(); err != nil {
+		return err
+	}
+	for _, seed := range userDeleteSeeds {
+		force := seed.compensationStatus == "force_requested" || seed.compensationStatus == "external_residue"
+		if _, err := a.enqueueUserDeleteJob(ctx, seed.userID, seed.operationID, force); err != nil {
+			return err
+		}
+	}
 	rows, err := a.DB.QueryContext(ctx, `SELECT user_id,id FROM domain_bindings WHERE status IN ('pending_dns','dns_error','pending_client','pending_router')`)
 	if err != nil {
 		return err
 	}
+	type domainSeed struct{ userID, domainID string }
+	domainSeeds := make([]domainSeed, 0)
 	for rows.Next() {
 		var userID, domainID string
 		if err := rows.Scan(&userID, &domainID); err != nil {
 			_ = rows.Close()
 			return err
 		}
-		if _, err := a.Jobs.Enqueue(ctx, "domain_dns_sync", "domain", domainID, "domain:"+domainID+":dns", map[string]interface{}{"user_id": userID, "domain_id": domainID, "action": "check"}, nil); err != nil {
-			_ = rows.Close()
-			return err
-		}
+		domainSeeds = append(domainSeeds, domainSeed{userID: userID, domainID: domainID})
 	}
 	if err := rows.Err(); err != nil {
 		return err
@@ -63,11 +89,20 @@ func (a *App) seedPendingJobs(ctx context.Context) error {
 	if err := rows.Close(); err != nil {
 		return err
 	}
+	for _, seed := range domainSeeds {
+		if _, err := a.Jobs.Enqueue(ctx, "domain_dns_sync", "domain", seed.domainID, "domain:"+seed.domainID+":dns", map[string]interface{}{"user_id": seed.userID, "domain_id": seed.domainID, "action": "check"}, nil); err != nil {
+			return err
+		}
+	}
 	rows, err = a.DB.QueryContext(ctx, `SELECT user_id,token_version FROM cloudflare_credentials WHERE status='pending'`)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	type tokenSeed struct {
+		userID  string
+		version int64
+	}
+	tokenSeeds := make([]tokenSeed, 0)
 	for rows.Next() {
 		var userID string
 		var version int64
@@ -75,13 +110,19 @@ func (a *App) seedPendingJobs(ctx context.Context) error {
 			_ = rows.Close()
 			return err
 		}
-		if _, err := a.Jobs.Enqueue(ctx, "cloudflare_token_verify", "cloudflare_token", userID, fmt.Sprintf("cloudflare:%s:%d", userID, version), map[string]interface{}{"user_id": userID, "token_version": version}, &version); err != nil {
-			_ = rows.Close()
-			return err
-		}
+		tokenSeeds = append(tokenSeeds, tokenSeed{userID: userID, version: version})
 	}
 	if err := rows.Err(); err != nil {
 		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, seed := range tokenSeeds {
+		version := seed.version
+		if _, err := a.Jobs.Enqueue(ctx, "cloudflare_token_verify", "cloudflare_token", seed.userID, fmt.Sprintf("cloudflare:%s:%d", seed.userID, version), map[string]interface{}{"user_id": seed.userID, "token_version": version}, &version); err != nil {
+			return err
+		}
 	}
 	if a.Config.ACMEEnabled {
 		// A missing ACME provider is represented as a blocked job with a long
@@ -94,17 +135,27 @@ func (a *App) seedPendingJobs(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
+		type acmeSeed struct{ userID, domainID string }
+		acmeSeeds := make([]acmeSeed, 0)
 		for rows.Next() {
 			var userID, domainID string
 			if err := rows.Scan(&userID, &domainID); err != nil {
 				return err
 			}
-			if _, err := a.Jobs.Enqueue(ctx, "acme_certificate_issue", "domain", domainID, "domain:"+domainID+":acme", map[string]interface{}{"user_id": userID, "domain_id": domainID}, nil); err != nil {
+			acmeSeeds = append(acmeSeeds, acmeSeed{userID: userID, domainID: domainID})
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		for _, seed := range acmeSeeds {
+			if _, err := a.Jobs.Enqueue(ctx, "acme_certificate_issue", "domain", seed.domainID, "domain:"+seed.domainID+":acme", map[string]interface{}{"user_id": seed.userID, "domain_id": seed.domainID}, nil); err != nil {
 				return err
 			}
 		}
-		return rows.Err()
 	}
 	return nil
 }
@@ -117,6 +168,8 @@ func (a *App) handleJob(ctx context.Context, job jobs.Job) error {
 		return a.syncDomainDNS(ctx, job)
 	case "domain_delete":
 		return a.deleteDomainExternal(ctx, job)
+	case "user_delete":
+		return a.deleteUserExternal(ctx, job)
 	case "acme_certificate_issue":
 		return a.issueCertificate(ctx, job)
 	case "router_snapshot_apply":
@@ -125,6 +178,138 @@ func (a *App) handleJob(ctx context.Context, job jobs.Job) error {
 	default:
 		return fmt.Errorf("unsupported job type %q", job.Type)
 	}
+}
+
+func (a *App) deleteUserExternal(ctx context.Context, job jobs.Job) error {
+	userID := payloadString(job.Payload, "user_id")
+	operationID := payloadString(job.Payload, "operation_id")
+	force := payloadBool(job.Payload, "force")
+	if userID == "" || operationID == "" {
+		return errors.New("user deletion job payload is invalid")
+	}
+	var userStatus string
+	if err := a.DB.QueryRowContext(ctx, `SELECT status FROM users WHERE id=? AND role='user'`, userID).Scan(&userStatus); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	if userStatus != "deleting" {
+		return errors.New("user is not in deleting state")
+	}
+	rows, err := a.DB.QueryContext(ctx, `SELECT id FROM domain_bindings WHERE user_id=? AND status='deleting' ORDER BY created_at ASC`, userID)
+	if err != nil {
+		return err
+	}
+	domainIDs := make([]string, 0)
+	for rows.Next() {
+		var domainID string
+		if err := rows.Scan(&domainID); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		domainIDs = append(domainIDs, domainID)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, domainID := range domainIDs {
+		domainJob := jobs.Job{Payload: map[string]interface{}{"user_id": userID, "domain_id": domainID}}
+		cleanupErr := a.deleteDomainExternal(ctx, domainJob)
+		var stillPresent int
+		if err := a.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM domain_bindings WHERE id=?`, domainID).Scan(&stillPresent); err != nil {
+			return err
+		}
+		if cleanupErr != nil || stillPresent != 0 {
+			if !force {
+				if cleanupErr == nil {
+					cleanupErr = errors.New("domain deletion is blocked by external cleanup")
+				}
+				_ = a.markUserDeleteFailure(ctx, operationID, cleanupErr)
+				return cleanupErr
+			}
+			identifier := a.domainResidueIdentifier(ctx, domainID)
+			reason := "domain cleanup left an external record"
+			if cleanupErr != nil {
+				reason = safeError(cleanupErr.Error())
+			}
+			if residueErr := a.recordExternalResidue(ctx, userID, operationID, "domain", domainID, "cloudflare", identifier, reason); residueErr != nil {
+				return residueErr
+			}
+			_ = a.Audit(ctx, AuthContext{UserID: userID, Role: "system"}, "user_delete_external_residue", "domain", domainID, "external_residue", map[string]interface{}{"provider": "cloudflare", "residue_count": 1}, operationID)
+			if finalizeErr := a.finalizeDeletedDomain(ctx, domainID); finalizeErr != nil {
+				return finalizeErr
+			}
+		}
+	}
+	if err := a.finalizeDeletedMappings(ctx, userID); err != nil {
+		return err
+	}
+	var mappingCount, domainCount int
+	if err := a.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM mappings WHERE user_id=?`, userID).Scan(&mappingCount); err != nil {
+		return err
+	}
+	if err := a.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM domain_bindings WHERE user_id=?`, userID).Scan(&domainCount); err != nil {
+		return err
+	}
+	if mappingCount != 0 || domainCount != 0 {
+		return fmt.Errorf("user deletion is waiting for local resources: mappings=%d domains=%d", mappingCount, domainCount)
+	}
+	residueCount := 0
+	if err := a.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM external_residues WHERE operation_id=? AND resolved_at IS NULL`, operationID).Scan(&residueCount); err != nil {
+		return err
+	}
+	transaction, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer transaction.Rollback()
+	now := nowString()
+	if _, err := transaction.ExecContext(ctx, `UPDATE operations SET user_id=NULL WHERE user_id=? AND id<>?`, userID, operationID); err != nil {
+		return err
+	}
+	compensationStatus := "not_required"
+	if residueCount > 0 {
+		compensationStatus = "external_residue"
+	}
+	if _, err := transaction.ExecContext(ctx, `UPDATE operations SET user_id=NULL,status='succeeded',phase='cleanup',step='completed',compensation_status=?,error_code=NULL,error_message=NULL,updated_at=?,completed_at=? WHERE id=?`, compensationStatus, now, now, operationID); err != nil {
+		return err
+	}
+	if _, err := transaction.ExecContext(ctx, `DELETE FROM users WHERE id=? AND status='deleting'`, userID); err != nil {
+		return err
+	}
+	if err := transaction.Commit(); err != nil {
+		return err
+	}
+	_ = a.EnqueueRouterSnapshot(ctx)
+	return nil
+}
+
+func (a *App) markUserDeleteFailure(ctx context.Context, operationID string, jobErr error) error {
+	now := nowString()
+	_, err := a.DB.ExecContext(ctx, `UPDATE operations SET status='failed',phase='external',step='failed',error_code='USER_DELETE_EXTERNAL_CLEANUP_FAILED',error_message=?,updated_at=?,completed_at=? WHERE id=? AND status IN ('pending','running')`, safeError(jobErr.Error()), now, now, operationID)
+	return err
+}
+
+func (a *App) domainResidueIdentifier(ctx context.Context, domainID string) string {
+	var zoneID, recordID string
+	if err := a.DB.QueryRowContext(ctx, `SELECT COALESCE(zone_id,''),COALESCE(record_id,'') FROM dns_records WHERE domain_binding_id=? ORDER BY last_synced_at DESC LIMIT 1`, domainID).Scan(&zoneID, &recordID); err != nil {
+		return domainID
+	}
+	identifier := strings.Trim(strings.TrimSpace(zoneID)+"/"+strings.TrimSpace(recordID), "/")
+	if identifier == "" {
+		return domainID
+	}
+	return identifier
+}
+
+func (a *App) recordExternalResidue(ctx context.Context, userID, operationID, resourceType, resourceID, provider, identifier, reason string) error {
+	_, err := a.DB.ExecContext(ctx, `INSERT INTO external_residues(id,user_id,operation_id,resource_type,resource_id,provider,identifier,reason,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, uuid.NewString(), userID, operationID, resourceType, resourceID, provider, identifier, reason, nowString())
+	return err
 }
 
 func (a *App) deleteDomainExternal(ctx context.Context, job jobs.Job) error {
@@ -178,7 +363,7 @@ func (a *App) finalizeDeletedDomain(ctx context.Context, domainID string) error 
 	if _, err := a.DB.ExecContext(ctx, `DELETE FROM domain_bindings WHERE id=? AND status='deleting'`, domainID); err != nil {
 		return err
 	}
-	_, err := a.DB.ExecContext(ctx, `UPDATE operations SET status='succeeded',phase='cleanup',step='completed',error_code=NULL,error_message=NULL,updated_at=?,completed_at=? WHERE resource_type='domain' AND resource_id=? AND operation_type='delete' AND status IN ('pending','running')`, now, now, domainID)
+	_, err := a.DB.ExecContext(ctx, `UPDATE operations SET status='succeeded',phase='cleanup',step='completed',error_code=NULL,error_message=NULL,updated_at=?,completed_at=? WHERE resource_type='domain' AND resource_id=? AND operation_type='delete' AND status IN ('pending','running','failed')`, now, now, domainID)
 	if err != nil {
 		return err
 	}
@@ -352,6 +537,10 @@ func (a *App) syncDomainDNS(ctx context.Context, job jobs.Job) error {
 		return err
 	}
 	desired := cloudflare.Record{Type: "CNAME", Name: normalized, Content: a.Config.FRPSPublicHost, TTL: 300, Proxied: httpsMode == "cloudflare_proxy"}
+	var desiredProxied int
+	if err := a.DB.QueryRowContext(ctx, `SELECT COALESCE(type,'CNAME'),COALESCE(content,?),COALESCE(ttl,300),COALESCE(proxied,0) FROM dns_records WHERE domain_binding_id=? ORDER BY last_synced_at DESC LIMIT 1`, a.Config.FRPSPublicHost, domainID).Scan(&desired.Type, &desired.Content, &desired.TTL, &desiredProxied); err == nil {
+		desired.Proxied = httpsMode == "cloudflare_proxy"
+	}
 	managed, adopted := false, false
 	var selected cloudflare.Record
 	for _, record := range records {
@@ -369,7 +558,7 @@ func (a *App) syncDomainDNS(ctx context.Context, job jobs.Job) error {
 		adopted = true
 	}
 	if selected.ID == "" {
-		selected, err = provider.UpsertDNS(ctx, zone, desired)
+		selected, err = a.upsertDNSWithRecovery(ctx, provider, zone, desired)
 		if err != nil {
 			if code, message, denied := cloudflarePermissionError(err); denied {
 				return a.markDomainDNSFailure(ctx, domainID, code, message)
@@ -377,8 +566,8 @@ func (a *App) syncDomainDNS(ctx context.Context, job jobs.Job) error {
 			return err
 		}
 		managed = true
-	} else if action == "overwrite" && (selected.Content != desired.Content || selected.Proxied != desired.Proxied || selected.Type != desired.Type) {
-		selected, err = provider.UpsertDNS(ctx, zone, desired)
+	} else if action == "overwrite" && (selected.Content != desired.Content || selected.Proxied != desired.Proxied || selected.Type != desired.Type || selected.TTL != desired.TTL) {
+		selected, err = a.upsertDNSWithRecovery(ctx, provider, zone, desired)
 		if err != nil {
 			if code, message, denied := cloudflarePermissionError(err); denied {
 				return a.markDomainDNSFailure(ctx, domainID, code, message)
@@ -512,6 +701,26 @@ func writeAtomicPrivate(path string, content []byte) error {
 	return nil
 }
 
+// upsertDNSWithRecovery handles the ambiguous window where Cloudflare may have
+// committed a record but the HTTP response was lost. A follow-up read turns an
+// already-applied desired record into success instead of creating duplicates on
+// every retry; unrelated errors are returned unchanged for the job backoff.
+func (a *App) upsertDNSWithRecovery(ctx context.Context, provider cloudflare.Provider, zone cloudflare.Zone, desired cloudflare.Record) (cloudflare.Record, error) {
+	selected, err := provider.UpsertDNS(ctx, zone, desired)
+	if err == nil {
+		return selected, nil
+	}
+	actual, readErr := provider.ListDNS(ctx, zone, desired.Name, desired.Type)
+	if readErr == nil {
+		for _, record := range actual {
+			if strings.EqualFold(record.Type, desired.Type) && strings.EqualFold(record.Name, desired.Name) && record.Content == desired.Content && record.TTL == desired.TTL && record.Proxied == desired.Proxied {
+				return record, nil
+			}
+		}
+	}
+	return cloudflare.Record{}, err
+}
+
 func (a *App) saveDNSRecord(ctx context.Context, userID, domainID string, zone cloudflare.Zone, record cloudflare.Record, managed, adopted bool) error {
 	now := nowString()
 	_, err := a.DB.ExecContext(ctx, `DELETE FROM dns_records WHERE domain_binding_id=?`, domainID)
@@ -555,6 +764,17 @@ func payloadInt64(payload map[string]interface{}, key string) int64 {
 		return int64(value)
 	}
 	return 0
+}
+
+func payloadBool(payload map[string]interface{}, key string) bool {
+	switch value := payload[key].(type) {
+	case bool:
+		return value
+	case string:
+		return value == "true"
+	default:
+		return false
+	}
 }
 
 func (a *App) cloudflareProvider(token string) *cloudflare.HTTPProvider {

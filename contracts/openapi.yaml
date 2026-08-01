@@ -363,6 +363,22 @@ paths:
             schema: { type: object, required: [username], properties: { username: { type: string }, password: { type: string, format: password } } }
       responses:
         '201': { description: User created }
+  /api/v1/admin/users/{id}:
+    delete:
+      operationId: adminDeleteUser
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: force
+          in: query
+          schema: { type: boolean, default: false }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      responses:
+        '202': { description: User deletion compensation operation queued }
+        '409': { $ref: '#/components/responses/Problem' }
   /api/v1/admin/users/{id}/status:
     post:
       operationId: adminSetUserStatus
@@ -504,6 +520,9 @@ components:
         hostname: { type: string, minLength: 1, maxLength: 253 }
         https_mode: { type: string, enum: [auto_certificate, cloudflare_proxy, http_only] }
         http_redirect: { type: boolean, default: false }
+        dns_type: { type: string, enum: [A, AAAA, CNAME], default: CNAME }
+        dns_content: { type: string, maxLength: 253, description: A/AAAA address or CNAME target; CNAME defaults to the configured FRPS public host }
+        dns_ttl: { type: integer, minimum: 60, maximum: 86400, default: 300 }
         expected_config_version: { type: integer, format: int64 }
     Domain:
       allOf:
@@ -513,6 +532,7 @@ components:
           properties:
             id: { type: string, format: uuid }
             normalized_domain: { type: string }
+            dns_proxied: { type: boolean }
             status: { type: string }
             revision: { type: integer, format: int64 }
     Operation:
@@ -528,6 +548,21 @@ components:
         step: { type: string }
         error_code: { type: string }
         error_message: { type: string }
+        compensation_status: { type: string }
+        external_residue_count: { type: integer, minimum: 0 }
+        external_residues:
+          type: array
+          items:
+            type: object
+            required: [resource_type, resource_id, provider, identifier, reason, created_at]
+            properties:
+              resource_type: { type: string }
+              resource_id: { type: string }
+              provider: { type: string }
+              identifier: { type: string }
+              reason: { type: string }
+              created_at: { type: string, format: date-time }
+              resolved_at: { type: string, format: date-time }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     RouterStatus:
