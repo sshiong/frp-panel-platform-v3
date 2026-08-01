@@ -1,0 +1,169 @@
+openapi: 3.1.0
+info:
+  title: FRP Panel Server API
+  version: 1.0.0
+  description: Versioned control-plane contract for the independent Server and Client Panels.
+servers:
+  - url: https://panel.example.invalid
+paths:
+  /api/v1/auth/client-login:
+    post:
+      operationId: clientLogin
+      summary: Create the only active Client Panel session for a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientLoginRequest'
+      responses:
+        '200':
+          description: Authenticated session and runtime configuration metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '401': { $ref: '#/components/responses/Problem' }
+  /api/v1/auth/admin-login:
+    post:
+      operationId: adminLogin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminLoginRequest'
+      responses:
+        '200':
+          description: Admin session
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionResponse' }
+        '401': { $ref: '#/components/responses/Problem' }
+  /api/v1/mappings:
+    get:
+      operationId: listMappings
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: User-scoped mappings
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, config_version]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Mapping' } }
+                  config_version: { type: integer, format: int64 }
+    post:
+      operationId: createMapping
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateMappingRequest' }
+      responses:
+        '201': { description: Mapping created }
+        '409': { $ref: '#/components/responses/Problem' }
+  /api/v1/config/full:
+    get:
+      operationId: fullConfig
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Signed full desired configuration
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigSnapshot' }
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 16, maxLength: 128 }
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  responses:
+    Problem:
+      description: RFC 9457 Problem Details
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    ClientLoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 1, maxLength: 80 }
+        password: { type: string, format: password, minLength: 12 }
+    AdminLoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 1, maxLength: 80 }
+        password: { type: string, format: password, minLength: 12 }
+    SessionResponse:
+      type: object
+      required: [request_id, session_expires_at, user]
+      properties:
+        request_id: { type: string }
+        session_expires_at: { type: string, format: date-time }
+        user: { $ref: '#/components/schemas/UserSummary' }
+        token:
+          type: string
+          description: Only returned to the Client Panel backend; never stored by a browser.
+    UserSummary:
+      type: object
+      required: [id, username, role, status, must_change_password]
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        role: { type: string, enum: [admin, user] }
+        status: { type: string, enum: [active, disabled, deleting, deleted] }
+        must_change_password: { type: boolean }
+    CreateMappingRequest:
+      type: object
+      required: [name, proxy_type, local_ip, local_port]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+        proxy_type: { type: string, enum: [tcp, udp, http] }
+        local_ip: { type: string, maxLength: 255 }
+        local_port: { type: integer, minimum: 1, maximum: 65535 }
+        remote_port: { type: integer, minimum: 0, maximum: 65535 }
+    Mapping:
+      allOf:
+        - $ref: '#/components/schemas/CreateMappingRequest'
+        - type: object
+          required: [id, user_id, lifecycle_status, desired_state, observed_state, revision]
+          properties:
+            id: { type: string, format: uuid }
+            user_id: { type: string, format: uuid }
+            lifecycle_status: { type: string }
+            desired_state: { type: string }
+            observed_state: { type: string }
+            revision: { type: integer, format: int64 }
+    ConfigSnapshot:
+      type: object
+      required: [schema_version, config_version, session_generation, payload]
+      properties:
+        schema_version: { type: string }
+        config_version: { type: integer, format: int64 }
+        session_generation: { type: integer, format: int64 }
+        payload: { type: object, additionalProperties: true }
+    Problem:
+      type: object
+      required: [type, title, status, detail, code, request_id]
+      properties:
+        type: { type: string, format: uri-reference }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        request_id: { type: string }
