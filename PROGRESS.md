@@ -63,7 +63,7 @@
 - [x] Client/Server 版本兼容边界已补齐：Client 发送 `X-FRP-Client-Version`，Server 对缺失/非法/过旧版本返回 426 与 `Upgrade-Required`，兼容但非 latest 版本显示升级建议；Server/Client 回归与 OpenAPI 契约测试通过。
 - [x] OpenAPI 类型化契约已补齐：`openapi-typescript` 生成 Server 与 Client Local API 的 `contracts/generated/*-api.d.ts`，两个面板请求层与页面模型引用对应生成类型，CI 检查生成文件漂移；root tooling 依赖纳入 SPDX SBOM 与许可证门禁。
 - [x] 密钥迁移期轮换已补齐：master/certificate wrapping key-ring 保留旧版本，`make key-rotate` 重包裹 FRP、Cloudflare 和证书私钥；重启兼容、旧密文解密、服务层行数/登录回归测试通过，真实生产轮换演练仍待外部环境。
-- [x] WCAG 2.1 AA 自动化已补齐：构建后的 Admin/Client 通过 axe、标签、键盘/reduced-motion 与 390px 横向溢出检查；脚本已接入既有 `web (admin)` CI job，新的分支 CI 证据待提交后更新。
+- [x] WCAG 2.1 AA 自动化已补齐：构建后的 Admin/Client 通过 axe、标签、键盘/reduced-motion 与 390px 横向溢出检查；脚本已接入既有 `web (admin)` CI job，PR #2 的最新 CI run 已通过。
 
 ## 验证记录
 
@@ -99,6 +99,8 @@
 | 2026-08-02 | 版本兼容、密钥轮换与 WCAG 托管门禁 | 通过；Server/Client 版本升级提示与 426 回归、版本化密钥环/`make key-rotate` 重包裹与重启兼容回归、两个已构建前端的 axe WCAG 2.1 AA/标签/键盘/移动端检查均通过；PR #2 的 [`ci` run 30757304002](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30757304002) 与 [`CodeQL run 30757303990`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30757303990) 全部成功，真实生产轮换仍待外部环境 |
 
 | 2026-08-03 | 发行边界与生成契约补齐 | 通过；`make build` 将两个独立 Vue dist 分别嵌入 Server/Client Go 二进制，`go test ./internal/httpapi` 覆盖 fallback embed；Server/Client `go test -race ./...`、`make lint`、`make contract`、OpenAPI 生成文件漂移检查、npm 许可证门禁和 SPDX SBOM 均通过。新增 Client Local API OpenAPI 与独立 route manifest；Vite 仍只有非阻断的大 chunk 警告，真实 Cloudflare/ACME/Linux FRP 矩阵和签名仍待外部环境 |
+
+| 2026-08-03 | Docker 构建修复与托管门禁 | 通过；提交 [`4e0cbc1`](https://github.com/sshiong/frp-panel-platform-v3/commit/4e0cbc1) 为镜像 UI 构建阶段复制生成契约类型，PR #2 的 [`ci` run 30760001938](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30760001938)（含 container-scan/release-metadata）与 [`CodeQL run 30760001941`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30760001941) 全部通过；正式签名和外部集成验收仍待发布环境 |
 
 ## 未决与发布阻断项
 
