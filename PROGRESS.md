@@ -106,6 +106,7 @@
 
 | 2026-08-03 | 响应契约与外部证据门禁 | 通过；`make contract`、Server/Client `go test -race ./...`、`make lint`、`make build`、`npm run test:accessibility`、`make sbom`、校验和/发布清单和 secret/license/migration 门禁均通过；新增 `request_id`/`/me` 实际字段契约与 `scripts/external-acceptance.rb`，本机无外部 Provider/签名证据时按设计生成 `blocked`，不伪造 Release Candidate |
 | 2026-08-03 | 最终托管门禁记录 | 通过；提交 [`0f0b353`](https://github.com/sshiong/frp-panel-platform-v3/commit/0f0b3538ba678ec685deb72e283dce9d4df9b038) 的 [`ci` run 30761382419](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30761382419) 与 [`CodeQL run 30761382415`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30761382415) 全部成功；PR #2 检查全绿但仍需人工 review，外部真实环境证据仍按标准保持 blocked |
+| 2026-08-03 | 固定 FRP 外部验收收集器 | 通过/按标准阻断；隔离 fixture 下 `frp-network-e2e.sh`、固定 FRPC `verify`、真实 FRPS/FRPC Plugin 网络 E2E 及本地契约/迁移/安全/许可证/构建均通过；`scripts/external-acceptance.rb` 仅因缺少 Cloudflare/ACME/目标硬件/故障注入/签名证据返回 blocked（退出码 2），未伪造 P0/P1 外部通过 |
 
 ## 未决与发布阻断项
 
