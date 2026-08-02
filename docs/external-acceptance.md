@@ -59,23 +59,30 @@ provide a redacted machine-readable evidence bundle:
   "schema_version": "v1",
   "status": "passed",
   "gates": {
-    "DNS-012": {"status": "passed", "evidence": "sandbox query-after-timeout"},
-    "DNS-013": {"status": "passed", "evidence": "managed/unmanaged cleanup"},
-    "CF-007": {"status": "passed", "evidence": "provider blocked job"},
-    "TLS-009": {"status": "passed", "evidence": "SNI hot reload"},
-    "TLS-010": {"status": "passed", "evidence": "ACME staging TXT propagation"},
-    "TLS-012": {"status": "passed", "evidence": "Cloudflare Full strict"},
-    "PERF-003": {"status": "passed", "evidence": "2 vCPU/2 GiB baseline"},
-    "REL-005": {"status": "passed", "evidence": "WAL pressure run"},
-    "REL-007": {"status": "passed", "evidence": "disk-full injection"},
-    "REL-008": {"status": "passed", "evidence": "clock skew injection"},
-    "SEC-008": {"status": "passed", "evidence": "cosign/tag attestation"},
-    "FRPS-009": {"status": "passed", "evidence": "Linux FRPS matrix"},
-    "KEY-004": {"status": "passed", "evidence": "rotation and rollback"},
-    "DOD-001": {"status": "passed", "evidence": "three-owner sign-off"}
+    "FRPS-009": {"status": "passed", "environment": {"os": "Ubuntu 24.04", "host": "isolated-release-runner"}, "steps": ["Run the fixed FRPS/FRPC Linux matrix"], "expected": "Supported FRP combinations pass", "actual": "All matrix cases pass", "artifacts": {"logs": ["secure/FRPS-009.log"], "screenshots": [], "request_ids": []}, "operator": "release-operator", "executed_at": "2026-08-03T00:00:00Z"},
+    "DNS-012": {"status": "passed", "environment": {"provider": "Cloudflare Sandbox", "zone": "disposable-test-zone"}, "steps": ["Create the timeout ambiguity fixture", "Query provider state"], "expected": "Query-after-timeout resolves without duplicate mutation", "actual": "Provider state matched the idempotent outcome", "artifacts": {"logs": ["secure/DNS-012.log"], "screenshots": [], "request_ids": ["sandbox-request-id"]}, "operator": "release-operator", "executed_at": "2026-08-03T00:00:00Z"},
+    "DNS-013": {"status": "passed", "environment": {"provider": "Cloudflare Sandbox", "zone": "disposable-test-zone"}, "steps": ["Run managed and adopted DNS cleanup"], "expected": "Only panel-managed records are removed", "actual": "Managed records cleaned; adopted records retained", "artifacts": {"logs": ["secure/DNS-013.log"], "screenshots": [], "request_ids": ["sandbox-request-id"]}, "operator": "release-operator", "executed_at": "2026-08-03T00:00:00Z"},
+    "CF-007": {"status": "passed", "environment": {"provider": "Cloudflare Sandbox", "token": "scoped-test-token"}, "steps": ["Run the missing-permission and blocked-job cases"], "expected": "Permission errors are classified and jobs remain retryable", "actual": "Blocked and permission states were recorded correctly", "artifacts": {"logs": ["secure/CF-007.log"], "screenshots": [], "request_ids": ["sandbox-request-id"]}, "operator": "release-operator", "executed_at": "2026-08-03T00:00:00Z"},
+    "TLS-009": {"status": "passed", "environment": {"os": "Ubuntu 24.04", "proxy": "test reverse proxy"}, "steps": ["Rotate certificates while serving SNI and Host traffic"], "expected": "SNI routing switches atomically without serving the wrong certificate", "actual": "Connections used the expected certificate before and after rotation", "artifacts": {"logs": ["secure/TLS-009.log"], "screenshots": [], "request_ids": []}, "operator": "release-operator", "executed_at": "2026-08-03T00:00:00Z"},
+    "TLS-010": {"status": "passed", "environment": {"ca": "ACME Staging", "dns": "Cloudflare Sandbox"}, "steps": ["Issue a DNS-01 certificate", "Verify TXT propagation and cleanup"], "expected": "Certificate is issued and temporary TXT records are removed", "actual": "Staging certificate issued; TXT cleanup verified", "artifacts": {"logs": ["secure/TLS-010.log"], "screenshots": [], "request_ids": ["acme-order-id"]}, "operator": "release-operator", "executed_at": "2026-08-03T00:00:00Z"},
+    "TLS-012": {"status": "passed", "environment": {"edge": "Cloudflare Full strict", "origin": "isolated TLS origin"}, "steps": ["Serve the panel through Full (strict)"], "expected": "The edge validates the origin certificate and routes successfully", "actual": "Full (strict) request completed with the expected origin", "artifacts": {"logs": ["secure/TLS-012.log"], "screenshots": [], "request_ids": ["edge-request-id"]}, "operator": "release-operator", "executed_at": "2026-08-03T00:00:00Z"},
+    "KEY-004": {"status": "passed", "environment": {"os": "Ubuntu 24.04", "data": "disposable encrypted fixture"}, "steps": ["Rotate the wrapping key", "Restart and decrypt old and new rows", "Exercise rollback"], "expected": "Old ciphertext remains readable during migration and rollback is recoverable", "actual": "Rotation, restart compatibility, and rollback passed", "artifacts": {"logs": ["secure/KEY-004.log"], "screenshots": [], "request_ids": []}, "operator": "release-operator", "executed_at": "2026-08-03T00:00:00Z"},
+    "PERF-003": {"status": "passed", "environment": {"cpu": "2 vCPU", "memory": "2 GiB", "disk": "local SSD"}, "steps": ["Run the target-scale mapping and domain profile"], "expected": "Requests and job lag remain within the documented thresholds", "actual": "All target-scale measurements met the thresholds", "artifacts": {"logs": ["secure/PERF-003.log"], "screenshots": [], "request_ids": []}, "operator": "release-operator", "executed_at": "2026-08-03T00:00:00Z"},
+    "REL-005": {"status": "passed", "environment": {"os": "Ubuntu 24.04", "disk": "disposable WAL fixture"}, "steps": ["Apply WAL pressure and checkpoint recovery"], "expected": "The service remains recoverable and reports the pressure", "actual": "Checkpoint and restart completed without data loss", "artifacts": {"logs": ["secure/REL-005.log"], "screenshots": [], "request_ids": []}, "operator": "release-operator", "executed_at": "2026-08-03T00:00:00Z"},
+    "REL-007": {"status": "passed", "environment": {"os": "Ubuntu 24.04", "disk": "quota-limited disposable volume"}, "steps": ["Inject disk-full during backup and restore"], "expected": "The operation fails safely and leaves recoverable state", "actual": "Disk-full paths returned bounded errors and preserved the last good state", "artifacts": {"logs": ["secure/REL-007.log"], "screenshots": [], "request_ids": []}, "operator": "release-operator", "executed_at": "2026-08-03T00:00:00Z"},
+    "REL-008": {"status": "passed", "environment": {"os": "Ubuntu 24.04", "clock": "isolated skewed clock"}, "steps": ["Inject forward and backward clock skew"], "expected": "Leases, retries, and certificates fail safe under skew", "actual": "Clock-skew cases remained bounded and recoverable", "artifacts": {"logs": ["secure/REL-008.log"], "screenshots": [], "request_ids": []}, "operator": "release-operator", "executed_at": "2026-08-03T00:00:00Z"},
+    "SEC-008": {"status": "passed", "environment": {"registry": "isolated artifact registry", "signer": "cosign test identity"}, "steps": ["Sign the tag and verify the attestation"], "expected": "The release artifact has a verifiable signature and provenance", "actual": "Cosign verification and tag attestation passed", "artifacts": {"logs": ["secure/SEC-008.log"], "screenshots": [], "request_ids": []}, "operator": "security-operator", "executed_at": "2026-08-03T00:00:00Z"},
+    "DOD-001": {"status": "passed", "environment": {"review": "release review record"}, "steps": ["Collect release, security, and test-owner approvals"], "expected": "All three required owners sign the same evidence revision", "actual": "Three-owner sign-off recorded", "artifacts": {"logs": ["secure/DOD-001-signoff.log"], "screenshots": [], "request_ids": []}, "operator": "release-manager", "executed_at": "2026-08-03T00:00:00Z"}
   }
 }
 ```
+
+Each gate must include a test environment, non-empty steps, expected and actual
+results, an artifacts object with at least one log, screenshot, or request ID,
+the operator, and an ISO-8601 execution time. The example uses placeholders for
+redacted artifact paths and request IDs; replace them with reviewed evidence
+before invoking the collector. The schema regression is covered by
+scripts/test-external-acceptance.rb and the contract CI job.
 
 Run the collector with that file only after the external report has been
 reviewed:

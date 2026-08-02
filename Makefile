@@ -49,6 +49,7 @@ lint:
 contract:
 	npm run generate:contracts
 	ruby scripts/validate-openapi.rb
+	ruby scripts/test-external-acceptance.rb
 	cd server && $(GO_ENV) go test ./internal/httpapi -run '^TestHTTPContract' -count=1
 
 migration-check:

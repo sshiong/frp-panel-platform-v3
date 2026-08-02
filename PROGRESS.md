@@ -63,7 +63,7 @@
 - [x] Client/Server 版本兼容边界已补齐：Client 发送 `X-FRP-Client-Version`，Server 对缺失/非法/过旧版本返回 426 与 `Upgrade-Required`，兼容但非 latest 版本显示升级建议；Server/Client 回归与 OpenAPI 契约测试通过。
 - [x] OpenAPI 类型化契约已补齐：`openapi-typescript` 生成 Server 与 Client Local API 的 `contracts/generated/*-api.d.ts`，两个面板请求层与页面模型引用对应生成类型，CI 检查生成文件漂移；root tooling 依赖纳入 SPDX SBOM 与许可证门禁。
 - [x] 密钥迁移期轮换已补齐：master/certificate wrapping key-ring 保留旧版本，`make key-rotate` 重包裹 FRP、Cloudflare 和证书私钥；重启兼容、旧密文解密、服务层行数/登录回归测试通过，真实生产轮换演练仍待外部环境。
-- [x] WCAG 2.1 AA 自动化已补齐：构建后的 Admin/Client 通过 axe、标签、键盘/reduced-motion 与 390px 横向溢出检查；脚本已接入既有 `web (admin)` CI job，PR #2 的最新 CI run 已通过。
+- [x] WCAG 2.1 AA 自动化已补齐：构建后的 Admin/Client 登录页、全部认证导航面板以及 Admin 创建用户、Client Mapping/Domain 对话框均通过 axe、标签、键盘/reduced-motion 与 390px 横向溢出检查；脚本使用无秘密的确定性 API fixture，并已接入既有 `web (admin)` CI job。
 - [x] API 成功响应契约已收紧：Server OpenAPI 为所有成功 JSON 响应声明 schema，统一 `request_id` 元数据，补齐 `/me` 实际会话字段、分页 envelope、异步 Operation、备份、Token、Router 和用户管理响应；`responseMetadata` 现在也覆盖 API GET 响应，契约回归验证通过。
 - [x] 外部验收证据收集器已补齐：`make external-acceptance` 运行本地契约/迁移/安全/许可证/构建门禁，在显式提供固定 FRP 二进制时运行真实网络 E2E，并对 Cloudflare Sandbox、ACME Staging、目标硬件、故障注入和签名证据缺失返回 `blocked`/退出码 2；流程见 [`external-acceptance.md`](docs/external-acceptance.md)。
 
@@ -108,6 +108,8 @@
 | 2026-08-03 | 最终托管门禁记录 | 通过；提交 [`0f0b353`](https://github.com/sshiong/frp-panel-platform-v3/commit/0f0b3538ba678ec685deb72e283dce9d4df9b038) 的 [`ci` run 30761382419](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30761382419) 与 [`CodeQL run 30761382415`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30761382415) 全部成功；PR #2 检查全绿但仍需人工 review，外部真实环境证据仍按标准保持 blocked |
 | 2026-08-03 | 固定 FRP 外部验收收集器 | 通过/按标准阻断；隔离 fixture 下 `frp-network-e2e.sh`、固定 FRPC `verify`、真实 FRPS/FRPC Plugin 网络 E2E 及本地契约/迁移/安全/许可证/构建均通过；`scripts/external-acceptance.rb` 仅因缺少 Cloudflare/ACME/目标硬件/故障注入/签名证据返回 blocked（退出码 2），未伪造 P0/P1 外部通过 |
 | 2026-08-03 | 固定 FRP 证据提交托管复核 | 通过；提交 [`49a21b0`](https://github.com/sshiong/frp-panel-platform-v3/commit/49a21b00f0e75afbf1c30772ab210e8b9d3dc98c) 的 [`ci` run 30762128928](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30762128928) 与 [`CodeQL` run 30762128925](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30762128925) 全部成功，包含容器扫描、发布元数据、双面板可访问性和安全门禁；PR #2 仍需人工 review |
+| 2026-08-03 | 认证面板可访问性与对比度收口 | 通过；`npm run test:accessibility` 扫描两个独立面板的全部导航 surface 与创建对话框，发现并修复导航类别标签、Mapping/Domain 元数据的 WCAG AA 对比度问题；登录页、认证页、对话框的 axe/标签/键盘/reduced-motion/390px 检查均通过 |
+| 2026-08-03 | 最终本地门禁与外部证据收集 | 本地通过；`make contract`（含证据 schema 回归）、`make test`、`make lint`、`make build`、`make perf`、`make security`、`make license`、`make migration-check`、`make sbom`、`make checksums` 和浏览器可访问性均通过；`make manifest` 因未提供固定 FRPS/FRPC 只拒绝生成正式清单，`make external-acceptance` 因同一固定版本依赖及 Cloudflare/ACME、目标硬件、故障注入和签名证据缺失按标准返回 blocked（退出码 2），未伪造发布通过 |
 
 ## 未决与发布阻断项
 

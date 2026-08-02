@@ -14,6 +14,7 @@ class AcceptanceCollector
     FRPS-009 DNS-012 DNS-013 CF-007 TLS-009 TLS-010 TLS-012 KEY-004
     PERF-003 REL-005 REL-007 REL-008 SEC-008 DOD-001
   ].freeze
+  EVIDENCE_ARTIFACT_FIELDS = %w[logs screenshots request_ids].freeze
 
   def initialize
     @steps = []
@@ -76,9 +77,9 @@ class AcceptanceCollector
     end
 
     document = JSON.parse(File.read(path))
-    gates = document.fetch("gates", {})
-    missing = PROVIDER_GATES.reject { |gate| gates.dig(gate, "status") == "passed" }
-    if missing.empty? && document["status"] == "passed"
+    errors = validate_evidence_bundle(document)
+
+    if errors.empty?
       @steps << {
         "id" => "provider-evidence",
         "title" => "Provider、目标环境与发布签字证据",
@@ -91,7 +92,7 @@ class AcceptanceCollector
         "provider-evidence",
         "Provider、目标环境与发布签字证据",
         [path],
-        "证据必须以 status=passed 且逐项包含通过状态；未通过或缺失：#{missing.join(', ')}"
+        "证据包不符合 v1 结构：#{errors.join('；')}"
       )
     end
   rescue JSON::ParserError, KeyError => e
@@ -102,6 +103,82 @@ class AcceptanceCollector
       "source" => path,
       "stderr_tail" => redact("证据文件格式无效：#{e.message}")
     }
+  end
+
+  def validate_evidence_gate(gate_id, gate)
+    return ["#{gate_id} 必须是对象"] unless gate.is_a?(Hash)
+
+    errors = []
+    errors << "#{gate_id}.status 必须为 passed" unless gate["status"] == "passed"
+    {
+      "environment" => "对象或非空字符串",
+      "steps" => "非空数组",
+      "expected" => "非空字符串",
+      "actual" => "非空字符串",
+      "operator" => "非空字符串",
+      "executed_at" => "ISO-8601 时间"
+    }.each do |field, description|
+      value = gate[field]
+      type_valid = case field
+      when "environment"
+        value.is_a?(Hash) || value.is_a?(String)
+      when "steps"
+        value.is_a?(Array)
+      else
+        value.is_a?(String)
+      end
+      next if type_valid && nonempty_value?(value)
+
+      errors << "#{gate_id}.#{field} 必须是#{description}"
+    end
+
+    artifacts = gate["artifacts"]
+    if !artifacts.is_a?(Hash)
+      errors << "#{gate_id}.artifacts 必须是对象"
+    elsif !EVIDENCE_ARTIFACT_FIELDS.any? { |field| nonempty_value?(artifacts[field]) }
+      errors << "#{gate_id}.artifacts 至少包含一项 logs、screenshots 或 request_ids"
+    end
+
+    begin
+      Time.iso8601(gate["executed_at"].to_s)
+    rescue ArgumentError
+      errors << "#{gate_id}.executed_at 不是有效的 ISO-8601 时间"
+    end unless gate["executed_at"].nil?
+
+    errors
+  end
+
+  def validate_evidence_bundle(document)
+    return ["证据根节点必须是对象"] unless document.is_a?(Hash)
+
+    errors = []
+    errors << "schema_version 必须为 v1" unless document["schema_version"] == "v1"
+    errors << "bundle status 必须为 passed" unless document["status"] == "passed"
+    gates = document["gates"]
+    unless gates.is_a?(Hash)
+      errors << "gates 必须是对象"
+      return errors
+    end
+
+    missing = PROVIDER_GATES.reject { |gate| gates[gate].is_a?(Hash) && gates[gate]["status"] == "passed" }
+    errors << "缺少或未通过：#{missing.join(', ')}" unless missing.empty?
+    PROVIDER_GATES.each do |gate_id|
+      errors.concat(validate_evidence_gate(gate_id, gates[gate_id]))
+    end
+    errors
+  end
+
+  def nonempty_value?(value)
+    case value
+    when String
+      !value.strip.empty?
+    when Array
+      value.any? { |item| nonempty_value?(item) }
+    when Hash
+      !value.empty?
+    else
+      !value.nil?
+    end
   end
 
   def report
@@ -151,7 +228,8 @@ class AcceptanceCollector
   end
 end
 
-collector = AcceptanceCollector.new
+def run_external_acceptance
+  collector = AcceptanceCollector.new
 
 if ENV.fetch("EXTERNAL_ACCEPTANCE_LOCAL", "1") != "0"
   collector.run("local-contract", "OpenAPI 与实现路由契约", ["ruby", "scripts/validate-openapi.rb"])
@@ -202,4 +280,7 @@ File.open(REPORT_PATH, "w", 0o600) { |file| file.write(JSON.pretty_generate(repo
 File.chmod(0o600, REPORT_PATH)
 puts JSON.pretty_generate(report)
 warn "external acceptance report: #{REPORT_PATH} (status=#{report["status"]})"
-exit(report["status"] == "passed" ? 0 : report["status"] == "blocked" ? 2 : 1)
+  exit(report["status"] == "passed" ? 0 : report["status"] == "blocked" ? 2 : 1)
+end
+
+run_external_acceptance if $PROGRAM_NAME == __FILE__
