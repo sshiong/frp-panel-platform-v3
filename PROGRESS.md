@@ -110,6 +110,7 @@
 | 2026-08-03 | 固定 FRP 证据提交托管复核 | 通过；提交 [`49a21b0`](https://github.com/sshiong/frp-panel-platform-v3/commit/49a21b00f0e75afbf1c30772ab210e8b9d3dc98c) 的 [`ci` run 30762128928](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30762128928) 与 [`CodeQL` run 30762128925](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30762128925) 全部成功，包含容器扫描、发布元数据、双面板可访问性和安全门禁；PR #2 仍需人工 review |
 | 2026-08-03 | 认证面板可访问性与对比度收口 | 通过；`npm run test:accessibility` 扫描两个独立面板的全部导航 surface 与创建对话框，发现并修复导航类别标签、Mapping/Domain 元数据的 WCAG AA 对比度问题；登录页、认证页、对话框的 axe/标签/键盘/reduced-motion/390px 检查均通过 |
 | 2026-08-03 | 最终本地门禁与外部证据收集 | 本地通过；`make contract`（含证据 schema 回归）、`make test`、`make lint`、`make build`、`make perf`、`make security`、`make license`、`make migration-check`、`make sbom`、`make checksums` 和浏览器可访问性均通过；`make manifest` 因未提供固定 FRPS/FRPC 只拒绝生成正式清单，`make external-acceptance` 因同一固定版本依赖及 Cloudflare/ACME、目标硬件、故障注入和签名证据缺失按标准返回 blocked（退出码 2），未伪造发布通过 |
+| 2026-08-03 | 认证面板修复提交的最终托管复核 | 通过；提交 [`92cf1a3`](https://github.com/sshiong/frp-panel-platform-v3/commit/92cf1a379aab096dc2800a92eaa3d43e41a5e77c) 的 [`ci` run 30763715852](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30763715852) 与 [`CodeQL` run 30763715867](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30763715867) 全部成功，新增 evidence schema regression、双面板认证可访问性、fuzz、container scan 和 release metadata 均通过 |
 
 ## 未决与发布阻断项
 
