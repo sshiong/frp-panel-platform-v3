@@ -2,6 +2,22 @@ package version
 
 import "testing"
 
+func TestBuildCompatibilityMetadata(t *testing.T) {
+	for name, value := range map[string]string{
+		"server":  ServerVersion,
+		"minimum": MinimumClientVersion,
+		"latest":  LatestClientVersion,
+		"frpc":    MinimumFRPCVersion,
+	} {
+		if _, err := ParseSemVer(value); err != nil {
+			t.Fatalf("%s build metadata %q is not SemVer: %v", name, value, err)
+		}
+	}
+	if !IsAtLeast(LatestClientVersion, MinimumClientVersion) {
+		t.Fatalf("latest client version %q is below minimum %q", LatestClientVersion, MinimumClientVersion)
+	}
+}
+
 func TestParseSemVerAndCompare(t *testing.T) {
 	parsed, err := ParseSemVer("1.2.3")
 	if err != nil || parsed != (SemVer{Major: 1, Minor: 2, Patch: 3}) {

@@ -139,7 +139,7 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 | API-002 | 本地通过 | Problem Details、稳定 code、request_id 和错误测试通过。 |
 | API-003 | 本地通过 | 权限中间件分离，越权拒绝不暴露资源存在性。 |
 | API-004 | 本地通过 | 不支持 HTTP/WS protocol 返回 426。 |
-| API-005 | 本地通过 | Client 发送 `X-FRP-Client-Version`；过旧/非法版本返回 426、`Upgrade-Required` 和 `CLIENT_VERSION_UNSUPPORTED`，兼容版本可登录并显示可升级提示，回归测试通过。 |
+| API-005 | 本地通过 | Client 发送 `X-FRP-Client-Version`；过旧/非法版本返回 426、`Upgrade-Required` 和 `CLIENT_VERSION_UNSUPPORTED`，兼容版本可登录并显示可升级提示，回归测试通过；Server/Client 发行版本可由独立 `-ldflags` 注入并进入 compatibility API。 |
 | API-006 | 本地通过 | WebSocket 指数退避、抖动、lease heartbeat 测试通过。 |
 | API-007 | 本地通过 | 丢通知触发 full sync，配置 hash/version 收敛测试通过。 |
 | PERF-001 | 本地通过 | 本机 100 并发读 profile 通过；Linux 2 vCPU/2 GiB p95 基线待外部。 |

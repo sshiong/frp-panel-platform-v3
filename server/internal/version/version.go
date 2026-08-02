@@ -6,13 +6,20 @@ import (
 	"strings"
 )
 
-const (
+// These string variables keep development defaults in source while allowing
+// the release build to inject independent Server/Client compatibility values
+// with Go's -ldflags -X mechanism. Protocol and schema versions stay fixed
+// until the API/configuration compatibility policy explicitly changes them.
+var (
 	ServerVersion        = "0.1.0"
-	ProtocolVersion      = "v1"
-	ConfigSchemaVersion  = "v1"
 	MinimumClientVersion = "0.1.0"
 	LatestClientVersion  = "0.1.0"
 	MinimumFRPCVersion   = "0.68.0"
+)
+
+const (
+	ProtocolVersion     = "v1"
+	ConfigSchemaVersion = "v1"
 )
 
 // SemVer is the stable three-component version form used by the panel

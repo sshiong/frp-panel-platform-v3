@@ -3,6 +3,30 @@ name: release
 on:
   push:
     tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'SemVer tag for the GitHub release, for example v1.2.3'
+        required: true
+        type: string
+      server_version:
+        description: 'Independent Server Panel SemVer'
+        required: true
+        type: string
+      client_version:
+        description: 'Independent Client Panel SemVer'
+        required: true
+        type: string
+      minimum_client_version:
+        description: 'Oldest supported Client Panel SemVer'
+        required: false
+        default: '0.1.0'
+        type: string
+      minimum_frpc_version:
+        description: 'Oldest supported FRPC SemVer'
+        required: false
+        default: '0.68.0'
+        type: string
 
 permissions:
   contents: write
@@ -27,6 +51,37 @@ jobs:
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
+      - name: Resolve independent release versions
+        id: release-version
+        shell: bash
+        env:
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+          INPUT_SERVER_VERSION: ${{ inputs.server_version }}
+          INPUT_CLIENT_VERSION: ${{ inputs.client_version }}
+          INPUT_MINIMUM_CLIENT_VERSION: ${{ inputs.minimum_client_version }}
+          INPUT_MINIMUM_FRPC_VERSION: ${{ inputs.minimum_frpc_version }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$INPUT_RELEASE_TAG" ]]; then
+            release_tag="$INPUT_RELEASE_TAG"
+            server_version="$INPUT_SERVER_VERSION"
+            client_version="$INPUT_CLIENT_VERSION"
+          else
+            release_tag="$GITHUB_REF_NAME"
+            server_version="${release_tag#v}"
+            client_version="${release_tag#v}"
+          fi
+          minimum_client_version="${INPUT_MINIMUM_CLIENT_VERSION:-0.1.0}"
+          minimum_frpc_version="${INPUT_MINIMUM_FRPC_VERSION:-0.68.0}"
+          [[ "$release_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "release tag must be vMAJOR.MINOR.PATCH" >&2; exit 1; }
+          [[ -n "$server_version" && -n "$client_version" ]] || { echo "independent Server/Client versions are required" >&2; exit 1; }
+          {
+            echo "tag=$release_tag"
+            echo "server_version=$server_version"
+            echo "client_version=$client_version"
+            echo "minimum_client_version=$minimum_client_version"
+            echo "minimum_frpc_version=$minimum_frpc_version"
+          } >> "$GITHUB_OUTPUT"
       - run: npm ci
       - run: npm ci
         working-directory: web/admin
@@ -45,7 +100,7 @@ jobs:
           mkdir -p build
           cp /tmp/frp_0.68.0_linux_amd64/frps build/frps
           cp /tmp/frp_0.68.0_linux_amd64/frpc build/frpc
-      - run: SERVER_VERSION="${GITHUB_REF_NAME#v}" CLIENT_VERSION="${GITHUB_REF_NAME#v}" FRPS_BINARY=build/frps FRPC_BINARY=build/frpc FRPS_VERSION=0.68.0 FRPC_VERSION=0.68.0 make contract migration-check license build sbom checksums manifest
+      - run: SERVER_VERSION="${{ steps.release-version.outputs.server_version }}" CLIENT_VERSION="${{ steps.release-version.outputs.client_version }}" MINIMUM_CLIENT_VERSION="${{ steps.release-version.outputs.minimum_client_version }}" LATEST_CLIENT_VERSION="${{ steps.release-version.outputs.client_version }}" MINIMUM_FRPC_VERSION="${{ steps.release-version.outputs.minimum_frpc_version }}" FRPS_BINARY=build/frps FRPC_BINARY=build/frpc FRPS_VERSION=0.68.0 FRPC_VERSION=0.68.0 make contract migration-check license build sbom checksums manifest
       - uses: sigstore/cosign-installer@v3
       - name: Sign release metadata and binaries
         run: |
@@ -54,6 +109,9 @@ jobs:
           done
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.release-version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
           files: |
             build/frp-panel-server
             build/frp-panel-client

@@ -35,6 +35,11 @@ Client 保持向后兼容并继续使用登录响应。
 `server_version` and the two panel artifact versions are independent release
 metadata. The release manifest records them under `panel_versions.server` and
 `panel_versions.client`; a future release may advance one without silently
-changing the other.
+changing the other. `make build SERVER_VERSION=x.y.z CLIENT_VERSION=a.b.c`
+injects those values into the two independent binaries, and the release
+workflow validates the values with `scripts/release-version-policy.rb` before
+generating the manifest. The manifest also records
+`minimum_client_version`, `latest_client_version` and `minimum_frpc_version`
+under `compatibility`.
 
 Patch/Minor 版本只增加可忽略字段；删除或改变字段必须升级 API 主版本或经过弃用周期。Server/Client 发行版本可以独立递增，但在兼容矩阵没有声明前不得应用配置。正式发布还要在 Linux release matrix 重复固定 FRPS/FRPC 和 Plugin 验证，并把具体二进制 hash 写入 `build/release-manifest.json`。

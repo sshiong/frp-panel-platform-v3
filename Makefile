@@ -5,8 +5,16 @@ GO_MODULE_CACHE ?= /private/tmp/frp-cf-gomodcache
 GO_ENV = GOCACHE=$(GO_CACHE) GOMODCACHE=$(GO_MODULE_CACHE)
 STATICCHECK ?= staticcheck
 FRPC_VERIFY_VERSION ?= 0.68.0
+SERVER_VERSION ?= 0.1.0
+CLIENT_VERSION ?= 0.1.0
+MINIMUM_CLIENT_VERSION ?= 0.1.0
+LATEST_CLIENT_VERSION ?= $(CLIENT_VERSION)
+MINIMUM_FRPC_VERSION ?= 0.68.0
 
-.PHONY: install-web build test lint accessibility contract migration-check license security fuzz perf frpc-verify network-e2e plugin-e2e external-acceptance sbom checksums manifest sign release checkpoint key-rotate dev-server dev-client clean
+SERVER_LDFLAGS ?= -X github.com/ricardo/frp-panel-platform/server/internal/version.ServerVersion=$(SERVER_VERSION) -X github.com/ricardo/frp-panel-platform/server/internal/version.MinimumClientVersion=$(MINIMUM_CLIENT_VERSION) -X github.com/ricardo/frp-panel-platform/server/internal/version.LatestClientVersion=$(LATEST_CLIENT_VERSION) -X github.com/ricardo/frp-panel-platform/server/internal/version.MinimumFRPCVersion=$(MINIMUM_FRPC_VERSION)
+CLIENT_LDFLAGS ?= -X github.com/ricardo/frp-panel-platform/client/internal/version.ClientVersion=$(CLIENT_VERSION)
+
+.PHONY: install-web build test lint accessibility contract migration-check license security fuzz perf frpc-verify network-e2e plugin-e2e external-acceptance sbom checksums manifest release-version-check sign release checkpoint key-rotate dev-server dev-client clean
 
 install-web:
 	npm ci
@@ -19,8 +27,8 @@ build:
 	./scripts/embed-web-assets.sh web/admin/dist server/internal/httpapi/static/generated
 	./scripts/embed-web-assets.sh web/client/dist client/internal/httpapi/static/generated
 	mkdir -p build
-	cd server && $(GO_ENV) go build -o ../build/frp-panel-server ./cmd/server
-	cd client && $(GO_ENV) go build -o ../build/frp-panel-client ./cmd/client
+	cd server && $(GO_ENV) go build -ldflags "$(SERVER_LDFLAGS)" -o ../build/frp-panel-server ./cmd/server
+	cd client && $(GO_ENV) go build -ldflags "$(CLIENT_LDFLAGS)" -o ../build/frp-panel-client ./cmd/client
 
 accessibility:
 	npm ci
@@ -51,6 +59,7 @@ contract:
 	npm run generate:contracts
 	ruby scripts/validate-openapi.rb
 	ruby scripts/test-external-acceptance.rb
+	ruby scripts/release-version-policy.rb
 	cd server && $(GO_ENV) go test ./internal/httpapi -run '^TestHTTPContract' -count=1
 
 migration-check:
@@ -93,7 +102,10 @@ checksums: build
 	shasum -a 256 build/frp-panel-server build/frp-panel-client > build/SHA256SUMS
 	@if test -f build/frps; then shasum -a 256 build/frps build/frpc >> build/SHA256SUMS; fi
 
-manifest: build
+release-version-check:
+	ruby scripts/release-version-policy.rb
+
+manifest: build release-version-check
 	ruby scripts/generate-release-manifest.rb
 
 sign: checksums sbom manifest

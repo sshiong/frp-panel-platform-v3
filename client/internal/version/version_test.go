@@ -2,6 +2,12 @@ package version
 
 import "testing"
 
+func TestBuildCompatibilityMetadata(t *testing.T) {
+	if _, err := ParseSemVer(ClientVersion); err != nil {
+		t.Fatalf("client build metadata %q is not SemVer: %v", ClientVersion, err)
+	}
+}
+
 func TestVersionComparison(t *testing.T) {
 	parsed, err := ParseSemVer("1.2.3")
 	if err != nil || parsed != (SemVer{Major: 1, Minor: 2, Patch: 3}) {

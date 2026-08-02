@@ -6,8 +6,14 @@ import (
 	"strings"
 )
 
+// ClientVersion is injected independently from the Server version for a
+// release build. The protocol and configuration schema remain source-level
+// compatibility constants until a versioned migration changes them.
+var (
+	ClientVersion = "0.1.0"
+)
+
 const (
-	ClientVersion       = "0.1.0"
 	ProtocolVersion     = "v1"
 	ConfigSchemaVersion = "v1"
 )
