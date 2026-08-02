@@ -41,8 +41,9 @@ paths:
               schema:
                 type: object
                 additionalProperties: false
-                required: [server_version, minimum_client_version, latest_client_version, minimum_frpc_version, protocol_version, config_schema_version]
+                required: [request_id, server_version, minimum_client_version, latest_client_version, minimum_frpc_version, protocol_version, config_schema_version]
                 properties:
+                  request_id: { type: string }
                   server_version: { type: string }
                   minimum_client_version: { type: string }
                   latest_client_version: { type: string }
@@ -93,7 +94,11 @@ paths:
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
       responses:
-        '200': { description: Session revoked }
+        '200':
+          description: Session revoked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AcknowledgedResponse' }
   /api/v1/auth/change-password:
     post:
       operationId: changePassword
@@ -112,7 +117,11 @@ paths:
                 new_username: { type: string, minLength: 3, maxLength: 40, description: Required when the initial administrator identity is being completed. }
                 new_password: { type: string, format: password, minLength: 12 }
       responses:
-        '200': { description: Password changed }
+        '200':
+          description: Password changed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AcknowledgedResponse' }
   /api/v1/auth/reauth:
     post:
       operationId: issueReauthTicket
@@ -158,7 +167,7 @@ paths:
       operationId: me
       security: [{ bearerAuth: [] }]
       responses:
-        '200': { description: Current authenticated principal, content: { application/json: { schema: { $ref: '#/components/schemas/UserSummary' } } } }
+        '200': { description: Current authenticated session, content: { application/json: { schema: { $ref: '#/components/schemas/AuthenticatedSession' } } } }
   /api/v1/dashboard:
     get:
       operationId: dashboard
@@ -168,7 +177,7 @@ paths:
           description: Dashboard summary
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Dashboard' }
+              schema: { $ref: '#/components/schemas/DashboardResponse' }
   /api/v1/mappings:
     get:
       operationId: listMappings
@@ -183,8 +192,9 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [items, config_version, page, page_size, total]
+                required: [request_id, items, config_version, page, page_size, total]
                 properties:
+                  request_id: { type: string }
                   items: { type: array, items: { $ref: '#/components/schemas/Mapping' } }
                   config_version: { type: integer, format: int64 }
                   page: { type: integer, minimum: 1 }
@@ -201,7 +211,11 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/CreateMappingRequest' }
       responses:
-        '201': { description: Mapping created }
+        '201':
+          description: Mapping created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MappingResponse' }
         '409': { $ref: '#/components/responses/Problem' }
   /api/v1/mappings/{id}:
     put:
@@ -219,7 +233,7 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/CreateMappingRequest' }
       responses:
-        '200': { description: Mapping updated, content: { application/json: { schema: { $ref: '#/components/schemas/Mapping' } } } }
+        '200': { description: Mapping updated, content: { application/json: { schema: { $ref: '#/components/schemas/MappingResponse' } } } }
         '409': { $ref: '#/components/responses/Problem' }
     delete:
       operationId: deleteMapping
@@ -234,7 +248,11 @@ paths:
           schema: { type: boolean, default: false }
         - { $ref: '#/components/parameters/IdempotencyKey' }
       responses:
-        '202': { description: Mapping deletion queued }
+        '202':
+          description: Mapping deletion queued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperationAcceptedResponse' }
   /api/v1/mappings/{id}/toggle:
     post:
       operationId: toggleMapping
@@ -258,7 +276,11 @@ paths:
                 expected_config_version: { type: integer, format: int64 }
                 expected_revision: { type: integer, format: int64 }
       responses:
-        '200': { description: Desired state updated }
+        '200':
+          description: Desired state updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AcknowledgedResponse' }
   /api/v1/config/full:
     get:
       operationId: fullConfig
@@ -268,7 +290,7 @@ paths:
           description: Signed full desired configuration
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ConfigSnapshot' }
+              schema: { $ref: '#/components/schemas/ConfigSnapshotResponse' }
   /api/v1/domains:
     get:
       operationId: listDomains
@@ -283,8 +305,9 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [items, page, page_size, total]
+                required: [request_id, items, page, page_size, total]
                 properties:
+                  request_id: { type: string }
                   items: { type: array, items: { $ref: '#/components/schemas/Domain' } }
                   page: { type: integer, minimum: 1 }
                   page_size: { type: integer, minimum: 1, maximum: 200 }
@@ -300,7 +323,11 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/CreateDomainRequest' }
       responses:
-        '202': { description: Domain Binding created in pending state }
+        '202':
+          description: Domain Binding created in pending state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DomainResponse' }
         '409': { $ref: '#/components/responses/Problem' }
   /api/v1/domains/{id}/dns-action:
     post:
@@ -322,7 +349,11 @@ paths:
               properties:
                 action: { type: string, enum: [adopt, overwrite, cancel, sync] }
       responses:
-        '202': { description: DNS conflict resolution queued }
+        '202':
+          description: DNS conflict resolution queued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DNSActionResponse' }
         '404': { $ref: '#/components/responses/Problem' }
   /api/v1/domains/{id}:
     delete:
@@ -335,7 +366,11 @@ paths:
           schema: { type: string, format: uuid }
         - { $ref: '#/components/parameters/IdempotencyKey' }
       responses:
-        '202': { description: Domain deletion queued }
+        '202':
+          description: Domain deletion queued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperationAcceptedResponse' }
   /api/v1/operations:
     get:
       operationId: listOperations
@@ -350,8 +385,9 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [items, page, page_size, total]
+                required: [request_id, items, page, page_size, total]
                 properties:
+                  request_id: { type: string }
                   items: { type: array, items: { $ref: '#/components/schemas/Operation' } }
                   page: { type: integer, minimum: 1 }
                   page_size: { type: integer, minimum: 1, maximum: 200 }
@@ -367,7 +403,11 @@ paths:
           schema: { type: string, format: uuid }
         - { $ref: '#/components/parameters/IdempotencyKey' }
       responses:
-        '202': { description: Operation requeued }
+        '202':
+          description: Operation requeued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperationAcceptedResponse' }
         '404': { $ref: '#/components/responses/Problem' }
   /api/v1/config/signing-key:
     get:
@@ -378,7 +418,7 @@ paths:
           description: Public Ed25519 verification key metadata
           content:
             application/json:
-              schema: { type: object, required: [algorithm, key_id, public_key], additionalProperties: false, properties: { algorithm: { type: string }, key_id: { type: string }, public_key: { type: string } } }
+              schema: { $ref: '#/components/schemas/SigningKeyResponse' }
   /api/v1/config/apply-result:
     post:
       operationId: applyResult
@@ -401,7 +441,11 @@ paths:
                 error_code: { type: string }
                 error_message: { type: string }
       responses:
-        '200': { description: Apply result accepted }
+        '200':
+          description: Apply result accepted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AcknowledgedResponse' }
   /api/v1/session/heartbeat:
     post:
       operationId: sessionHeartbeat
@@ -409,13 +453,17 @@ paths:
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
       responses:
-        '200': { description: Session heartbeat accepted }
+        '200':
+          description: Session heartbeat accepted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HeartbeatResponse' }
   /api/v1/cloudflare/status:
     get:
       operationId: cloudflareStatus
       security: [{ bearerAuth: [] }]
       responses:
-        '200': { description: Cloudflare credential and capability state, content: { application/json: { schema: { $ref: '#/components/schemas/CloudflareStatus' } } } }
+        '200': { description: Cloudflare credential and capability state, content: { application/json: { schema: { $ref: '#/components/schemas/CloudflareStatusResponse' } } } }
   /api/v1/cloudflare/token:
     post:
       operationId: saveCloudflareToken
@@ -433,7 +481,11 @@ paths:
                 token: { type: string, minLength: 20 }
                 reauth_ticket: { type: string, minLength: 32 }
       responses:
-        '202': { description: Token verification queued }
+        '202':
+          description: Token verification queued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPendingResponse' }
     delete:
       operationId: clearCloudflareToken
       security: [{ bearerAuth: [] }]
@@ -449,7 +501,11 @@ paths:
               properties:
                 reauth_ticket: { type: string, minLength: 32 }
       responses:
-        '200': { description: Cloudflare credentials retired }
+        '200':
+          description: Cloudflare credentials retired
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CloudflareTokenClearedResponse' }
   /api/v1/admin/router/status:
     get:
       operationId: routerStatus
@@ -459,7 +515,7 @@ paths:
           description: Router snapshot and last-good state
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/RouterStatus' }
+              schema: { $ref: '#/components/schemas/RouterStatusResponse' }
   /api/v1/admin/router/rebuild:
     post:
       operationId: rebuildRouter
@@ -472,7 +528,11 @@ paths:
           application/json:
             schema: { type: object, required: [reauth_ticket], properties: { reauth_ticket: { type: string, minLength: 32 } } }
       responses:
-        '202': { description: Router snapshot rebuild queued }
+        '202':
+          description: Router snapshot rebuild queued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PendingMessageResponse' }
   /api/v1/admin/users:
     get:
       operationId: adminListUsers
@@ -487,8 +547,9 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [items, page, page_size, total]
+                required: [request_id, items, page, page_size, total]
                 properties:
+                  request_id: { type: string }
                   items: { type: array, items: { $ref: '#/components/schemas/UserRecord' } }
                   page: { type: integer, minimum: 1 }
                   page_size: { type: integer, minimum: 1, maximum: 200 }
@@ -504,7 +565,11 @@ paths:
           application/json:
             schema: { type: object, required: [username, reauth_ticket], properties: { username: { type: string }, reauth_ticket: { type: string, minLength: 32 } } }
       responses:
-        '201': { description: User created }
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreatedUserResponse' }
   /api/v1/admin/users/{id}:
     delete:
       operationId: adminDeleteUser
@@ -524,7 +589,11 @@ paths:
           application/json:
             schema: { type: object, required: [reauth_ticket], properties: { reauth_ticket: { type: string, minLength: 32 } } }
       responses:
-        '202': { description: User deletion compensation operation queued }
+        '202':
+          description: User deletion compensation operation queued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ForcedOperationAcceptedResponse' }
         '409': { $ref: '#/components/responses/Problem' }
   /api/v1/admin/users/{id}/status:
     post:
@@ -542,7 +611,11 @@ paths:
           application/json:
             schema: { type: object, required: [status, reauth_ticket], properties: { status: { type: string, enum: [active, disabled] }, reauth_ticket: { type: string, minLength: 32 } } }
       responses:
-        '200': { description: User status updated }
+        '200':
+          description: User status updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AcknowledgedResponse' }
   /api/v1/admin/users/{id}/reset-password:
     post:
       operationId: adminResetPassword
@@ -559,7 +632,11 @@ paths:
           application/json:
             schema: { type: object, required: [reauth_ticket], properties: { reauth_ticket: { type: string, minLength: 32 } } }
       responses:
-        '200': { description: Temporary password generated }
+        '200':
+          description: Temporary password generated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TemporaryPasswordResponse' }
   /api/v1/admin/users/{id}/reset-frp-credential:
     post:
       operationId: adminResetFRPCredential
@@ -580,7 +657,11 @@ paths:
               properties:
                 reauth_ticket: { type: string, minLength: 32 }
       responses:
-        '200': { description: Target user FRP credential rotated; secret is not returned }
+        '200':
+          description: Target user FRP credential rotated; secret is not returned
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FRPSecretResetResult' }
   /api/v1/admin/operations:
     get:
       operationId: adminOperations
@@ -595,8 +676,9 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [items, page, page_size, total]
+                required: [request_id, items, page, page_size, total]
                 properties:
+                  request_id: { type: string }
                   items: { type: array, items: { $ref: '#/components/schemas/Operation' } }
                   page: { type: integer, minimum: 1 }
                   page_size: { type: integer, minimum: 1, maximum: 200 }
@@ -606,7 +688,7 @@ paths:
       operationId: adminStats
       security: [{ bearerAuth: [] }]
       responses:
-        '200': { description: Server statistics, content: { application/json: { schema: { $ref: '#/components/schemas/AdminStats' } } } }
+        '200': { description: Server statistics, content: { application/json: { schema: { $ref: '#/components/schemas/AdminStatsResponse' } } } }
   /api/v1/admin/backups:
     post:
       operationId: createBackup
@@ -624,7 +706,11 @@ paths:
                 password: { type: string, format: password, minLength: 12 }
                 reauth_ticket: { type: string, minLength: 32 }
       responses:
-        '201': { description: Encrypted backup created }
+        '201':
+          description: Encrypted backup created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BackupCreatedResponse' }
 components:
   parameters:
     Page:
@@ -659,6 +745,153 @@ components:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
   schemas:
+    RequestMetadata:
+      type: object
+      required: [request_id]
+      properties:
+        request_id: { type: string }
+    AcknowledgedResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, ok]
+      properties:
+        request_id: { type: string }
+        ok: { type: boolean, const: true }
+    OperationAcceptedResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, operation_id, status]
+      properties:
+        request_id: { type: string }
+        operation_id: { type: string, format: uuid }
+        status: { type: string, enum: [pending] }
+    ForcedOperationAcceptedResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, operation_id, status, force]
+      properties:
+        request_id: { type: string }
+        operation_id: { type: string, format: uuid }
+        status: { type: string, enum: [pending] }
+        force: { type: boolean }
+    DNSActionResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, status, action]
+      properties:
+        request_id: { type: string }
+        status: { type: string, enum: [pending] }
+        action: { type: string, enum: [adopt, overwrite, cancel, sync] }
+    HeartbeatResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, ok, server_time]
+      properties:
+        request_id: { type: string }
+        ok: { type: boolean, const: true }
+        server_time: { type: string, format: date-time }
+    TokenPendingResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, status, message]
+      properties:
+        request_id: { type: string }
+        status: { type: string, enum: [pending] }
+        message: { type: string }
+    CloudflareTokenClearedResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, status, message]
+      properties:
+        request_id: { type: string }
+        status: { type: string, enum: [missing] }
+        message: { type: string }
+    PendingMessageResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, status, message]
+      properties:
+        request_id: { type: string }
+        status: { type: string, enum: [pending] }
+        message: { type: string }
+    SigningKeyResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, algorithm, key_id, public_key]
+      properties:
+        request_id: { type: string }
+        algorithm: { type: string, const: Ed25519 }
+        key_id: { type: string }
+        public_key: { type: string }
+    BackupCreatedResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, status, file]
+      properties:
+        request_id: { type: string }
+        status: { type: string, enum: [succeeded] }
+        file: { type: string, pattern: '^backups/' }
+    TemporaryPasswordResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, initial_password, warning]
+      properties:
+        request_id: { type: string }
+        initial_password: { type: string, format: password }
+        warning: { type: string }
+    CreatedUserResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, user, initial_password, warning]
+      properties:
+        request_id: { type: string }
+        user: { $ref: '#/components/schemas/UserRecord' }
+        initial_password: { type: string, format: password }
+        warning: { type: string }
+    AuthenticatedSession:
+      type: object
+      additionalProperties: false
+      required: [request_id, session_id, user_id, username, role, status, generation, channel, must_change_password, must_change_username, expires_at]
+      properties:
+        request_id: { type: string }
+        session_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        username: { type: string }
+        role: { type: string, enum: [admin, user] }
+        status: { type: string, enum: [active, disabled, deleting, deleted] }
+        generation: { type: integer, format: int64 }
+        channel: { type: string, enum: [admin_panel, client_panel] }
+        must_change_password: { type: boolean }
+        must_change_username: { type: boolean }
+        expires_at: { type: string, format: date-time }
+    MappingResponse:
+      allOf:
+        - $ref: '#/components/schemas/Mapping'
+        - $ref: '#/components/schemas/RequestMetadata'
+    DomainResponse:
+      allOf:
+        - $ref: '#/components/schemas/Domain'
+        - $ref: '#/components/schemas/RequestMetadata'
+    DashboardResponse:
+      allOf:
+        - $ref: '#/components/schemas/Dashboard'
+        - $ref: '#/components/schemas/RequestMetadata'
+    ConfigSnapshotResponse:
+      allOf:
+        - $ref: '#/components/schemas/ConfigSnapshot'
+        - $ref: '#/components/schemas/RequestMetadata'
+    CloudflareStatusResponse:
+      allOf:
+        - $ref: '#/components/schemas/CloudflareStatus'
+        - $ref: '#/components/schemas/RequestMetadata'
+    RouterStatusResponse:
+      allOf:
+        - $ref: '#/components/schemas/RouterStatus'
+        - $ref: '#/components/schemas/RequestMetadata'
+    AdminStatsResponse:
+      allOf:
+        - $ref: '#/components/schemas/AdminStats'
+        - $ref: '#/components/schemas/RequestMetadata'
     ClientLoginRequest:
       type: object
       required: [username, password]
@@ -706,14 +939,16 @@ components:
         current_password: { type: string, format: password }
     ReauthResponse:
       type: object
-      required: [reauth_ticket, expires_at]
+      required: [request_id, reauth_ticket, expires_at]
       properties:
+        request_id: { type: string }
         reauth_ticket: { type: string, minLength: 32 }
         expires_at: { type: string, format: date-time }
     FRPSecretResetResult:
       type: object
-      required: [status, secret_version, session_generation]
+      required: [request_id, status, secret_version, session_generation]
       properties:
+        request_id: { type: string }
         status: { type: string, enum: [rotated] }
         secret_version: { type: integer, format: int64 }
         session_generation: { type: integer, format: int64 }
@@ -744,6 +979,9 @@ components:
         applied_config_version: { type: integer, format: int64 }
         observed_client_status: { type: string }
         frp_credential: { $ref: '#/components/schemas/FRPCredentialStatus' }
+        last_heartbeat_at: { type: string, format: date-time }
+        last_error_code: { type: string }
+        last_error_message: { type: string }
         mappings: { type: array, items: { $ref: '#/components/schemas/Mapping' } }
         counts: { $ref: '#/components/schemas/DashboardCounts' }
     DashboardCounts:
@@ -825,6 +1063,8 @@ components:
         desired_state: { type: string }
         observed_state: { type: string }
         revision: { type: integer, format: int64 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
     CreateDomainRequest:
       type: object
       required: [mapping_id, hostname, https_mode]
@@ -855,11 +1095,14 @@ components:
         dns_adopted: { type: boolean }
         status: { type: string }
         revision: { type: integer, format: int64 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
     Operation:
       type: object
       required: [id, resource_type, operation_type, status, phase, step, created_at]
       properties:
         id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
         resource_type: { type: string }
         resource_id: { type: string }
         operation_type: { type: string }
@@ -903,7 +1146,13 @@ components:
       properties:
         schema_version: { type: string }
         config_version: { type: integer, format: int64 }
+        user_id: { type: string, format: uuid }
         session_generation: { type: integer, format: int64 }
+        issued_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        config_hash: { type: string }
+        signing_key_id: { type: string }
+        signature: { type: string }
         payload: { type: object, additionalProperties: true }
     Problem:
       type: object

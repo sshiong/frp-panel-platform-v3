@@ -555,6 +555,114 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        RequestMetadata: {
+            request_id: string;
+        };
+        AcknowledgedResponse: {
+            request_id: string;
+            /** @constant */
+            ok: true;
+        };
+        OperationAcceptedResponse: {
+            request_id: string;
+            /** Format: uuid */
+            operation_id: string;
+            /** @enum {string} */
+            status: "pending";
+        };
+        ForcedOperationAcceptedResponse: {
+            request_id: string;
+            /** Format: uuid */
+            operation_id: string;
+            /** @enum {string} */
+            status: "pending";
+            force: boolean;
+        };
+        DNSActionResponse: {
+            request_id: string;
+            /** @enum {string} */
+            status: "pending";
+            /** @enum {string} */
+            action: "adopt" | "overwrite" | "cancel" | "sync";
+        };
+        HeartbeatResponse: {
+            request_id: string;
+            /** @constant */
+            ok: true;
+            /** Format: date-time */
+            server_time: string;
+        };
+        TokenPendingResponse: {
+            request_id: string;
+            /** @enum {string} */
+            status: "pending";
+            message: string;
+        };
+        CloudflareTokenClearedResponse: {
+            request_id: string;
+            /** @enum {string} */
+            status: "missing";
+            message: string;
+        };
+        PendingMessageResponse: {
+            request_id: string;
+            /** @enum {string} */
+            status: "pending";
+            message: string;
+        };
+        SigningKeyResponse: {
+            request_id: string;
+            /** @constant */
+            algorithm: "Ed25519";
+            key_id: string;
+            public_key: string;
+        };
+        BackupCreatedResponse: {
+            request_id: string;
+            /** @enum {string} */
+            status: "succeeded";
+            file: string;
+        };
+        TemporaryPasswordResponse: {
+            request_id: string;
+            /** Format: password */
+            initial_password: string;
+            warning: string;
+        };
+        CreatedUserResponse: {
+            request_id: string;
+            user: components["schemas"]["UserRecord"];
+            /** Format: password */
+            initial_password: string;
+            warning: string;
+        };
+        AuthenticatedSession: {
+            request_id: string;
+            /** Format: uuid */
+            session_id: string;
+            /** Format: uuid */
+            user_id: string;
+            username: string;
+            /** @enum {string} */
+            role: "admin" | "user";
+            /** @enum {string} */
+            status: "active" | "disabled" | "deleting" | "deleted";
+            /** Format: int64 */
+            generation: number;
+            /** @enum {string} */
+            channel: "admin_panel" | "client_panel";
+            must_change_password: boolean;
+            must_change_username: boolean;
+            /** Format: date-time */
+            expires_at: string;
+        };
+        MappingResponse: components["schemas"]["Mapping"] & components["schemas"]["RequestMetadata"];
+        DomainResponse: components["schemas"]["Domain"] & components["schemas"]["RequestMetadata"];
+        DashboardResponse: components["schemas"]["Dashboard"] & components["schemas"]["RequestMetadata"];
+        ConfigSnapshotResponse: components["schemas"]["ConfigSnapshot"] & components["schemas"]["RequestMetadata"];
+        CloudflareStatusResponse: components["schemas"]["CloudflareStatus"] & components["schemas"]["RequestMetadata"];
+        RouterStatusResponse: components["schemas"]["RouterStatus"] & components["schemas"]["RequestMetadata"];
+        AdminStatsResponse: components["schemas"]["AdminStats"] & components["schemas"]["RequestMetadata"];
         ClientLoginRequest: {
             username: string;
             /** Format: password */
@@ -592,11 +700,13 @@ export interface components {
             current_password: string;
         };
         ReauthResponse: {
+            request_id: string;
             reauth_ticket: string;
             /** Format: date-time */
             expires_at: string;
         };
         FRPSecretResetResult: {
+            request_id: string;
             /** @enum {string} */
             status: "rotated";
             /** Format: int64 */
@@ -631,6 +741,10 @@ export interface components {
             applied_config_version: number;
             observed_client_status: string;
             frp_credential: components["schemas"]["FRPCredentialStatus"];
+            /** Format: date-time */
+            last_heartbeat_at?: string;
+            last_error_code?: string;
+            last_error_message?: string;
             mappings: components["schemas"]["Mapping"][];
             counts: components["schemas"]["DashboardCounts"];
         };
@@ -707,6 +821,10 @@ export interface components {
             observed_state: string;
             /** Format: int64 */
             revision: number;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            updated_at?: string;
         };
         CreateDomainRequest: {
             /** Format: uuid */
@@ -748,10 +866,16 @@ export interface components {
             status: string;
             /** Format: int64 */
             revision: number;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            updated_at?: string;
         };
         Operation: {
             /** Format: uuid */
             id: string;
+            /** Format: uuid */
+            user_id?: string;
             resource_type: string;
             resource_id?: string;
             operation_type: string;
@@ -797,8 +921,17 @@ export interface components {
             schema_version: string;
             /** Format: int64 */
             config_version: number;
+            /** Format: uuid */
+            user_id?: string;
             /** Format: int64 */
             session_generation: number;
+            /** Format: date-time */
+            issued_at?: string;
+            /** Format: date-time */
+            expires_at?: string;
+            config_hash?: string;
+            signing_key_id?: string;
+            signature?: string;
             payload: {
                 [key: string]: unknown;
             };
@@ -880,6 +1013,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        request_id: string;
                         server_version: string;
                         minimum_client_version: string;
                         latest_client_version: string;
@@ -963,7 +1097,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["AcknowledgedResponse"];
+                };
             };
         };
     };
@@ -994,7 +1130,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["AcknowledgedResponse"];
+                };
             };
         };
     };
@@ -1063,13 +1201,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Current authenticated principal */
+            /** @description Current authenticated session */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UserSummary"];
+                    "application/json": components["schemas"]["AuthenticatedSession"];
                 };
             };
         };
@@ -1089,7 +1227,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Dashboard"];
+                    "application/json": components["schemas"]["DashboardResponse"];
                 };
             };
         };
@@ -1113,6 +1251,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        request_id: string;
                         items: components["schemas"]["Mapping"][];
                         /** Format: int64 */
                         config_version: number;
@@ -1144,7 +1283,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["MappingResponse"];
+                };
             };
             409: components["responses"]["Problem"];
         };
@@ -1172,7 +1313,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Mapping"];
+                    "application/json": components["schemas"]["MappingResponse"];
                 };
             };
             409: components["responses"]["Problem"];
@@ -1198,7 +1339,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OperationAcceptedResponse"];
+                };
             };
         };
     };
@@ -1230,7 +1373,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["AcknowledgedResponse"];
+                };
             };
         };
     };
@@ -1249,7 +1394,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ConfigSnapshot"];
+                    "application/json": components["schemas"]["ConfigSnapshotResponse"];
                 };
             };
         };
@@ -1273,6 +1418,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        request_id: string;
                         items: components["schemas"]["Domain"][];
                         page: number;
                         page_size: number;
@@ -1302,7 +1448,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["DomainResponse"];
+                };
             };
             409: components["responses"]["Problem"];
         };
@@ -1332,7 +1480,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["DNSActionResponse"];
+                };
             };
             404: components["responses"]["Problem"];
         };
@@ -1355,7 +1505,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OperationAcceptedResponse"];
+                };
             };
         };
     };
@@ -1378,6 +1530,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        request_id: string;
                         items: components["schemas"]["Operation"][];
                         page: number;
                         page_size: number;
@@ -1405,7 +1558,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OperationAcceptedResponse"];
+                };
             };
             404: components["responses"]["Problem"];
         };
@@ -1425,11 +1580,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        algorithm: string;
-                        key_id: string;
-                        public_key: string;
-                    };
+                    "application/json": components["schemas"]["SigningKeyResponse"];
                 };
             };
         };
@@ -1464,7 +1615,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["AcknowledgedResponse"];
+                };
             };
         };
     };
@@ -1484,7 +1637,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["HeartbeatResponse"];
+                };
             };
         };
     };
@@ -1503,7 +1658,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CloudflareStatus"];
+                    "application/json": components["schemas"]["CloudflareStatusResponse"];
                 };
             };
         };
@@ -1531,7 +1686,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["TokenPendingResponse"];
+                };
             };
         };
     };
@@ -1557,7 +1714,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["CloudflareTokenClearedResponse"];
+                };
             };
         };
     };
@@ -1576,7 +1735,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RouterStatus"];
+                    "application/json": components["schemas"]["RouterStatusResponse"];
                 };
             };
         };
@@ -1603,7 +1762,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["PendingMessageResponse"];
+                };
             };
         };
     };
@@ -1626,6 +1787,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        request_id: string;
                         items: components["schemas"]["UserRecord"][];
                         page: number;
                         page_size: number;
@@ -1658,7 +1820,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["CreatedUserResponse"];
+                };
             };
         };
     };
@@ -1688,7 +1852,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ForcedOperationAcceptedResponse"];
+                };
             };
             409: components["responses"]["Problem"];
         };
@@ -1719,7 +1885,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["AcknowledgedResponse"];
+                };
             };
         };
     };
@@ -1747,7 +1915,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["TemporaryPasswordResponse"];
+                };
             };
         };
     };
@@ -1775,7 +1945,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["FRPSecretResetResult"];
+                };
             };
         };
     };
@@ -1798,6 +1970,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        request_id: string;
                         items: components["schemas"]["Operation"][];
                         page: number;
                         page_size: number;
@@ -1822,7 +1995,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AdminStats"];
+                    "application/json": components["schemas"]["AdminStatsResponse"];
                 };
             };
         };
@@ -1851,7 +2024,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["BackupCreatedResponse"];
+                };
             };
         };
     };

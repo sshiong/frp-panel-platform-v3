@@ -16,7 +16,7 @@
 | 阶段 3：TCP/UDP Mapping | 本地实现完成，平台矩阵待执行 | Mapping/Revision/Port Lease/幂等 API、真实 FRP Plugin envelope 与固定 v0.68.0 FRPS/FRPC + loopback Plugin metadata 网络 E2E 已通过 |
 | 阶段 4：域名和 Cloudflare | 本地实现完成，外部 Sandbox 待执行 | Domain/DNS/Token 加密模型、权限分流、冲突语义、补偿 Job 和重定向隔离已实现；真实测试 Zone/Token 尚未配置 |
 | 阶段 5：Router 和证书 | 本地实现完成，ACME/TLS 待执行 | Router Snapshot control/business 分离、HMAC/last-good、DB-free Host runtime 与 ACME DNS-01 Provider 已实现；真实 ACME Staging、TLS/SNI 热切换仍需外部部署验收 |
-| 阶段 6：任务、删除、备份和发布 | 本地与 CI 门禁完成，发布签署待执行 | Job/Audit、pending 配额、删除补偿、全数据加密备份 Decode/Restore、OpenAPI 34/39 路由与响应契约、上一稳定版 migration 演练、ESLint、许可证策略、SPDX SBOM、SHA-256 清单已通过；GitHub Actions `ci` 与 CodeQL 已在最终修复提交上全绿，仍需正式签名、外部环境和发布签字 |
+| 阶段 6：任务、删除、备份和发布 | 本地与 CI 门禁完成，发布签署待执行 | Job/Audit、pending 配额、删除补偿、全数据加密备份 Decode/Restore、OpenAPI 34/39 路由与显式成功响应 schema、上一稳定版 migration 演练、ESLint、许可证策略、SPDX SBOM、SHA-256 清单和 `make external-acceptance` 证据收集器已通过；GitHub Actions `ci` 与 CodeQL 已在最终修复提交上全绿，仍需正式签名、外部环境和发布签字 |
 
 ## 已实现
 
@@ -64,6 +64,8 @@
 - [x] OpenAPI 类型化契约已补齐：`openapi-typescript` 生成 Server 与 Client Local API 的 `contracts/generated/*-api.d.ts`，两个面板请求层与页面模型引用对应生成类型，CI 检查生成文件漂移；root tooling 依赖纳入 SPDX SBOM 与许可证门禁。
 - [x] 密钥迁移期轮换已补齐：master/certificate wrapping key-ring 保留旧版本，`make key-rotate` 重包裹 FRP、Cloudflare 和证书私钥；重启兼容、旧密文解密、服务层行数/登录回归测试通过，真实生产轮换演练仍待外部环境。
 - [x] WCAG 2.1 AA 自动化已补齐：构建后的 Admin/Client 通过 axe、标签、键盘/reduced-motion 与 390px 横向溢出检查；脚本已接入既有 `web (admin)` CI job，PR #2 的最新 CI run 已通过。
+- [x] API 成功响应契约已收紧：Server OpenAPI 为所有成功 JSON 响应声明 schema，统一 `request_id` 元数据，补齐 `/me` 实际会话字段、分页 envelope、异步 Operation、备份、Token、Router 和用户管理响应；`responseMetadata` 现在也覆盖 API GET 响应，契约回归验证通过。
+- [x] 外部验收证据收集器已补齐：`make external-acceptance` 运行本地契约/迁移/安全/许可证/构建门禁，在显式提供固定 FRP 二进制时运行真实网络 E2E，并对 Cloudflare Sandbox、ACME Staging、目标硬件、故障注入和签名证据缺失返回 `blocked`/退出码 2；流程见 [`external-acceptance.md`](docs/external-acceptance.md)。
 
 ## 验证记录
 
@@ -101,6 +103,8 @@
 | 2026-08-03 | 发行边界与生成契约补齐 | 通过；`make build` 将两个独立 Vue dist 分别嵌入 Server/Client Go 二进制，`go test ./internal/httpapi` 覆盖 fallback embed；Server/Client `go test -race ./...`、`make lint`、`make contract`、OpenAPI 生成文件漂移检查、npm 许可证门禁和 SPDX SBOM 均通过。新增 Client Local API OpenAPI 与独立 route manifest；Vite 仍只有非阻断的大 chunk 警告，真实 Cloudflare/ACME/Linux FRP 矩阵和签名仍待外部环境 |
 
 | 2026-08-03 | Docker 构建修复与托管门禁 | 通过；提交 [`4e0cbc1`](https://github.com/sshiong/frp-panel-platform-v3/commit/4e0cbc1) 为镜像 UI 构建阶段复制生成契约类型，PR #2 的 [`ci` run 30760001938](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30760001938)（含 container-scan/release-metadata）与 [`CodeQL run 30760001941`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30760001941) 全部通过；正式签名和外部集成验收仍待发布环境 |
+
+| 2026-08-03 | 响应契约与外部证据门禁 | 通过；`make contract`、Server/Client `go test -race ./...`、`make lint`、`make build`、`npm run test:accessibility`、`make sbom`、校验和/发布清单和 secret/license/migration 门禁均通过；新增 `request_id`/`/me` 实际字段契约与 `scripts/external-acceptance.rb`，本机无外部 Provider/签名证据时按设计生成 `blocked`，不伪造 Release Candidate |
 
 ## 未决与发布阻断项
 

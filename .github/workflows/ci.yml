@@ -47,6 +47,7 @@ jobs:
       - run: npm run generate:contracts
       - run: git diff --exit-code -- contracts/generated/server-api.d.ts contracts/generated/client-api.d.ts
       - run: ruby scripts/validate-openapi.rb
+      - run: ruby -c scripts/external-acceptance.rb
       - run: go test ./internal/httpapi -run '^TestHTTPContract' -count=1
         working-directory: server
       - run: go test ./internal/db -run '^TestMigration' -count=1

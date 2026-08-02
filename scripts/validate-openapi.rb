@@ -23,6 +23,13 @@ def validate_contract(path, module_dir, minimum_paths, require_websocket, go_env
 			next unless %w[get post put patch delete options head].include?(method)
 			abort "#{path}: #{route} #{method} is missing operationId" unless operation.is_a?(Hash) && operation["operationId"]
 			operation_ids << operation["operationId"]
+			operation.fetch("responses", {}).each do |status, response|
+				next unless status.to_s.start_with?("2") && status.to_s != "204"
+				next if response.is_a?(Hash) && response["$ref"]
+				unless response.is_a?(Hash) && response["content"].is_a?(Hash) && response["content"].any? { |_mime, media| media.is_a?(Hash) && media["schema"] }
+					abort "#{path}: #{route} #{method.upcase} #{status} must declare a success response schema"
+				end
+			end
 		end
 	end
 	abort "#{path}: duplicate operationId" unless operation_ids.uniq.length == operation_ids.length

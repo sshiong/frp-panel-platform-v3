@@ -6,7 +6,7 @@ GO_ENV = GOCACHE=$(GO_CACHE) GOMODCACHE=$(GO_MODULE_CACHE)
 STATICCHECK ?= staticcheck
 FRPC_VERIFY_VERSION ?= 0.68.0
 
-.PHONY: install-web build test lint accessibility contract migration-check license security fuzz perf frpc-verify network-e2e plugin-e2e sbom checksums manifest sign release checkpoint key-rotate dev-server dev-client clean
+.PHONY: install-web build test lint accessibility contract migration-check license security fuzz perf frpc-verify network-e2e plugin-e2e external-acceptance sbom checksums manifest sign release checkpoint key-rotate dev-server dev-client clean
 
 install-web:
 	npm ci
@@ -71,7 +71,7 @@ perf:
 
 frpc-verify:
 	@test -n "$(FRPC_VERIFY_BINARY)" || (echo "FRPC_VERIFY_BINARY is required" >&2; exit 1)
-	cd client && $(GO_ENV) FRPC_VERIFY_BINARY="$(FRPC_VERIFY_BINARY)" FRPC_VERIFY_VERSION="$(FRPC_VERIFY_VERSION)" go test -race ./internal/supervisor -run '^TestRenderTOMLIsAcceptedByFixedFRPCWhenConfigured$$'
+	cd client && $(GO_ENV) FRPC_VERIFY_BINARY="$(abspath $(FRPC_VERIFY_BINARY))" FRPC_VERIFY_VERSION="$(FRPC_VERIFY_VERSION)" go test -race ./internal/supervisor -run '^TestRenderTOMLIsAcceptedByFixedFRPCWhenConfigured$$'
 
 network-e2e:
 	./scripts/frp-network-e2e.sh
@@ -79,7 +79,10 @@ network-e2e:
 plugin-e2e:
 	@test -n "$(FRP_E2E_FRPS_BINARY)" || (echo "FRP_E2E_FRPS_BINARY is required" >&2; exit 1)
 	@test -n "$(FRP_E2E_FRPC_BINARY)" || (echo "FRP_E2E_FRPC_BINARY is required" >&2; exit 1)
-	cd server && $(GO_ENV) FRP_PLUGIN_E2E=1 FRP_E2E_FRPS_BINARY="$(FRP_E2E_FRPS_BINARY)" FRP_E2E_FRPC_BINARY="$(FRP_E2E_FRPC_BINARY)" go test -race ./internal/httpapi -run '^TestFRPPluginNetworkE2E$$' -count=1 -v
+	cd server && $(GO_ENV) FRP_PLUGIN_E2E=1 FRP_E2E_FRPS_BINARY="$(abspath $(FRP_E2E_FRPS_BINARY))" FRP_E2E_FRPC_BINARY="$(abspath $(FRP_E2E_FRPC_BINARY))" go test -race ./internal/httpapi -run '^TestFRPPluginNetworkE2E$$' -count=1 -v
+
+external-acceptance:
+	ruby scripts/external-acceptance.rb
 
 sbom: build
 	ruby scripts/generate-sbom.rb

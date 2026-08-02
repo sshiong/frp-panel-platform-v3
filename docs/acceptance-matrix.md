@@ -135,7 +135,7 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 
 | ID | 状态 | 实际结果与证据 |
 |---|---|---|
-| API-001 | 本地通过 | Server OpenAPI 3.1 34 paths/39 operations 与 chi route manifest 对齐；Client Local API 20 paths/23 operations 也与独立 route manifest 对齐；`contracts/generated/server-api.d.ts`、`contracts/generated/client-api.d.ts`、响应契约测试和生成文件漂移检查已纳入 CI。 |
+| API-001 | 本地通过 | Server OpenAPI 3.1 34 paths/39 operations 与 chi route manifest 对齐；Client Local API 20 paths/23 operations 也与独立 route manifest 对齐；成功 JSON 响应均声明 schema（含统一 `request_id` 元数据），`/me` 的实际会话字段已纳入契约；`contracts/generated/server-api.d.ts`、`contracts/generated/client-api.d.ts`、响应契约测试和生成文件漂移检查已纳入 CI。 |
 | API-002 | 本地通过 | Problem Details、稳定 code、request_id 和错误测试通过。 |
 | API-003 | 本地通过 | 权限中间件分离，越权拒绝不暴露资源存在性。 |
 | API-004 | 本地通过 | 不支持 HTTP/WS protocol 返回 426。 |

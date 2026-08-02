@@ -296,7 +296,7 @@ func (a *API) protocolV1(next http.Handler) http.Handler {
 // original hijack-capable ResponseWriter.
 func (a *API) responseMetadata(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/ws" || (r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodDelete && r.Method != http.MethodPatch) {
+		if r.URL.Path == "/api/v1/ws" {
 			next.ServeHTTP(w, r)
 			return
 		}
