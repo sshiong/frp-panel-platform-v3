@@ -11,8 +11,8 @@
 | 阶段 | 状态 | 证据 |
 |---|---|---|
 | 阶段 0：技术验证 | 本地实现完成，外部验证待执行 | Server/Client Supervisor、Router/Provider、固定 FRP v0.68.0 配置验证和真实 FRPS/FRPC + Server Plugin TCP 网络 E2E 已通过；Cloudflare/ACME 仍需隔离环境 |
-| 阶段 1：身份与基础安全 | 本地实现完成 | Argon2id、单活动 Client Session、审计、地址规范化、Server Cookie CSRF、敏感写入再认证、登录/API 限速和 LAN 安全边界已通过 race/vet/staticcheck 测试 |
-| 阶段 2：Client/FRPC 闭环 | 本地实现完成，外部矩阵待执行 | Supervisor 串行队列、verify/原子写入/last-good 回滚、Server/Client WebSocket 心跳/退避/全量恢复、固定 FRPC v0.68.0 兼容性和真实 Plugin 网络链路已验证 |
+| 阶段 1：身份与基础安全 | 本地实现完成 | Argon2id、单活动 Client Session、审计、地址规范化、Server Cookie CSRF、敏感写入再认证、登录/API 限速、LAN 安全边界、证书检查/SPKI pin 和内存态 CSRF 已通过 race/vet/staticcheck 测试 |
+| 阶段 2：Client/FRPC 闭环 | 本地实现完成，外部矩阵待执行 | Supervisor 串行队列、verify/原子写入/last-good 回滚、Server/Client WebSocket 心跳/退避/全量恢复、固定 FRPC v0.68.0 兼容性和真实 Plugin 网络链路已验证；离线只读缓存、运行时秘密清理和 Operations 状态面板已接入 |
 | 阶段 3：TCP/UDP Mapping | 本地实现完成，平台矩阵待执行 | Mapping/Revision/Port Lease/幂等 API、真实 FRP Plugin envelope 与固定 v0.68.0 FRPS/FRPC + loopback Plugin metadata 网络 E2E 已通过 |
 | 阶段 4：域名和 Cloudflare | 本地实现完成，外部 Sandbox 待执行 | Domain/DNS/Token 加密模型、权限分流、冲突语义、补偿 Job 和重定向隔离已实现；真实测试 Zone/Token 尚未配置 |
 | 阶段 5：Router 和证书 | 本地实现完成，ACME/TLS 待执行 | Router Snapshot control/business 分离、HMAC/last-good、DB-free Host runtime 与 ACME DNS-01 Provider 已实现；真实 ACME Staging、TLS/SNI 热切换仍需外部部署验收 |
@@ -26,7 +26,7 @@
 - [x] 不透明服务端 Session；普通用户 Client Panel 全局单活动 Session；Session generation 替换旧会话。
 - [x] API Problem Details、请求 ID、CORS/安全 Header、限速边界和敏感日志过滤。
 - [x] Mapping 归属用户；不可变 Revision；端口全局唯一租约；配置版本与 expected version 冲突。
-- [x] 核心用户资源写 API 的 Idempotency-Key；审计记录；用户资源 SQL 级 `user_id` 过滤。
+- [x] 所有认证写 API 强制 `Idempotency-Key`；资源事务与通用写入均持久化幂等记录，通用重放响应使用 Server 主密钥加密；审计记录；用户资源 SQL 级 `user_id` 过滤。
 - [x] Client Server 地址规范化（Scheme/Host/端口/IPv6/Userinfo/Path 校验）。
 - [x] Client 内存 Local Proxy Session；Server token 不进入 localStorage；单 Supervisor 队列、原子配置回滚、last-good 启动可读状态和代理项优先 reload。
 - [x] 两个独立 Vue 前端，采用石墨/象牙/钢蓝/状态色视觉体系，不使用浅紫色。
@@ -51,6 +51,10 @@
 - [x] Client 应用失败事务化回滚 pending Revision：Revision 留存为 `failed`、`pending_revision_id` 清空、旧 active Revision/端口保持有效、新端口 pending lease 释放，失败后可继续创建下一条不可变 Revision。
 - [x] 管理员用户删除进入 `deleting` 状态并立即撤销 Session/运行时凭据；Domain、Mapping 按依赖顺序进入持久化补偿队列，强制删除会记录 `external_residues`，本地用户删除后保留用户级 Operation 证据。
 - [x] Client 固定 FRPC 进程写入受保护 PID 标记；启动时只回收命令行匹配固定二进制的孤儿进程，PID 复用时拒绝终止并清除运行时秘密。
+- [x] Client 登录前只做 TLS 证书检查，不发送登录密码；生产 HTTPS 需系统 CA、IP SAN/custom CA 或用户确认的 SPKI pin，pin 仅驻留内存并绑定当前 Server；切换 Server 会注销旧会话、停止旧 FRPC 并清理缓存/秘密。
+- [x] Client 离线回退只允许当前登录会话的 GET 快照，4xx/会话替换/停用永不被缓存掩盖；退出、切换 Server、会话失效会清理缓存和内存运行时秘密；浏览器 `localStorage` 仅保存 `last_server_panel_url`。
+- [x] Client Operations 页面展示阶段、步骤、状态、错误、重试和 external residues；所有异步操作保留可见的 loading/error/retry 反馈。
+- [x] `http_only` 固定为无证书、无 HTTPS 跳转；API、服务层、Client 表单和 SQLite CHECK/trigger migration 均拒绝冲突配置。
 - [x] 正式 FPPB1 包包含数据库、受保护数据目录密钥/证书/ACME 文件，逐文件校验并安全恢复；Server 启动会重新排队 Router 快照。
 - [x] OpenAPI 3.1 路径/operationId/WebSocket 元数据校验脚本、双模块 CI contract job、`make sbom`、`make checksums`、固定 FRP 版本下载归档校验和发布清单已加入；正式发布仍需签名和第三方扫描。
 
@@ -75,6 +79,10 @@
 | 2026-08-02 | Security and release gates | 通过；OpenAPI 34 paths/39 operations、Server/Client 全量 race、go vet/staticcheck、Vue typecheck/build、secret scan、3 个 2 秒 fuzz、PERF-001/002、官方 FRPC/FRPS v0.68.0 verify、带归档 SHA-256 的原生 transport E2E、真实 FRPS/FRPC + loopback Plugin metadata E2E、SPDX SBOM、产物校验和与 release manifest 均通过 |
 | 2026-08-02 | Coverage and Revision rollback gate | 通过；Server Go 总体行覆盖率 75.1%，Client 76.0%；认证 94.7%、Token 加密 91.4%、Router runtime/snapshot 92.1%，Session/端口租约错误路径与 Revision 成功切换/失败回滚测试通过；失败回滚保留旧 active Revision/旧端口并释放新端口 |
 | 2026-08-02 | Frontend policy guard gate | 通过；Admin 与 Client `npm run test:policy` 均通过，策略模块 line/branch/function coverage 100%，并纳入 `make lint` 与 GitHub Actions web job |
+| 2026-08-02 | Session/address/cache hardening | 通过；Client TLS inspection 在提交密码前完成，正确 SPKI pin 才允许连接，错误 pin 不触发 HTTP 请求；Server 切换会注销旧会话，断线仅回退当前会话 GET 缓存，退出/失效后缓存不可见 |
+| 2026-08-02 | API protocol/idempotency hardening | 通过；Server/Client API 统一请求 ID 与 `X-FRP-Protocol-Version: v1`，未知版本返回 426；认证写入强制幂等键，重复请求重放加密响应，不同请求体复用同键返回 409；OpenAPI 保持 34 paths/39 operations |
+| 2026-08-02 | Fixed TLS mode and browser visual QA | 通过；`http_only` 与 redirect 冲突在 API/服务层/表单均被阻断；Playwright 检查 Admin 与 Client 登录页，石墨/象牙/钢蓝/状态色体系，无浅紫色；当前页面截图已核对 |
+| 2026-08-02 | Database constraint and final regression | 通过；SQLite CHECK/trigger migration 拒绝 `http_only + redirect`，全量 `make test`（Server/Client race）、`make lint`、`make build`、SBOM/checksum/manifest、OpenAPI 和 secret scan 均通过；Vite 仅保留非阻断的大 chunk 警告 |
 
 ## 未决与发布阻断项
 

@@ -151,11 +151,12 @@ CREATE TABLE IF NOT EXISTS domain_bindings (
   normalized_domain TEXT NOT NULL UNIQUE,
   zone_id TEXT,
   https_mode TEXT NOT NULL CHECK (https_mode IN ('auto_certificate', 'cloudflare_proxy', 'http_only')),
-  http_redirect INTEGER NOT NULL DEFAULT 0,
+  http_redirect INTEGER NOT NULL DEFAULT 0 CHECK (http_redirect IN (0, 1)),
   status TEXT NOT NULL CHECK (status IN ('reserved', 'pending_dns', 'pending_client', 'pending_certificate', 'pending_router', 'active', 'offline', 'dns_error', 'certificate_error', 'router_error', 'deleting', 'deleted')),
   revision INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  CHECK (https_mode <> 'http_only' OR http_redirect = 0)
 )
 -- statement
 CREATE TABLE IF NOT EXISTS dns_records (

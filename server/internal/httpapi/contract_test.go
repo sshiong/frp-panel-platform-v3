@@ -61,6 +61,13 @@ func TestHTTPContractSmokeCoversProblemDetailsAuthAndPagination(t *testing.T) {
 	if compatibilityResponse.Code != http.StatusOK {
 		t.Fatalf("compatibility status=%d", compatibilityResponse.Code)
 	}
+	unsupportedProtocol := httptest.NewRequest(http.MethodGet, "/api/v1/compatibility", nil)
+	unsupportedProtocol.Header.Set("X-FRP-Protocol-Version", "v9")
+	unsupportedProtocolResponse := httptest.NewRecorder()
+	handler.ServeHTTP(unsupportedProtocolResponse, unsupportedProtocol)
+	if unsupportedProtocolResponse.Code != http.StatusUpgradeRequired || !strings.Contains(unsupportedProtocolResponse.Body.String(), "UPGRADE_REQUIRED") || unsupportedProtocolResponse.Header().Get("Upgrade-Required") != "v1" {
+		t.Fatalf("unsupported protocol contract: status=%d headers=%v body=%s", unsupportedProtocolResponse.Code, unsupportedProtocolResponse.Header(), unsupportedProtocolResponse.Body.String())
+	}
 	var compatibility map[string]interface{}
 	if err := json.Unmarshal(compatibilityResponse.Body.Bytes(), &compatibility); err != nil {
 		t.Fatal(err)
@@ -69,6 +76,42 @@ func TestHTTPContractSmokeCoversProblemDetailsAuthAndPagination(t *testing.T) {
 		if compatibility[field] == nil || compatibility[field] == "" {
 			t.Fatalf("compatibility missing %q: %#v", field, compatibility)
 		}
+	}
+
+	reauthRequest := httptest.NewRequest(http.MethodPost, "/api/v1/auth/reauth", strings.NewReader(`{"current_password":"Admin-Password-2026!"}`))
+	reauthRequest.RemoteAddr = "127.0.0.1:12000"
+	reauthRequest.Header.Set("Authorization", "Bearer "+login.Token)
+	reauthRequest.Header.Set("Idempotency-Key", "contract-reauth-key-0001")
+	reauthResponse := httptest.NewRecorder()
+	handler.ServeHTTP(reauthResponse, reauthRequest)
+	if reauthResponse.Code != http.StatusOK {
+		t.Fatalf("reauth idempotency first request status=%d body=%s", reauthResponse.Code, reauthResponse.Body.String())
+	}
+	var firstReauth map[string]interface{}
+	if err := json.Unmarshal(reauthResponse.Body.Bytes(), &firstReauth); err != nil {
+		t.Fatal(err)
+	}
+	if firstReauth["reauth_ticket"] == nil || firstReauth["request_id"] == nil {
+		t.Fatalf("write response metadata missing: %#v", firstReauth)
+	}
+	retryRequest := httptest.NewRequest(http.MethodPost, "/api/v1/auth/reauth", strings.NewReader(`{"current_password":"Admin-Password-2026!"}`))
+	retryRequest.RemoteAddr = "127.0.0.1:12000"
+	retryRequest.Header.Set("Authorization", "Bearer "+login.Token)
+	retryRequest.Header.Set("Idempotency-Key", "contract-reauth-key-0001")
+	retryResponse := httptest.NewRecorder()
+	handler.ServeHTTP(retryResponse, retryRequest)
+	var repeatedReauth map[string]interface{}
+	if retryResponse.Code != http.StatusOK || json.Unmarshal(retryResponse.Body.Bytes(), &repeatedReauth) != nil || repeatedReauth["reauth_ticket"] != firstReauth["reauth_ticket"] {
+		t.Fatalf("idempotent reauth did not replay encrypted response: status=%d body=%s first=%v repeated=%v", retryResponse.Code, retryResponse.Body.String(), firstReauth, repeatedReauth)
+	}
+	conflictRequest := httptest.NewRequest(http.MethodPost, "/api/v1/auth/reauth", strings.NewReader(`{"current_password":"different-password-2026!"}`))
+	conflictRequest.RemoteAddr = "127.0.0.1:12000"
+	conflictRequest.Header.Set("Authorization", "Bearer "+login.Token)
+	conflictRequest.Header.Set("Idempotency-Key", "contract-reauth-key-0001")
+	conflictResponse := httptest.NewRecorder()
+	handler.ServeHTTP(conflictResponse, conflictRequest)
+	if conflictResponse.Code != http.StatusConflict || !strings.Contains(conflictResponse.Body.String(), "IDEMPOTENCY_KEY_REUSED") {
+		t.Fatalf("idempotency body conflict was not rejected: status=%d body=%s", conflictResponse.Code, conflictResponse.Body.String())
 	}
 
 	mappingsRequest := httptest.NewRequest(http.MethodGet, "/api/v1/mappings?page=2&page_size=1", nil)

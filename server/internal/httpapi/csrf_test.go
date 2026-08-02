@@ -106,6 +106,7 @@ func TestAdminCookieWritesRequireSessionBoundCSRF(t *testing.T) {
 	}
 	reauthRequest.Header.Set("Content-Type", "application/json")
 	reauthRequest.Header.Set("X-CSRF-Token", csrf)
+	reauthRequest.Header.Set("Idempotency-Key", "csrf-test-reauth-123456")
 	reauthResponse, err := client.Do(reauthRequest)
 	if err != nil {
 		t.Fatal(err)

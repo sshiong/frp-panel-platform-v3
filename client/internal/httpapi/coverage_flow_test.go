@@ -133,6 +133,15 @@ func TestClientHTTPAPICoverageFlow(t *testing.T) {
 
 	status, body := request(http.MethodGet, "/healthz", "", nil)
 	must(status, http.StatusOK, body)
+	var health map[string]interface{}
+	if err := json.Unmarshal(body, &health); err != nil || health["request_id"] == nil {
+		t.Fatalf("local success response did not carry request_id: %s", body)
+	}
+	status, body = request(http.MethodGet, "/healthz", "", map[string]string{"X-FRP-Protocol-Version": "v9"})
+	must(status, http.StatusUpgradeRequired, body)
+	if !strings.Contains(string(body), "UPGRADE_REQUIRED") || !strings.Contains(string(body), "request_id") {
+		t.Fatalf("local protocol error was not a versioned Problem Details response: %s", body)
+	}
 	status, body = request(http.MethodGet, "/", "", nil)
 	must(status, http.StatusOK, body)
 	status, body = request(http.MethodOptions, "/api/v1/session", "", map[string]string{"Origin": "http://127.0.0.1:5174"})

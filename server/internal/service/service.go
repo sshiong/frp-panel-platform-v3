@@ -1024,6 +1024,9 @@ func (a *App) CreateDomain(ctx context.Context, ac AuthContext, req DomainReques
 	if req.HTTPSMode != "auto_certificate" && req.HTTPSMode != "cloudflare_proxy" && req.HTTPSMode != "http_only" {
 		return Domain{}, fmt.Errorf("invalid https mode")
 	}
+	if req.HTTPSMode == "http_only" && req.HTTPRedirect {
+		return Domain{}, fmt.Errorf("http_only domains cannot enable HTTP to HTTPS redirect")
+	}
 	normalized, err := normalizeDomain(req.Hostname)
 	if err != nil {
 		return Domain{}, err
@@ -1297,7 +1300,9 @@ func (a *App) FullConfig(ctx context.Context, ac AuthContext) (ConfigSnapshot, e
 	unsigned, _ = json.Marshal(snapshot)
 	snapshot.Signature = a.Crypto.Sign(unsigned)
 	encoded, _ := json.Marshal(snapshot)
-	_, _ = a.DB.ExecContext(ctx, `INSERT OR REPLACE INTO config_snapshots(id,user_id,version,schema_version,session_generation,config_json,config_hash,config_signing_key_id,config_signature,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, id.New(), ac.UserID, version, snapshot.SchemaVersion, generation, string(encoded), snapshot.ConfigHash, snapshot.SigningKeyID, snapshot.Signature, nowString())
+	if _, err := a.DB.ExecContext(ctx, `INSERT OR REPLACE INTO config_snapshots(id,user_id,version,schema_version,session_generation,config_json,config_hash,config_signing_key_id,config_signature,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, id.New(), ac.UserID, version, snapshot.SchemaVersion, generation, string(encoded), snapshot.ConfigHash, snapshot.SigningKeyID, snapshot.Signature, nowString()); err != nil {
+		return ConfigSnapshot{}, err
+	}
 	return snapshot, nil
 }
 
@@ -1312,17 +1317,35 @@ func (a *App) ApplyResult(ctx context.Context, ac AuthContext, req ApplyResultRe
 	if req.ConfigVersion != desiredVersion {
 		return ErrConfigConflict
 	}
+	if appliedHash := strings.TrimSpace(req.AppliedConfigHash); appliedHash != "" {
+		var snapshotHash string
+		err := a.DB.QueryRowContext(ctx, `SELECT config_hash FROM config_snapshots WHERE user_id=? AND version=? ORDER BY created_at DESC LIMIT 1`, ac.UserID, req.ConfigVersion).Scan(&snapshotHash)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrConfigConflict
+		}
+		if err != nil {
+			return err
+		}
+		if !strings.EqualFold(appliedHash, snapshotHash) {
+			return ErrConfigConflict
+		}
+	}
 	now := nowString()
 	if req.Status == "succeeded" {
 		tx, err := a.DB.BeginTx(ctx, nil)
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE mapping_revisions SET status='superseded' WHERE mapping_id IN (SELECT id FROM mappings WHERE user_id=?) AND status='active'`, ac.UserID); err != nil {
+		// Only mappings with a pending revision are switching authority in this
+		// apply. Other mappings are part of the same signed snapshot, but their
+		// existing active revision must remain active; superseding every active
+		// revision here would leave unchanged mappings pointing at a revision
+		// whose state no longer reflects the database authority.
+		if _, err := tx.ExecContext(ctx, `UPDATE mapping_revisions SET status='superseded' WHERE id IN (SELECT active_revision_id FROM mappings WHERE user_id=? AND pending_revision_id IS NOT NULL AND active_revision_id IS NOT NULL)`, ac.UserID); err != nil {
 			_ = tx.Rollback()
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE mapping_revisions SET status='active',applied_at=? WHERE mapping_id IN (SELECT id FROM mappings WHERE user_id=?) AND status IN ('pending','applying')`, now, ac.UserID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE mapping_revisions SET status='active',applied_at=? WHERE id IN (SELECT pending_revision_id FROM mappings WHERE user_id=? AND pending_revision_id IS NOT NULL)`, now, ac.UserID); err != nil {
 			_ = tx.Rollback()
 			return err
 		}

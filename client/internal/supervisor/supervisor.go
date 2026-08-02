@@ -547,6 +547,18 @@ func (s *Supervisor) ClearRuntimeSecrets() error {
 			return err
 		}
 	}
+	// The last applied snapshot contains the runtime-only FRP credentials that
+	// App injected immediately before Apply. Clearing files is not sufficient:
+	// logout, session replacement, and server switching must also remove those
+	// values from the Supervisor's in-memory reload state.
+	s.mu.Lock()
+	if s.lastSnapshot != nil {
+		for _, key := range []string{"frp_secret", "frp_user_secret", "runtime_credential", "frps_transport_secret"} {
+			delete(s.lastSnapshot.Payload, key)
+		}
+		s.lastSnapshot = nil
+	}
+	s.mu.Unlock()
 	return nil
 }
 

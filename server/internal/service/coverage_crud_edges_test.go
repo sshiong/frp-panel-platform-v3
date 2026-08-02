@@ -107,6 +107,9 @@ func TestServiceCoverageCRUDConflictAndIdempotencyEdges(t *testing.T) {
 	if _, err := app.CreateDomain(ctx, client, DomainRequest{MappingID: httpMapping.ID, Hostname: "bad-dns.example.com", HTTPSMode: "http_only", DNSRecordType: "A", DNSContent: "not-an-ip"}, "crud-domain-dns"); err == nil {
 		t.Fatal("invalid DNS content was accepted")
 	}
+	if _, err := app.CreateDomain(ctx, client, DomainRequest{MappingID: httpMapping.ID, Hostname: "bad-redirect.example.com", HTTPSMode: "http_only", HTTPRedirect: true}, "crud-domain-redirect"); err == nil {
+		t.Fatal("http_only domain accepted an HTTPS redirect")
+	}
 	if _, err := app.CreateDomain(ctx, client, DomainRequest{MappingID: httpMapping.ID, Hostname: "conflict.example.com", HTTPSMode: "http_only", ExpectedConfigVersion: &wrongVersion}, "crud-domain-conflict"); !errors.Is(err, ErrConfigConflict) {
 		t.Fatalf("domain config conflict: %v", err)
 	}

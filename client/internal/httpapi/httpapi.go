@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -14,7 +15,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/ricardo/frp-panel-platform/client/internal/app"
+	"github.com/ricardo/frp-panel-platform/client/internal/id"
 )
+
+type contextKey string
+
+const requestIDKey contextKey = "request_id"
 
 type API struct {
 	App         *app.App
@@ -29,7 +35,7 @@ func New(a *app.App) *API {
 
 func (a *API) Handler() http.Handler {
 	r := chi.NewRouter()
-	r.Use(a.headers, a.cors, a.rateLimit, a.concurrencyLimit, a.localAuth)
+	r.Use(a.headers, a.requestID, a.protocolV1, a.cors, a.rateLimit, a.concurrencyLimit, a.localAuth)
 	r.Get("/healthz", a.health)
 	r.Get("/", a.app)
 	r.Handle("/assets/*", http.StripPrefix("/assets/", http.FileServer(http.Dir(filepath.Join(a.webDir(), "assets")))))
@@ -38,6 +44,7 @@ func (a *API) Handler() http.Handler {
 	})
 	r.Handle("/favicon.svg", http.FileServer(http.Dir(a.webDir())))
 	r.Post("/api/v1/login", a.login)
+	r.Post("/api/v1/server/inspect", a.inspectServer)
 	r.Group(func(r chi.Router) {
 		r.Use(a.sessionRequired)
 		r.Post("/api/v1/logout", a.logout)
@@ -52,6 +59,7 @@ func (a *API) Handler() http.Handler {
 		r.Delete("/api/v1/mappings/{id}", a.deleteMapping)
 		r.Post("/api/v1/mappings/{id}/toggle", a.toggleMapping)
 		r.Get("/api/v1/domains", a.domains)
+		r.Get("/api/v1/operations", a.operations)
 		r.Post("/api/v1/domains", a.createDomain)
 		r.Delete("/api/v1/domains/{id}", a.deleteDomain)
 		r.Post("/api/v1/domains/{id}/dns-action", a.domainDNSAction)
@@ -61,6 +69,29 @@ func (a *API) Handler() http.Handler {
 		r.Get("/api/v1/logs", a.logs)
 	})
 	return r
+}
+
+func (a *API) requestID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		value := strings.TrimSpace(r.Header.Get("X-Request-ID"))
+		if value == "" || len(value) > 80 || strings.ContainsAny(value, "\r\n") {
+			value = id.New()
+		}
+		w.Header().Set("X-Request-ID", value)
+		ctx := context.WithValue(r.Context(), requestIDKey, value)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func (a *API) protocolV1(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requested := strings.TrimSpace(r.Header.Get("X-FRP-Protocol-Version")); requested != "" && requested != "v1" {
+			w.Header().Set("Upgrade-Required", "v1")
+			problem(w, r, http.StatusUpgradeRequired, "UPGRADE_REQUIRED", "Client Panel API protocol version is unsupported.")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (a *API) rateLimit(next http.Handler) http.Handler {
@@ -112,7 +143,7 @@ func (a *API) cors(next http.Handler) http.Handler {
 		if origin := r.Header.Get("Origin"); origin == "http://127.0.0.1:5174" || origin == "http://localhost:5174" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Idempotency-Key, X-CSRF-Token")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Idempotency-Key, X-CSRF-Token, X-FRP-Protocol-Version")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		}
 		if r.Method == http.MethodOptions {
@@ -195,6 +226,7 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 		ServerPanelURL string `json:"server_panel_url"`
 		Username       string `json:"username"`
 		Password       string `json:"password"`
+		TrustedSPKI    string `json:"trusted_spki_sha256,omitempty"`
 	}
 	if !decodeJSON(w, r, &input) {
 		return
@@ -211,9 +243,10 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	session, err := a.App.Login(r.Context(), input.ServerPanelURL, input.Username, input.Password)
+	session, err := a.App.LoginWithTrust(r.Context(), input.ServerPanelURL, input.Username, input.Password, input.TrustedSPKI)
 	if err != nil {
-		problem(w, r, 401, "AUTH_INVALID_CREDENTIALS", err.Error())
+		status, code, detail := loginProblem(err)
+		problem(w, r, status, code, detail)
 		return
 	}
 	if a.loginLimit != nil {
@@ -221,6 +254,44 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{Name: "frp_client_session", Value: a.App.SessionCookie(), Path: "/", HttpOnly: true, Secure: a.App.Config.Environment == "production", SameSite: http.SameSiteStrictMode, MaxAge: 1800})
 	writeJSON(w, 200, session)
+}
+
+func loginProblem(err error) (int, string, string) {
+	var remote app.RemoteError
+	if errors.As(err, &remote) {
+		code := remote.Code
+		if code == "" {
+			code = "AUTH_INVALID_CREDENTIALS"
+		}
+		detail := "用户名或密码不正确，或账号已停用。"
+		if code == "SERVER_TLS_VALIDATION_FAILED" {
+			detail = "Server Panel TLS 验证失败；请先检查证书并确认 SPKI 指纹。"
+		}
+		return remote.Status, code, detail
+	}
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "url") || strings.Contains(message, "scheme") || strings.Contains(message, "host") {
+		return http.StatusBadRequest, "SERVER_ADDRESS_INVALID", "Server Panel 地址无效。"
+	}
+	if strings.Contains(message, "certificate") || strings.Contains(message, "tls") || strings.Contains(message, "x509") || strings.Contains(message, "https") {
+		return http.StatusBadRequest, "SERVER_TLS_VALIDATION_FAILED", "Server Panel TLS 验证失败；请先检查证书并确认 SPKI 指纹。"
+	}
+	return http.StatusUnauthorized, "AUTH_INVALID_CREDENTIALS", "用户名或密码不正确，或账号已停用。"
+}
+
+func (a *API) inspectServer(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		ServerPanelURL string `json:"server_panel_url"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	certificate, err := a.App.InspectServerCertificate(r.Context(), input.ServerPanelURL)
+	if err != nil {
+		problem(w, r, http.StatusBadRequest, "SERVER_CERTIFICATE_INSPECTION_FAILED", "无法检查 Server Panel 证书；未发送登录密码。", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, certificate)
 }
 func (a *API) logout(w http.ResponseWriter, r *http.Request) {
 	_ = a.App.Logout(r.Context())
@@ -295,6 +366,7 @@ func (a *API) dashboard(w http.ResponseWriter, r *http.Request) {
 		problem(w, r, 503, "SERVER_UNAVAILABLE", "Server Panel 暂不可达，当前仅可查看本地缓存。", err)
 		return
 	}
+	a.markDataSource(w)
 	writeJSON(w, 200, output)
 }
 func (a *API) mappings(w http.ResponseWriter, r *http.Request) {
@@ -303,6 +375,7 @@ func (a *API) mappings(w http.ResponseWriter, r *http.Request) {
 		problem(w, r, 503, "SERVER_UNAVAILABLE", "Server Panel 暂不可达。", err)
 		return
 	}
+	a.markDataSource(w)
 	writeJSON(w, 200, output)
 }
 func (a *API) createMapping(w http.ResponseWriter, r *http.Request) {
@@ -361,6 +434,17 @@ func (a *API) domains(w http.ResponseWriter, r *http.Request) {
 		problem(w, r, 503, "SERVER_UNAVAILABLE", "Server Panel 暂不可达。", err)
 		return
 	}
+	a.markDataSource(w)
+	writeJSON(w, 200, output)
+}
+
+func (a *API) operations(w http.ResponseWriter, r *http.Request) {
+	var output interface{}
+	if err := a.App.Proxy(r.Context(), "GET", "/api/v1/operations", nil, "", &output); err != nil {
+		problem(w, r, 503, "SERVER_UNAVAILABLE", "Server Panel 暂不可达。", err)
+		return
+	}
+	a.markDataSource(w)
 	writeJSON(w, 200, output)
 }
 
@@ -407,6 +491,7 @@ func (a *API) config(w http.ResponseWriter, r *http.Request) {
 		problem(w, r, 503, "SERVER_UNAVAILABLE", "Server Panel 暂不可达。", err)
 		return
 	}
+	a.markDataSource(w)
 	writeJSON(w, 200, output)
 }
 func (a *API) sync(w http.ResponseWriter, r *http.Request) {
@@ -421,6 +506,15 @@ func (a *API) localStatus(w http.ResponseWriter, r *http.Request) {
 }
 func (a *API) logs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]interface{}{"items": []map[string]string{{"level": "info", "message": "本地日志由 Supervisor 脱敏收集；当前版本不展示秘密。", "time": time.Now().UTC().Format(time.RFC3339Nano)}}})
+}
+
+func (a *API) markDataSource(w http.ResponseWriter) {
+	if !a.App.ServerReachable() {
+		w.Header().Set("X-Panel-Data", "cached")
+		w.Header().Set("Warning", `110 - "Server Panel unavailable; cached read-only data"`)
+	} else {
+		w.Header().Set("X-Panel-Data", "server")
+	}
 }
 
 func remoteIP(r *http.Request) string {
@@ -476,9 +570,26 @@ func hostAllowed(requestHost, configured string) bool {
 	return false
 }
 func writeJSON(w http.ResponseWriter, status int, value interface{}) {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return
+	}
+	if status >= 200 && status < 300 {
+		var object map[string]interface{}
+		if json.Unmarshal(encoded, &object) == nil && object != nil {
+			if _, exists := object["request_id"]; !exists {
+				if requestID := w.Header().Get("X-Request-ID"); requestID != "" {
+					object["request_id"] = requestID
+					if encoded, err = json.Marshal(object); err != nil {
+						return
+					}
+				}
+			}
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
+	_, _ = w.Write(append(encoded, '\n'))
 }
 
 func problem(w http.ResponseWriter, r *http.Request, status int, code, detail string, causes ...error) {
@@ -497,5 +608,10 @@ func problem(w http.ResponseWriter, r *http.Request, status int, code, detail st
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{"type": "https://docs.example.invalid/problems/" + strings.ToLower(strings.ReplaceAll(code, "_", "-")), "title": code, "status": status, "detail": detail, "instance": r.URL.Path})
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"type": "https://docs.example.invalid/problems/" + strings.ToLower(strings.ReplaceAll(code, "_", "-")), "title": code, "status": status, "detail": detail, "instance": r.URL.Path, "code": code, "request_id": requestID(r)})
+}
+
+func requestID(r *http.Request) string {
+	value, _ := r.Context().Value(requestIDKey).(string)
+	return value
 }

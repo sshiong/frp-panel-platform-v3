@@ -113,14 +113,14 @@ func TestServiceCoverageResourceLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	domain, err := app.CreateDomain(ctx, client, DomainRequest{MappingID: httpMapping.ID, Hostname: "App.Example.com", HTTPSMode: "http_only", HTTPRedirect: true, DNSRecordType: "CNAME", DNSContent: "frp.example.com", DNSTTL: 300}, "coverage-domain-000001")
+	domain, err := app.CreateDomain(ctx, client, DomainRequest{MappingID: httpMapping.ID, Hostname: "App.Example.com", HTTPSMode: "http_only", DNSRecordType: "CNAME", DNSContent: "frp.example.com", DNSTTL: 300}, "coverage-domain-000001")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if domain.Normalized != "app.example.com" || domain.Status != "pending_dns" {
 		t.Fatalf("unexpected domain: %#v", domain)
 	}
-	if replay, err := app.CreateDomain(ctx, client, DomainRequest{MappingID: httpMapping.ID, Hostname: "App.Example.com", HTTPSMode: "http_only", HTTPRedirect: true, DNSRecordType: "CNAME", DNSContent: "frp.example.com", DNSTTL: 300}, "coverage-domain-000001"); err != nil || replay.ID != domain.ID {
+	if replay, err := app.CreateDomain(ctx, client, DomainRequest{MappingID: httpMapping.ID, Hostname: "App.Example.com", HTTPSMode: "http_only", DNSRecordType: "CNAME", DNSContent: "frp.example.com", DNSTTL: 300}, "coverage-domain-000001"); err != nil || replay.ID != domain.ID {
 		t.Fatalf("idempotent domain replay failed: %#v %v", replay, err)
 	}
 

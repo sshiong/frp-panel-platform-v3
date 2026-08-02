@@ -11,9 +11,18 @@ function requestID(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
+// The local CSRF token is a browser-session value. Keep it only in this
+// module's memory; the only browser storage permitted by the product contract
+// is the non-sensitive last Server Panel URL.
+let inMemoryCSRF = ''
+
+export function setCSRFToken(value: string) {
+  inMemoryCSRF = value
+}
+
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const csrf = sessionStorage.getItem('client_csrf') ?? ''
-  const headers = new Headers({ 'Content-Type': 'application/json', ...(csrf ? { 'X-CSRF-Token': csrf } : {}), ...(init.headers ?? {}) })
+  const csrf = inMemoryCSRF
+  const headers = new Headers({ 'Content-Type': 'application/json', 'X-FRP-Protocol-Version': 'v1', ...(csrf ? { 'X-CSRF-Token': csrf } : {}), ...(init.headers ?? {}) })
   if (['POST', 'PUT', 'DELETE'].includes((init.method ?? 'GET').toUpperCase()) && !headers.has('Idempotency-Key')) headers.set('Idempotency-Key', requestID())
   const response = await fetch(path, { credentials: 'include', ...init, headers })
   if (!response.ok) { const problem = await response.json().catch(() => ({})) as { detail?: string; code?: string }; throw new Error(problem.detail || problem.code || `HTTP ${response.status}`) }

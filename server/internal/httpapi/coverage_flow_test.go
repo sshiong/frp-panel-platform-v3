@@ -82,6 +82,9 @@ func TestServerHTTPAPIUserAndAdminFlow(t *testing.T) {
 		for key, value := range headers {
 			req.Header.Set(key, value)
 		}
+		if token != "" && (method == http.MethodPost || method == http.MethodPut || method == http.MethodDelete || method == http.MethodPatch) && req.Header.Get("Idempotency-Key") == "" {
+			req.Header.Set("Idempotency-Key", "coverage-auto-"+shortID())
+		}
 		response, err := httpClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -174,7 +177,7 @@ func TestServerHTTPAPIUserAndAdminFlow(t *testing.T) {
 	mustStatus(httpResponse, http.StatusCreated)
 	var httpMapping service.Mapping
 	parse(httpResponse, &httpMapping)
-	domainResponse := request(http.MethodPost, "/api/v1/domains", `{"mapping_id":"`+httpMapping.ID+`","hostname":"panel.example.com","https_mode":"http_only","http_redirect":true,"dns_type":"CNAME","dns_content":"frp.example.com","dns_ttl":300}`, clientToken, key("coverage-http-domain-000001"))
+	domainResponse := request(http.MethodPost, "/api/v1/domains", `{"mapping_id":"`+httpMapping.ID+`","hostname":"panel.example.com","https_mode":"http_only","http_redirect":false,"dns_type":"CNAME","dns_content":"frp.example.com","dns_ttl":300}`, clientToken, key("coverage-http-domain-000001"))
 	mustStatus(domainResponse, http.StatusAccepted)
 	var domain service.Domain
 	parse(domainResponse, &domain)

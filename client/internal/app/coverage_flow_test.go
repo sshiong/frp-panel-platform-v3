@@ -125,6 +125,23 @@ func TestAppCoverageLifecycleAndProxy(t *testing.T) {
 		t.Fatalf("config synchronization count=%d, want 2", applyCount.Load())
 	}
 
+	secondServer := httptest.NewServer(handler)
+	if _, err := client.Login(context.Background(), secondServer.URL, "coverage-user", "Coverage-Password-2026!"); err != nil {
+		t.Fatal(err)
+	}
+	if logoutCount.Load() != 1 {
+		t.Fatalf("switching Server Panels did not best-effort logout old session: count=%d", logoutCount.Load())
+	}
+	var switchedDashboard map[string]interface{}
+	if err := client.Proxy(context.Background(), http.MethodGet, "/api/v1/dashboard", nil, "", &switchedDashboard); err != nil {
+		t.Fatal(err)
+	}
+	secondServer.Close()
+	var cachedAfterDisconnect map[string]interface{}
+	if err := client.Proxy(context.Background(), http.MethodGet, "/api/v1/dashboard", nil, "", &cachedAfterDisconnect); err != nil || cachedAfterDisconnect["status"] != "online" || client.ServerReachable() {
+		t.Fatalf("valid local session did not provide cached read-only dashboard after disconnect: %#v err=%v reachable=%v", cachedAfterDisconnect, err, client.ServerReachable())
+	}
+
 	var remoteResponse map[string]interface{}
 	if err := client.serverRequest(context.Background(), server.URL, http.MethodGet, "/error", nil, "token", &remoteResponse); err == nil {
 		t.Fatal("remote problem response was accepted")
@@ -148,7 +165,7 @@ func TestAppCoverageLifecycleAndProxy(t *testing.T) {
 		t.Fatal("offline write was accepted")
 	}
 	var cached map[string]interface{}
-	if err := client.Proxy(context.Background(), http.MethodGet, "/api/v1/dashboard", nil, "", &cached); err != nil {
-		t.Fatalf("cached dashboard was not available offline: %v", err)
+	if err := client.Proxy(context.Background(), http.MethodGet, "/api/v1/dashboard", nil, "", &cached); err == nil {
+		t.Fatal("logged-out client exposed cached dashboard")
 	}
 }

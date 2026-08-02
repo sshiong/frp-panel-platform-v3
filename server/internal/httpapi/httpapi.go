@@ -1,8 +1,12 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -35,15 +39,16 @@ const (
 )
 
 type API struct {
-	App         *service.App
-	Log         *slog.Logger
-	Origin      map[string]bool
-	WS          websocket.Upgrader
-	mu          sync.Mutex
-	clients     map[string]map[*websocket.Conn]struct{}
-	apiLimit    *requestRateLimiter
-	loginLimit  *requestRateLimiter
-	concurrency chan struct{}
+	App                *service.App
+	Log                *slog.Logger
+	Origin             map[string]bool
+	WS                 websocket.Upgrader
+	mu                 sync.Mutex
+	clients            map[string]map[*websocket.Conn]struct{}
+	apiLimit           *requestRateLimiter
+	loginLimit         *requestRateLimiter
+	concurrency        chan struct{}
+	writeIdempotencyMu sync.Mutex
 }
 
 type wsEnvelope struct {
@@ -93,12 +98,14 @@ func (a *API) routeTree() chi.Router {
 	r.Handle("/favicon.svg", http.FileServer(http.Dir(a.webDir())))
 	r.With(a.loopbackOnly).HandleFunc("/internal/frp/plugin", a.frpPlugin)
 	r.Route("/api/v1", func(r chi.Router) {
+		r.Use(a.protocolV1, a.responseMetadata)
 		r.Get("/compatibility", a.compatibility)
 		r.Post("/auth/admin-login", a.adminLogin)
 		r.Post("/auth/client-login", a.clientLogin)
 		r.Group(func(r chi.Router) {
 			r.Use(a.authenticate)
 			r.Use(a.requireWriteIdempotency)
+			r.Use(a.idempotency)
 			r.Post("/auth/logout", a.logout)
 			r.Post("/auth/change-password", a.changePassword)
 			r.Post("/auth/reauth", a.reauth)
@@ -207,7 +214,7 @@ func (a *API) cors(next http.Handler) http.Handler {
 		if origin != "" && a.Origin[origin] {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key, X-CSRF-Token, X-Request-ID")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key, X-CSRF-Token, X-FRP-Protocol-Version, X-Request-ID")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		}
 		if r.Method == http.MethodOptions {
@@ -270,18 +277,289 @@ func (a *API) authenticate(next http.Handler) http.Handler {
 	})
 }
 
+// protocolV1 keeps the HTTP API versioned independently from the FRP plugin
+// and WebSocket handshakes. A missing header remains compatible with existing
+// browsers; an explicitly unsupported version must fail closed with a clear
+// upgrade signal instead of being parsed as a v1 request.
+func (a *API) protocolV1(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requested := strings.TrimSpace(r.Header.Get("X-FRP-Protocol-Version")); requested != "" && requested != "v1" {
+			w.Header().Set("Upgrade-Required", "v1")
+			problem(w, r, http.StatusUpgradeRequired, "UPGRADE_REQUIRED", "HTTP API protocol version is unsupported; use v1.", nil)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// responseMetadata adds the request correlation ID to every successful JSON
+// write without requiring every handler to duplicate envelope plumbing. The
+// WebSocket upgrade is intentionally excluded because it must retain the
+// original hijack-capable ResponseWriter.
+func (a *API) responseMetadata(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/ws" || (r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodDelete && r.Method != http.MethodPatch) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		buffer := newBufferedResponseWriter(w)
+		next.ServeHTTP(buffer, r)
+		if buffer.status == 0 {
+			buffer.status = http.StatusOK
+		}
+		body := buffer.body.Bytes()
+		contentType := buffer.Header().Get("Content-Type")
+		if buffer.status >= 200 && buffer.status < 300 && strings.HasPrefix(contentType, "application/json") && len(body) > 0 {
+			var object map[string]interface{}
+			if json.Unmarshal(body, &object) == nil && object != nil {
+				if _, exists := object["request_id"]; !exists {
+					object["request_id"] = requestID(r)
+					if encoded, err := json.Marshal(object); err == nil {
+						body = encoded
+					}
+				}
+			}
+		}
+		for key, values := range buffer.Header() {
+			w.Header()[key] = append([]string(nil), values...)
+		}
+		if len(body) > 0 {
+			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		}
+		w.WriteHeader(buffer.status)
+		_, _ = io.Copy(w, bytes.NewReader(body))
+	})
+}
+
+type bufferedResponseWriter struct {
+	header http.Header
+	body   bytes.Buffer
+	status int
+}
+
+func newBufferedResponseWriter(parent http.ResponseWriter) *bufferedResponseWriter {
+	header := make(http.Header)
+	for key, values := range parent.Header() {
+		header[key] = append([]string(nil), values...)
+	}
+	return &bufferedResponseWriter{header: header}
+}
+
+func (w *bufferedResponseWriter) Header() http.Header { return w.header }
+
+func (w *bufferedResponseWriter) WriteHeader(status int) {
+	if w.status != 0 {
+		return
+	}
+	w.status = status
+}
+
+func (w *bufferedResponseWriter) Write(body []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.body.Write(body)
+}
+
 func (a *API) requireWriteIdempotency(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		protectedResourceWrite := strings.HasPrefix(r.URL.Path, "/api/v1/mappings") || strings.HasPrefix(r.URL.Path, "/api/v1/domains") || strings.HasSuffix(r.URL.Path, "/reset-frp-credential") || (r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/v1/admin/users/"))
-		if protectedResourceWrite && (r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodDelete || r.Method == http.MethodPatch) {
+		stateChanging := r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodDelete || r.Method == http.MethodPatch
+		if stateChanging {
 			key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 			if len(key) < 16 || len(key) > 128 {
-				problem(w, r, http.StatusPreconditionRequired, "IDEMPOTENCY_KEY_REQUIRED", "写请求必须携带 16 至 128 字符的 Idempotency-Key。", nil)
+				problem(w, r, http.StatusPreconditionRequired, "IDEMPOTENCY_KEY_REQUIRED", "所有已认证写请求必须携带 16 至 128 字符的 Idempotency-Key。", nil)
 				return
 			}
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// idempotency provides durable replay semantics for authenticated writes that
+// do not have a resource-specific transaction helper. Mapping, Domain and FRP
+// credential-reset mutations own their records inside the service transaction
+// and are deliberately excluded below. The remaining responses are encrypted
+// with the Server master key before they enter SQLite, so a retry can safely
+// replay an initial password or another one-time response without persisting
+// the secret in plaintext.
+func (a *API) idempotency(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isWriteMethod(r.Method) || serviceOwnsIdempotency(r.Method, r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		ac := authFrom(r)
+		key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+		body, err := readIdempotencyBody(r)
+		if err != nil {
+			problem(w, r, http.StatusRequestEntityTooLarge, "REQUEST_BODY_TOO_LARGE", "请求体超过允许大小。", err)
+			return
+		}
+		path := normalizedIdempotencyPath(r)
+		bodyHash := hashIdempotencyBody(body)
+		aad := idempotencyAAD(ac, r.Method, path, key)
+
+		// SQLite is the deployment authority and this process owns the only API
+		// writer. Holding the short-lived lock across the handler closes the
+		// lost-response race for duplicate keys while the durable row survives a
+		// process restart.
+		a.writeIdempotencyMu.Lock()
+		defer a.writeIdempotencyMu.Unlock()
+
+		var existingHash, storedBody string
+		var storedStatus int
+		lookupErr := a.App.DB.QueryRowContext(r.Context(), `SELECT request_body_hash,response_status,response_body_json FROM idempotency_records WHERE user_id=? AND session_generation=? AND http_method=? AND normalized_path=? AND idempotency_key=?`, ac.UserID, ac.Generation, r.Method, path, key).Scan(&existingHash, &storedStatus, &storedBody)
+		if lookupErr == nil {
+			if existingHash != bodyHash {
+				problem(w, r, http.StatusConflict, "IDEMPOTENCY_KEY_REUSED", "幂等键已用于不同请求。", service.ErrIdempotencyReuse)
+				return
+			}
+			responseBody, decryptErr := a.decryptIdempotencyResponse(storedBody, aad)
+			if decryptErr != nil {
+				problem(w, r, http.StatusInternalServerError, "IDEMPOTENCY_RESPONSE_UNAVAILABLE", "幂等响应暂时无法恢复，请联系管理员。", decryptErr)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(storedStatus)
+			_, _ = w.Write(responseBody)
+			return
+		}
+		if !errors.Is(lookupErr, sql.ErrNoRows) {
+			problem(w, r, http.StatusInternalServerError, "IDEMPOTENCY_LOOKUP_FAILED", "幂等状态暂时无法读取，请稍后重试。", lookupErr)
+			return
+		}
+
+		buffer := newBufferedResponseWriter(w)
+		next.ServeHTTP(buffer, r)
+		if buffer.status == 0 {
+			buffer.status = http.StatusOK
+		}
+		if buffer.status >= 200 && buffer.status < 300 {
+			stored, encryptErr := a.encryptIdempotencyResponse(buffer.body.Bytes(), aad)
+			if encryptErr == nil {
+				_, insertErr := a.App.DB.ExecContext(r.Context(), `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id.New(), ac.UserID, ac.Generation, r.Method, path, key, bodyHash, buffer.status, stored, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano))
+				if insertErr != nil && a.Log != nil {
+					a.Log.Error("idempotency_record_write_failed", "request_id", requestID(r), "method", r.Method, "path", path, "error", insertErr)
+				}
+			} else if a.Log != nil {
+				a.Log.Error("idempotency_response_encrypt_failed", "request_id", requestID(r), "method", r.Method, "path", path, "error", encryptErr)
+			}
+		}
+		writeBufferedResponse(w, buffer)
+	})
+}
+
+func isWriteMethod(method string) bool {
+	return method == http.MethodPost || method == http.MethodPut || method == http.MethodDelete || method == http.MethodPatch
+}
+
+func serviceOwnsIdempotency(method, path string) bool {
+	switch {
+	case path == "/api/v1/mappings" && method == http.MethodPost:
+		return true
+	case strings.HasPrefix(path, "/api/v1/mappings/") && (method == http.MethodPut || method == http.MethodDelete):
+		return true
+	case strings.HasSuffix(path, "/toggle") && method == http.MethodPost:
+		return true
+	case path == "/api/v1/domains" && method == http.MethodPost:
+		return true
+	case strings.HasPrefix(path, "/api/v1/domains/") && (method == http.MethodDelete || strings.HasSuffix(path, "/dns-action") && method == http.MethodPost):
+		return true
+	case path == "/api/v1/auth/reset-frp-credential" && method == http.MethodPost:
+		return true
+	case strings.HasSuffix(path, "/reset-frp-credential") && method == http.MethodPost:
+		return true
+	case strings.HasPrefix(path, "/api/v1/admin/users/") && method == http.MethodDelete:
+		return true
+	default:
+		return false
+	}
+}
+
+func readIdempotencyBody(r *http.Request) ([]byte, error) {
+	if r.Body == nil {
+		return nil, nil
+	}
+	original := r.Body
+	defer original.Close()
+	body, err := io.ReadAll(io.LimitReader(original, (1<<20)+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > 1<<20 {
+		return nil, fmt.Errorf("request body exceeds 1 MiB")
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	return body, nil
+}
+
+func normalizedIdempotencyPath(r *http.Request) string {
+	path := r.URL.EscapedPath()
+	if query := r.URL.Query().Encode(); query != "" {
+		path += "?" + query
+	}
+	return path
+}
+
+func hashIdempotencyBody(body []byte) string {
+	digest := sha256.Sum256(body)
+	return hex.EncodeToString(digest[:])
+}
+
+func idempotencyAAD(ac service.AuthContext, method, path, key string) string {
+	return fmt.Sprintf("idempotency:%s:%d:%s:%s:%s", ac.UserID, ac.Generation, method, path, key)
+}
+
+type encryptedIdempotencyResponse struct {
+	Version    int    `json:"version"`
+	Ciphertext string `json:"ciphertext"`
+	Nonce      string `json:"nonce"`
+}
+
+func (a *API) encryptIdempotencyResponse(body []byte, aad string) (string, error) {
+	if a.App == nil || a.App.Crypto == nil {
+		return "", errors.New("server crypto manager unavailable")
+	}
+	ciphertext, nonce, err := a.App.Crypto.Encrypt(body, aad)
+	if err != nil {
+		return "", err
+	}
+	envelope, err := json.Marshal(encryptedIdempotencyResponse{Version: 1, Ciphertext: base64.RawURLEncoding.EncodeToString(ciphertext), Nonce: base64.RawURLEncoding.EncodeToString(nonce)})
+	if err != nil {
+		return "", err
+	}
+	return string(envelope), nil
+}
+
+func (a *API) decryptIdempotencyResponse(stored, aad string) ([]byte, error) {
+	var envelope encryptedIdempotencyResponse
+	if json.Unmarshal([]byte(stored), &envelope) == nil && envelope.Version == 1 && envelope.Ciphertext != "" && envelope.Nonce != "" {
+		ciphertext, err := base64.RawURLEncoding.DecodeString(envelope.Ciphertext)
+		if err != nil {
+			return nil, err
+		}
+		nonce, err := base64.RawURLEncoding.DecodeString(envelope.Nonce)
+		if err != nil {
+			return nil, err
+		}
+		return a.App.Crypto.Decrypt(ciphertext, nonce, aad)
+	}
+	// Service-owned records created before this middleware used plaintext JSON
+	// response bodies. The middleware excludes those routes, but accepting the
+	// legacy format keeps the read path compatible with already-persisted rows.
+	return []byte(stored), nil
+}
+
+func writeBufferedResponse(w http.ResponseWriter, buffer *bufferedResponseWriter) {
+	for key, values := range buffer.Header() {
+		w.Header()[key] = append([]string(nil), values...)
+	}
+	body := buffer.body.Bytes()
+	if len(body) > 0 {
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+	}
+	w.WriteHeader(buffer.status)
+	_, _ = w.Write(body)
 }
 
 func (a *API) requireAdmin(next http.Handler) http.Handler {

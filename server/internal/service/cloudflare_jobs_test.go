@@ -53,6 +53,16 @@ func TestCloudflareTokenAndDomainJobs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	configHash := func(expectedVersion int64) string {
+		snapshot, snapshotErr := app.FullConfig(context.Background(), userContext)
+		if snapshotErr != nil {
+			t.Fatal(snapshotErr)
+		}
+		if snapshot.ConfigVersion != expectedVersion {
+			t.Fatalf("config version: got %d want %d", snapshot.ConfigVersion, expectedVersion)
+		}
+		return snapshot.ConfigHash
+	}
 	if err := app.ChangePassword(context.Background(), userContext, initial, "Alice-Password-2026!"); err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +158,7 @@ func TestCloudflareTokenAndDomainJobs(t *testing.T) {
 	if err := database.QueryRow(`SELECT status FROM domain_bindings WHERE id=?`, domain.ID).Scan(&status); err != nil || status != "pending_client" {
 		t.Fatalf("domain status before client apply: %q %v", status, err)
 	}
-	if err := app.ApplyResult(context.Background(), userContext, ApplyResultRequest{Status: "succeeded", ConfigVersion: 2, AppliedConfigHash: "hash", ClientPanelVersion: "test", FRPCVersion: "test"}); err != nil {
+	if err := app.ApplyResult(context.Background(), userContext, ApplyResultRequest{Status: "succeeded", ConfigVersion: 2, AppliedConfigHash: configHash(2), ClientPanelVersion: "test", FRPCVersion: "test"}); err != nil {
 		t.Fatal(err)
 	}
 	routerJob, err = app.Jobs.Claim(context.Background())
@@ -172,7 +182,7 @@ func TestCloudflareTokenAndDomainJobs(t *testing.T) {
 	if err := database.QueryRow(`SELECT status FROM domain_bindings WHERE id=?`, domain.ID).Scan(&status); err != nil || status != "deleting" {
 		t.Fatalf("domain must remain available for DNS compensation: %q %v", status, err)
 	}
-	if err := app.ApplyResult(context.Background(), userContext, ApplyResultRequest{Status: "succeeded", ConfigVersion: 3, AppliedConfigHash: "hash-3", ClientPanelVersion: "test", FRPCVersion: "test"}); err != nil {
+	if err := app.ApplyResult(context.Background(), userContext, ApplyResultRequest{Status: "succeeded", ConfigVersion: 3, AppliedConfigHash: configHash(3), ClientPanelVersion: "test", FRPCVersion: "test"}); err != nil {
 		t.Fatal(err)
 	}
 	deleteJob, err := app.Jobs.Claim(context.Background())
@@ -201,14 +211,14 @@ func TestCloudflareTokenAndDomainJobs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := app.ApplyResult(context.Background(), userContext, ApplyResultRequest{Status: "succeeded", ConfigVersion: 4, AppliedConfigHash: "hash-4", ClientPanelVersion: "test", FRPCVersion: "test"}); err != nil {
+	if err := app.ApplyResult(context.Background(), userContext, ApplyResultRequest{Status: "succeeded", ConfigVersion: 4, AppliedConfigHash: configHash(4), ClientPanelVersion: "test", FRPCVersion: "test"}); err != nil {
 		t.Fatal(err)
 	}
 	updatedPort := 6101
 	if _, err := app.UpdateMapping(context.Background(), userContext, portMapping.ID, MappingRequest{Name: "tcp", ProxyType: "tcp", LocalIP: "127.0.0.1", LocalPort: 9000, RemotePort: &updatedPort}, "idempotency-tcp-update"); err != nil {
 		t.Fatal(err)
 	}
-	if err := app.ApplyResult(context.Background(), userContext, ApplyResultRequest{Status: "succeeded", ConfigVersion: 5, AppliedConfigHash: "hash-5", ClientPanelVersion: "test", FRPCVersion: "test"}); err != nil {
+	if err := app.ApplyResult(context.Background(), userContext, ApplyResultRequest{Status: "succeeded", ConfigVersion: 5, AppliedConfigHash: configHash(5), ClientPanelVersion: "test", FRPCVersion: "test"}); err != nil {
 		t.Fatal(err)
 	}
 	var oldPort, newPort int

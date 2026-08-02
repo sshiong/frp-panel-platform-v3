@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -24,6 +25,9 @@ func TestApplyFailurePreservesActiveRevisionAndReleasesPendingPort(t *testing.T)
 	initial, err := app.FullConfig(ctx, client)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if err := app.ApplyResult(ctx, client, ApplyResultRequest{Status: "succeeded", ConfigVersion: initial.ConfigVersion, AppliedConfigHash: "not-the-signed-snapshot"}); !errors.Is(err, ErrConfigConflict) {
+		t.Fatalf("mismatched applied snapshot hash was accepted: %v", err)
 	}
 	if err := app.ApplyResult(ctx, client, ApplyResultRequest{Status: "succeeded", ConfigVersion: initial.ConfigVersion, ClientPanelVersion: "0.1.0", FRPCVersion: "0.68.0"}); err != nil {
 		t.Fatal(err)
@@ -131,4 +135,75 @@ func TestApplyFailurePreservesActiveRevisionAndReleasesPendingPort(t *testing.T)
 	if retryLease != 0 || nextLease != 1 {
 		t.Fatalf("pending lease replacement failed: old=%d new=%d", retryLease, nextLease)
 	}
+}
+
+func TestApplySuccessKeepsUnchangedActiveRevisions(t *testing.T) {
+	fixture := newServiceCoverageFixture(t)
+	ctx := context.Background()
+	app, client := fixture.app, fixture.client
+
+	first, err := app.CreateMapping(ctx, client, MappingRequest{
+		Name:      "revision-stable-first",
+		ProxyType: "tcp",
+		LocalIP:   "127.0.0.1",
+		LocalPort: 8400,
+	}, "revision-stable-first-000001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := app.CreateMapping(ctx, client, MappingRequest{
+		Name:      "revision-stable-second",
+		ProxyType: "tcp",
+		LocalIP:   "127.0.0.1",
+		LocalPort: 8401,
+	}, "revision-stable-second-000001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial, err := app.FullConfig(ctx, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.ApplyResult(ctx, client, ApplyResultRequest{Status: "succeeded", ConfigVersion: initial.ConfigVersion, ClientPanelVersion: "0.1.0", FRPCVersion: "0.68.0"}); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := app.UpdateMapping(ctx, client, first.ID, MappingRequest{
+		Name:       "revision-stable-first-v2",
+		ProxyType:  "tcp",
+		LocalIP:    "127.0.0.1",
+		LocalPort:  8402,
+		RemotePort: first.RemotePort,
+	}, "revision-stable-first-000002")
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed, err := app.FullConfig(ctx, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.ApplyResult(ctx, client, ApplyResultRequest{Status: "succeeded", ConfigVersion: changed.ConfigVersion, ClientPanelVersion: "0.1.0", FRPCVersion: "0.68.0"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var firstActiveStatus, secondActiveStatus string
+	if err := app.DB.QueryRowContext(ctx, `SELECT status FROM mapping_revisions WHERE mapping_id=? AND revision=?`, first.ID, updated.Revision).Scan(&firstActiveStatus); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.DB.QueryRowContext(ctx, `SELECT status FROM mapping_revisions WHERE mapping_id=? AND revision=?`, second.ID, second.Revision).Scan(&secondActiveStatus); err != nil {
+		t.Fatal(err)
+	}
+	if firstActiveStatus != "active" || secondActiveStatus != "active" {
+		t.Fatalf("apply changed revision authority for unchanged mapping: first=%q second=%q", firstActiveStatus, secondActiveStatus)
+	}
+	if ok, code, detail := app.AuthorizeFRPWithCredentials(ctx, "NewProxy", fixture.clientLogin.FRPUsername, fixture.clientLogin.RuntimeCredential, fixture.clientLogin.FRPSecret, client.Generation, second.ID, second.Revision, dereferencePort(second.RemotePort), "", "tcp"); !ok {
+		t.Fatalf("unchanged active mapping is no longer authorized: code=%q detail=%q", code, detail)
+	}
+}
+
+func dereferencePort(port *int) int {
+	if port == nil {
+		return 0
+	}
+	return *port
 }

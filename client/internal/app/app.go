@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -30,6 +31,8 @@ type App struct {
 	mu                  sync.RWMutex
 	serverURL           string
 	serverToken         string
+	serverSPKIPin       string
+	serverReachable     bool
 	runtimeCredential   string
 	frpUsername         string
 	frpSecret           string
@@ -38,7 +41,7 @@ type App struct {
 	csrfToken           string
 	user                map[string]interface{}
 	expiresAt           time.Time
-	lastDashboard       json.RawMessage
+	lastCache           map[string]json.RawMessage
 	lastConfig          supervisor.Snapshot
 	wsMu                sync.Mutex
 	wsConn              *websocket.Conn
@@ -85,13 +88,31 @@ func (e RemoteError) Error() string {
 }
 
 func New(cfg config.Config) *App {
-	return &App{Config: cfg, Supervisor: supervisor.NewWithBinaryHashAndVersion(cfg.DataDir, cfg.FRPCBinary, cfg.FRPCBinarySHA256, cfg.FRPCVersion)}
+	return &App{Config: cfg, Supervisor: supervisor.NewWithBinaryHashAndVersion(cfg.DataDir, cfg.FRPCBinary, cfg.FRPCBinarySHA256, cfg.FRPCVersion), lastCache: make(map[string]json.RawMessage)}
 }
 
 func (a *App) Login(ctx context.Context, serverURL, username, password string) (ClientSession, error) {
+	return a.LoginWithTrust(ctx, serverURL, username, password, "")
+}
+
+// LoginWithTrust performs the only password-bearing request. A non-empty
+// fingerprint is used only after the local UI has displayed it and the user
+// has explicitly confirmed the certificate. It is held in memory with the
+// Server Session and never persisted to browser storage.
+func (a *App) LoginWithTrust(ctx context.Context, serverURL, username, password, trustedSPKI string) (ClientSession, error) {
 	normalized, err := security.NormalizeServerURL(serverURL, a.Config.Environment == "development")
 	if err != nil {
 		return ClientSession{}, err
+	}
+	trustedSPKI, err = security.NormalizeSPKIHash(trustedSPKI)
+	if err != nil {
+		return ClientSession{}, err
+	}
+	a.mu.RLock()
+	oldToken, oldURL, oldPin := a.serverToken, a.serverURL, a.serverSPKIPin
+	a.mu.RUnlock()
+	if trustedSPKI == "" && oldURL == normalized {
+		trustedSPKI = oldPin
 	}
 	var response struct {
 		Token               string                 `json:"token"`
@@ -102,11 +123,18 @@ func (a *App) Login(ctx context.Context, serverURL, username, password string) (
 		FRPSecret           string                 `json:"frp_secret"`
 		FRPSTransportSecret string                 `json:"frps_transport_secret"`
 	}
-	if err := a.serverRequest(ctx, normalized, "POST", "/api/v1/auth/client-login", map[string]string{"username": username, "password": password}, "", &response); err != nil {
+	if err := a.serverRequestWithPin(ctx, normalized, trustedSPKI, "POST", "/api/v1/auth/client-login", map[string]string{"username": username, "password": password}, "", &response); err != nil {
 		return ClientSession{}, err
 	}
 	if response.Token == "" {
 		return ClientSession{}, fmt.Errorf("server did not return a session")
+	}
+	// A successful login is the commit point for switching Server Panels. Best
+	// effort logout of the previous opaque session happens before the new
+	// credentials replace local memory; a failure must never prevent the safe
+	// switch because the old Server may already be unreachable.
+	if oldToken != "" && oldURL != "" {
+		_ = a.serverRequestWithPin(ctx, oldURL, oldPin, "POST", "/api/v1/auth/logout", nil, oldToken, nil)
 	}
 	a.stopWebSocket()
 	local, err := randomToken()
@@ -118,9 +146,10 @@ func (a *App) Login(ctx context.Context, serverURL, username, password string) (
 		return ClientSession{}, err
 	}
 	a.mu.Lock()
-	oldToken := a.serverToken
 	a.serverURL = normalized
 	a.serverToken = response.Token
+	a.serverSPKIPin = trustedSPKI
+	a.serverReachable = true
 	a.runtimeCredential = response.RuntimeCredential
 	a.frpUsername = response.FRPUsername
 	a.frpSecret = response.FRPSecret
@@ -129,6 +158,10 @@ func (a *App) Login(ctx context.Context, serverURL, username, password string) (
 	a.csrfToken = csrf
 	a.user = response.User
 	a.expiresAt = time.Now().UTC().Add(30 * time.Minute)
+	// Cached snapshots and last-good UI state belong to the previous local
+	// session, even when the user logs into the same Server URL again.
+	a.lastCache = make(map[string]json.RawMessage)
+	a.lastConfig = supervisor.Snapshot{}
 	a.mu.Unlock()
 	if oldToken != "" {
 		_ = a.Supervisor.Stop(ctx)
@@ -144,16 +177,18 @@ func (a *App) Login(ctx context.Context, serverURL, username, password string) (
 func (a *App) Logout(ctx context.Context) error {
 	a.stopWebSocket()
 	a.mu.RLock()
-	token, urlValue := a.serverToken, a.serverURL
+	token, urlValue, pin := a.serverToken, a.serverURL, a.serverSPKIPin
 	a.mu.RUnlock()
 	if token != "" {
-		_ = a.serverRequest(ctx, urlValue, "POST", "/api/v1/auth/logout", nil, token, nil)
+		_ = a.serverRequestWithPin(ctx, urlValue, pin, "POST", "/api/v1/auth/logout", nil, token, nil)
 	}
 	_ = a.Supervisor.Stop(ctx)
 	_ = a.Supervisor.ClearRuntimeSecrets()
 	a.mu.Lock()
 	a.serverToken = ""
 	a.serverURL = ""
+	a.serverSPKIPin = ""
+	a.serverReachable = false
 	a.runtimeCredential = ""
 	a.frpUsername = ""
 	a.frpSecret = ""
@@ -163,6 +198,7 @@ func (a *App) Logout(ctx context.Context) error {
 	a.user = nil
 	a.expiresAt = time.Time{}
 	a.lastConfig = supervisor.Snapshot{}
+	a.lastCache = make(map[string]json.RawMessage)
 	a.mu.Unlock()
 	return nil
 }
@@ -184,32 +220,101 @@ func (a *App) Session() ClientSession {
 	return ClientSession{CSRFToken: a.csrfToken, User: a.user, ServerPanelURL: a.serverURL, ExpiresAt: a.expiresAt}
 }
 
+// ServerReachable reports whether the last Server-backed read succeeded. It
+// is intentionally only a local UI hint; authorization continues to be
+// enforced by the Server session on every proxied request.
+func (a *App) ServerReachable() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.serverReachable
+}
+
+// InspectServerCertificate is deliberately independent of the authenticated
+// session. The local UI can call it before a password-bearing login request.
+func (a *App) InspectServerCertificate(ctx context.Context, serverURL string) (security.CertificateInfo, error) {
+	normalized, err := security.NormalizeServerURL(serverURL, a.Config.Environment == "development")
+	if err != nil {
+		return security.CertificateInfo{}, err
+	}
+	return security.InspectServerCertificate(ctx, normalized)
+}
+
 func (a *App) Proxy(ctx context.Context, method, path string, body interface{}, csrf string, response interface{}, idempotencyKeys ...string) error {
 	a.mu.RLock()
-	token, urlValue := a.serverToken, a.serverURL
+	token, urlValue, pin := a.serverToken, a.serverURL, a.serverSPKIPin
 	a.mu.RUnlock()
 	if token == "" || urlValue == "" {
-		if a.lastDashboard != nil && method == "GET" && path == "/api/v1/dashboard" {
-			return json.Unmarshal(a.lastDashboard, response)
+		if method == "GET" && a.loadCached(path, response) {
+			a.setServerReachable(false)
+			return nil
 		}
 		return fmt.Errorf("client session is offline")
 	}
 	if method != "GET" && method != "HEAD" && !a.CSRFValid(csrf) {
 		return fmt.Errorf("local csrf validation failed")
 	}
-	err := a.serverRequest(ctx, urlValue, method, path, body, token, response, idempotencyKeys...)
-	if remote, ok := err.(RemoteError); ok && (remote.Code == "SESSION_REPLACED" || remote.Code == "SESSION_EXPIRED" || remote.Code == "AUTH_USER_DISABLED") {
-		// A replaced/revoked Server Session is a local safety event: stop FRPC
-		// before returning the error and erase all runtime-only material.
-		a.invalidateRemoteSession(ctx)
+	err := a.serverRequestWithPin(ctx, urlValue, pin, method, path, body, token, response, idempotencyKeys...)
+	if err != nil {
+		var remote RemoteError
+		if errors.As(err, &remote) {
+			if remote.Code == "SESSION_REPLACED" || remote.Code == "SESSION_EXPIRED" || remote.Code == "AUTH_USER_DISABLED" {
+				// A replaced/revoked Server Session is a local safety event: stop FRPC
+				// before returning the error and erase all runtime-only material. Never
+				// let an offline cache hide a server-side session invalidation.
+				a.invalidateRemoteSession(ctx)
+			}
+			// A client-side cache is only valid for transport/server unavailability;
+			// it must not mask authorization or validation responses from the Server.
+			if remote.Status < http.StatusInternalServerError {
+				return err
+			}
+		}
+		if method == "GET" && a.loadCached(path, response) {
+			a.setServerReachable(false)
+			return nil
+		}
 	}
-	if err == nil && path == "/api/v1/dashboard" {
-		a.mu.Lock()
-		encoded, _ := json.Marshal(response)
-		a.lastDashboard = encoded
-		a.mu.Unlock()
+	if err == nil {
+		a.setServerReachable(true)
+		a.cacheResponse(path, response)
 	}
 	return err
+}
+
+func (a *App) setServerReachable(value bool) {
+	a.mu.Lock()
+	a.serverReachable = value
+	a.mu.Unlock()
+}
+
+func (a *App) cacheResponse(path string, response interface{}) {
+	if response == nil || (path != "/api/v1/dashboard" && path != "/api/v1/mappings" && path != "/api/v1/domains" && path != "/api/v1/operations" && path != "/api/v1/config/full") {
+		return
+	}
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		return
+	}
+	a.mu.Lock()
+	if a.lastCache == nil {
+		a.lastCache = make(map[string]json.RawMessage)
+	}
+	a.lastCache[path] = append(json.RawMessage(nil), encoded...)
+	a.mu.Unlock()
+}
+
+func (a *App) loadCached(path string, response interface{}) bool {
+	if response == nil {
+		return false
+	}
+	a.mu.RLock()
+	encoded, ok := a.lastCache[path]
+	copyOfEncoded := append(json.RawMessage(nil), encoded...)
+	a.mu.RUnlock()
+	if !ok || len(copyOfEncoded) == 0 {
+		return false
+	}
+	return json.Unmarshal(copyOfEncoded, response) == nil
 }
 
 func (a *App) FetchConfigAndApply(ctx context.Context) error {
@@ -274,6 +379,16 @@ func (a *App) applySnapshot(ctx context.Context, snapshot supervisor.Snapshot) e
 }
 
 func (a *App) serverRequest(ctx context.Context, baseURL, method, path string, payload interface{}, token string, response interface{}, idempotencyKeys ...string) error {
+	pin := ""
+	a.mu.RLock()
+	if strings.TrimRight(baseURL, "/") == strings.TrimRight(a.serverURL, "/") {
+		pin = a.serverSPKIPin
+	}
+	a.mu.RUnlock()
+	return a.serverRequestWithPin(ctx, baseURL, pin, method, path, payload, token, response, idempotencyKeys...)
+}
+
+func (a *App) serverRequestWithPin(ctx context.Context, baseURL, pin, method, path string, payload interface{}, token string, response interface{}, idempotencyKeys ...string) error {
 	var reader io.Reader
 	if payload != nil {
 		encoded, err := json.Marshal(payload)
@@ -299,6 +414,7 @@ func (a *App) serverRequest(ctx context.Context, baseURL, method, path string, p
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
+	req.Header.Set("X-FRP-Protocol-Version", "v1")
 	req.Header.Set("X-Request-ID", id.New())
 	if method == "POST" || method == "PUT" || method == "DELETE" {
 		idempotencyKey := ""
@@ -310,7 +426,11 @@ func (a *App) serverRequest(ctx context.Context, baseURL, method, path string, p
 		}
 		req.Header.Set("Idempotency-Key", idempotencyKey)
 	}
-	resp, err := serverHTTPClient.Do(req)
+	client, err := serverHTTPClientFor(baseURL, pin)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -331,6 +451,27 @@ func (a *App) serverRequest(ctx context.Context, baseURL, method, path string, p
 		return json.Unmarshal(data, response)
 	}
 	return nil
+}
+
+func serverHTTPClientFor(baseURL, pin string) (*http.Client, error) {
+	if strings.TrimSpace(pin) == "" {
+		return serverHTTPClient, nil
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" {
+		return nil, fmt.Errorf("certificate pin requires an https Server Panel address")
+	}
+	tlsConfig, err := security.PinnedTLSConfig(parsed.Hostname(), pin)
+	if err != nil {
+		return nil, err
+	}
+	transport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return nil, fmt.Errorf("default HTTP transport is unavailable")
+	}
+	transport = transport.Clone()
+	transport.TLSClientConfig = tlsConfig
+	return &http.Client{Transport: transport, CheckRedirect: serverHTTPClient.CheckRedirect}, nil
 }
 
 func randomToken() (string, error) {
@@ -403,7 +544,7 @@ func (a *App) runWebSocket(ctx context.Context, generation uint64) {
 		if baseURL == "" || token == "" {
 			return
 		}
-		conn, response, err := dialServerWebSocket(ctx, baseURL, token, localOrigin(a.Config))
+		conn, response, err := dialServerWebSocketWithPin(ctx, baseURL, token, a.serverCertificatePin(), localOrigin(a.Config))
 		if err != nil {
 			if response != nil && response.StatusCode == http.StatusUnauthorized && a.currentWebSocket(generation) {
 				a.invalidateRemoteSession(context.Background())
@@ -513,6 +654,7 @@ func (a *App) invalidateRemoteSession(ctx context.Context) {
 	a.mu.Lock()
 	a.serverToken = ""
 	a.serverURL = ""
+	a.serverSPKIPin = ""
 	a.runtimeCredential = ""
 	a.frpUsername = ""
 	a.frpSecret = ""
@@ -521,6 +663,8 @@ func (a *App) invalidateRemoteSession(ctx context.Context) {
 	a.user = nil
 	a.expiresAt = time.Time{}
 	a.lastConfig = supervisor.Snapshot{}
+	a.lastCache = make(map[string]json.RawMessage)
+	a.serverReachable = false
 	a.mu.Unlock()
 	_ = ctx
 }
@@ -531,7 +675,17 @@ func (a *App) serverCredentials() (string, string) {
 	return a.serverURL, a.serverToken
 }
 
+func (a *App) serverCertificatePin() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.serverSPKIPin
+}
+
 func dialServerWebSocket(ctx context.Context, baseURL, token, origin string) (*websocket.Conn, *http.Response, error) {
+	return dialServerWebSocketWithPin(ctx, baseURL, token, "", origin)
+}
+
+func dialServerWebSocketWithPin(ctx context.Context, baseURL, token, pin, origin string) (*websocket.Conn, *http.Response, error) {
 	wsURL, err := websocketURL(baseURL)
 	if err != nil {
 		return nil, nil, err
@@ -543,6 +697,16 @@ func dialServerWebSocket(ctx context.Context, baseURL, token, origin string) (*w
 		headers.Set("Origin", origin)
 	}
 	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
+	if strings.TrimSpace(pin) != "" {
+		parsed, parseErr := url.Parse(baseURL)
+		if parseErr != nil {
+			return nil, nil, parseErr
+		}
+		dialer.TLSClientConfig, err = security.PinnedTLSConfig(parsed.Hostname(), pin)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
 	return dialer.DialContext(ctx, wsURL, headers)
 }
 

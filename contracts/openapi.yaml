@@ -77,12 +77,16 @@ paths:
     post:
       operationId: logout
       security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
       responses:
         '200': { description: Session revoked }
   /api/v1/auth/change-password:
     post:
       operationId: changePassword
       security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
       requestBody:
         required: true
         content:
@@ -100,6 +104,8 @@ paths:
     post:
       operationId: issueReauthTicket
       security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
       requestBody:
         required: true
         content:
@@ -346,6 +352,7 @@ paths:
           in: path
           required: true
           schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
       responses:
         '202': { description: Operation requeued }
         '404': { $ref: '#/components/responses/Problem' }
@@ -363,6 +370,8 @@ paths:
     post:
       operationId: applyResult
       security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
       requestBody:
         required: true
         content:
@@ -384,6 +393,8 @@ paths:
     post:
       operationId: sessionHeartbeat
       security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
       responses:
         '200': { description: Session heartbeat accepted }
   /api/v1/cloudflare/status:
@@ -396,6 +407,8 @@ paths:
     post:
       operationId: saveCloudflareToken
       security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
       requestBody:
         required: true
         content:
@@ -411,6 +424,8 @@ paths:
     delete:
       operationId: clearCloudflareToken
       security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
       requestBody:
         required: true
         content:
@@ -436,6 +451,8 @@ paths:
     post:
       operationId: rebuildRouter
       security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
       requestBody:
         required: true
         content:
@@ -466,6 +483,8 @@ paths:
     post:
       operationId: adminCreateUser
       security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
       requestBody:
         required: true
         content:
@@ -503,6 +522,7 @@ paths:
           in: path
           required: true
           schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
       requestBody:
         required: true
         content:
@@ -519,6 +539,7 @@ paths:
           in: path
           required: true
           schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
       requestBody:
         required: true
         content:
@@ -577,6 +598,8 @@ paths:
     post:
       operationId: createBackup
       security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
       requestBody:
         required: true
         content:

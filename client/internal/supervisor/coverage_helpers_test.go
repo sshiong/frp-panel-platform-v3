@@ -35,6 +35,14 @@ func TestSupervisorCoverageHelpersAndRuntimeArtifacts(t *testing.T) {
 	if err := s.writeRuntimeSecrets(snapshot); err != nil {
 		t.Fatal(err)
 	}
+	s.mu.Lock()
+	s.lastSnapshot = &Snapshot{Payload: map[string]interface{}{
+		"frp_secret":            "secret-in-memory",
+		"frp_user_secret":       "secret-in-memory",
+		"runtime_credential":    "runtime-in-memory",
+		"frps_transport_secret": "transport-in-memory",
+	}}
+	s.mu.Unlock()
 	for _, name := range []string{"transport-token", "user-frp-secret", "runtime-token"} {
 		if _, err := os.Stat(filepath.Join(root, "runtime", "secrets", name)); err != nil {
 			t.Fatal(err)
@@ -68,6 +76,12 @@ func TestSupervisorCoverageHelpersAndRuntimeArtifacts(t *testing.T) {
 	if err := s.clearRecoveredRuntime(); err != nil {
 		t.Fatal(err)
 	}
+	s.mu.RLock()
+	if s.lastSnapshot != nil {
+		s.mu.RUnlock()
+		t.Fatal("runtime-only snapshot remained in Supervisor memory")
+	}
+	s.mu.RUnlock()
 	if _, err := os.Stat(filepath.Join(root, "runtime", "secrets")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("runtime secrets were not cleared: %v", err)
 	}
