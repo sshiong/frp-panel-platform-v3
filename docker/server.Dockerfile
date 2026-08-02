@@ -1,4 +1,6 @@
 FROM node:22-bookworm-slim AS admin-ui
+WORKDIR /src
+COPY contracts/generated/server-api.d.ts /src/contracts/generated/server-api.d.ts
 WORKDIR /src/web/admin
 COPY web/admin/package.json web/admin/package-lock.json ./
 RUN npm ci --ignore-scripts

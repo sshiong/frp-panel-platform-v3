@@ -1,4 +1,6 @@
 FROM node:22-bookworm-slim AS client-ui
+WORKDIR /src
+COPY contracts/generated/client-api.d.ts /src/contracts/generated/client-api.d.ts
 WORKDIR /src/web/client
 COPY web/client/package.json web/client/package-lock.json ./
 RUN npm ci --ignore-scripts
