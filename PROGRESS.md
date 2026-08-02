@@ -54,6 +54,7 @@
 - [x] Client 登录前只做 TLS 证书检查，不发送登录密码；生产 HTTPS 需系统 CA、IP SAN/custom CA 或用户确认的 SPKI pin，pin 仅驻留内存并绑定当前 Server；切换 Server 会注销旧会话、停止旧 FRPC 并清理缓存/秘密。
 - [x] Client 离线回退只允许当前登录会话的 GET 快照，4xx/会话替换/停用永不被缓存掩盖；退出、切换 Server、会话失效会清理缓存和内存运行时秘密；浏览器 `localStorage` 仅保存 `last_server_panel_url`。
 - [x] Client Operations 页面展示阶段、步骤、状态、错误、重试和 external residues；所有异步操作保留可见的 loading/error/retry 反馈。
+- [x] PERF-001~007 本地验收 profile：并发读写、目标规模 Router/Domain 快照、200 Mapping 配置签名、Client 提交到应用以及旧 HTTP/WS/FRP Plugin 会话在替换后失效均有可重复测试；目标 Linux/硬件基线仍需外部环境签收。
 - [x] `http_only` 固定为无证书、无 HTTPS 跳转；API、服务层、Client 表单和 SQLite CHECK/trigger migration 均拒绝冲突配置。
 - [x] 正式 FPPB1 包包含数据库、受保护数据目录密钥/证书/ACME 文件，逐文件校验并安全恢复；Server 启动会重新排队 Router 快照。
 - [x] OpenAPI 3.1 路径/operationId/WebSocket 元数据校验脚本、双模块 CI contract job、`make sbom`、`make checksums`、固定 FRP 版本下载归档校验和发布清单已加入；正式发布仍需签名和第三方扫描。
@@ -83,6 +84,8 @@
 | 2026-08-02 | API protocol/idempotency hardening | 通过；Server/Client API 统一请求 ID 与 `X-FRP-Protocol-Version: v1`，未知版本返回 426；认证写入强制幂等键，重复请求重放加密响应，不同请求体复用同键返回 409；OpenAPI 保持 34 paths/39 operations |
 | 2026-08-02 | Fixed TLS mode and browser visual QA | 通过；`http_only` 与 redirect 冲突在 API/服务层/表单均被阻断；Playwright 检查 Admin 与 Client 登录页，石墨/象牙/钢蓝/状态色体系，无浅紫色；当前页面截图已核对 |
 | 2026-08-02 | Database constraint and final regression | 通过；SQLite CHECK/trigger migration 拒绝 `http_only + redirect`，全量 `make test`（Server/Client race）、`make lint`、`make build`、SBOM/checksum/manifest、OpenAPI 和 secret scan 均通过；Vite 仅保留非阻断的大 chunk 警告 |
+| 2026-08-02 | Responsive/performance acceptance hardening | 通过；Admin/Client 390×844 Playwright 检查 `scrollWidth === innerWidth`，移动端断点、表格容器滚动、44px 触控目标和 reduced-motion 已接入；`make perf` 的 PERF-001~007 本地 profile 通过，其中 PERF-007 覆盖旧 HTTP/WS/FRP Plugin 会话替换失效 |
+| 2026-08-02 | Frontend technical audit | 通过并留有发布建议；`docs/ui-audit.md` 评分 15/20，未发现 P0/P1 UI 阻断项；P2 为生产 bundle 分包与颜色 token 收敛，P3 为将认证路由 WCAG 自动化纳入 CI |
 
 ## 未决与发布阻断项
 
@@ -92,7 +95,7 @@
 2. Cloudflare Sandbox Token 权限、DNS 三种冲突语义、超时补偿和真实外部残留验证。
 3. 使用真实 Cloudflare Sandbox + ACME Staging 完成 DNS-01 传播、TXT 清理、证书原子替换与 Router TLS SNI/Host 热切换；本地 Provider 已实现但未伪造外部成功。
 4. 加密归档备份恢复的 clean-host 灾备演练、WAL checkpoint 受控执行和磁盘满/时钟偏差故障注入。
-5. 1000 Mapping/2000 Domain、200 Mapping、配置同步和会话替换等 PERF-003~007 的目标环境基线；当前 PERF-001/002 已通过。
+5. 1000 Mapping/2000 Domain、200 Mapping、配置同步和会话替换等 PERF-003~007 的目标环境基线；本地开发 profile 已通过，但尚未替代 Linux/生产目标机的容量基线。
 6. GitHub Actions 实际运行、正式 SAST/SCA/依赖扫描、cosign 签名及发布负责人/安全负责人/测试负责人签字。
 7. 完成上述 P0/P1 外部验收前，仓库只能作为开发预览，不得声明生产就绪。
 

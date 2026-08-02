@@ -14,11 +14,14 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/ricardo/frp-panel-platform/server/internal/config"
 	"github.com/ricardo/frp-panel-platform/server/internal/crypto"
 	"github.com/ricardo/frp-panel-platform/server/internal/db"
@@ -35,7 +38,8 @@ func TestPerformanceBaseline(t *testing.T) {
 	if testing.Short() || os.Getenv("FRP_PERF") != "1" {
 		t.Skip("set FRP_PERF=1 to run the acceptance performance profile")
 	}
-	app, server, token := performanceFixture(t)
+	app, server, login := performanceFixture(t)
+	token := login.Token
 	defer server.Close()
 
 	readErrors, readP95 := concurrentRequests(100, func(index int) error {
@@ -84,6 +88,121 @@ func TestPerformanceBaseline(t *testing.T) {
 	}
 	_ = app
 	t.Logf("PERF-001 reads=100 errors=%d p95=%s; PERF-002 writes=20 errors=%d p95=%s", readErrors, readP95, writeErrors, writeP95)
+}
+
+// TestPerformanceSessionReplacement measures the bounded invalidation path
+// required by PERF-007: an old HTTP session, WebSocket and FRP Plugin login
+// must stop being useful immediately after the replacement login commits.
+func TestPerformanceSessionReplacement(t *testing.T) {
+	if testing.Short() || os.Getenv("FRP_PERF_SCALE") != "1" {
+		t.Skip("set FRP_PERF_SCALE=1 to run the session replacement acceptance profile")
+	}
+	app, server, oldLogin := performanceFixture(t)
+	oldUser, err := app.Authenticate(t.Context(), oldLogin.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/v1/ws"
+	dialer := websocket.Dialer{HandshakeTimeout: 5 * time.Second}
+	connection, response, err := dialer.Dial(wsURL, http.Header{
+		"Authorization": []string{"Bearer " + oldLogin.Token},
+		"Origin":        []string{"http://127.0.0.1:7410"},
+	})
+	if err != nil {
+		if response != nil {
+			t.Fatalf("old WebSocket dial failed with status %d: %v", response.StatusCode, err)
+		}
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	_ = connection.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var connected wsEnvelope
+	if err := connection.ReadJSON(&connected); err != nil || connected.Type != "connected" {
+		t.Fatalf("old WebSocket did not connect: %#v %v", connected, err)
+	}
+
+	started := time.Now()
+	loginBody := bytes.NewBufferString(`{"username":"perf-user","password":"Perf-User-Password-2026!"}`)
+	loginRequest, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/auth/client-login", loginBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loginRequest.Header.Set("Content-Type", "application/json")
+	loginRequest.Header.Set("X-FRP-Protocol-Version", "v1")
+	loginResponse, err := http.DefaultClient.Do(loginRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer loginResponse.Body.Close()
+	var replacement service.LoginResult
+	if err := json.NewDecoder(loginResponse.Body).Decode(&replacement); err != nil {
+		t.Fatal(err)
+	}
+	if loginResponse.StatusCode != http.StatusOK || replacement.Token == "" {
+		t.Fatalf("replacement login failed: status=%d result=%#v", loginResponse.StatusCode, replacement)
+	}
+
+	_ = connection.SetReadDeadline(time.Now().Add(5 * time.Second))
+	var replaced wsEnvelope
+	if err := connection.ReadJSON(&replaced); err != nil || replaced.Type != "session_replaced" {
+		t.Fatalf("old WebSocket was not invalidated: %#v %v", replaced, err)
+	}
+	websocketInvalidation := time.Since(started)
+	if websocketInvalidation > 5*time.Second {
+		t.Fatalf("PERF-007 WebSocket invalidation took %s", websocketInvalidation)
+	}
+
+	started = time.Now()
+	oldRequest, err := http.NewRequest(http.MethodGet, server.URL+"/api/v1/dashboard", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldRequest.Header.Set("Authorization", "Bearer "+oldLogin.Token)
+	oldResponse, err := http.DefaultClient.Do(oldRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer oldResponse.Body.Close()
+	var oldProblem map[string]interface{}
+	_ = json.NewDecoder(oldResponse.Body).Decode(&oldProblem)
+	httpInvalidation := time.Since(started)
+	if oldResponse.StatusCode != http.StatusUnauthorized || oldProblem["code"] != "SESSION_REPLACED" || httpInvalidation > 5*time.Second {
+		t.Fatalf("PERF-007 old HTTP session remained usable: status=%d code=%v duration=%s", oldResponse.StatusCode, oldProblem["code"], httpInvalidation)
+	}
+
+	started = time.Now()
+	pluginPayload, err := json.Marshal(map[string]interface{}{"content": map[string]interface{}{
+		"version": "0.68.0",
+		"user":    oldLogin.FRPUsername,
+		"metas": map[string]string{
+			"frp_runtime_credential": oldLogin.RuntimeCredential,
+			"session_generation":     strconv.FormatInt(oldUser.Generation, 10),
+			"frp_user_secret":        oldLogin.FRPSecret,
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pluginRequest, err := http.NewRequest(http.MethodPost, server.URL+"/internal/frp/plugin?version=0.1.0&op=Login", bytes.NewReader(pluginPayload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pluginRequest.Header.Set("Content-Type", "application/json")
+	pluginResponse, err := http.DefaultClient.Do(pluginRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pluginResponse.Body.Close()
+	var pluginReject frpPluginResponse
+	if err := json.NewDecoder(pluginResponse.Body).Decode(&pluginReject); err != nil {
+		t.Fatal(err)
+	}
+	pluginInvalidation := time.Since(started)
+	if pluginResponse.StatusCode != http.StatusOK || !pluginReject.Reject || pluginInvalidation > 30*time.Second {
+		t.Fatalf("PERF-007 old FRP login remained usable: status=%d reject=%v reason=%q duration=%s", pluginResponse.StatusCode, pluginReject.Reject, pluginReject.RejectReason, pluginInvalidation)
+	}
+	t.Logf("PERF-007 session replacement: websocket=%s http=%s old-frp-login=%s", websocketInvalidation, httpInvalidation, pluginInvalidation)
 }
 
 // TestPerformanceScale is the target-size local profile for the remaining
@@ -201,7 +320,7 @@ type httpError struct{ status int }
 
 func (e *httpError) Error() string { return "unexpected HTTP status" }
 
-func performanceFixture(t *testing.T) (*service.App, *httptest.Server, string) {
+func performanceFixture(t *testing.T) (*service.App, *httptest.Server, service.LoginResult) {
 	t.Helper()
 	root := t.TempDir()
 	database, err := db.Open(filepath.Join(root, "server.db"))
@@ -213,7 +332,7 @@ func performanceFixture(t *testing.T) (*service.App, *httptest.Server, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := config.Config{DataDir: root, Environment: "development", AdminPassword: "Admin-Password-2026!", SessionTTLHours: 12, PortStart: 6000, PortEnd: 6999}
+	cfg := config.Config{DataDir: root, Environment: "development", AdminPassword: "Admin-Password-2026!", SessionTTLHours: 12, PortStart: 6000, PortEnd: 6999, AllowedOrigins: []string{"http://127.0.0.1:7410"}}
 	app := service.New(database, cfg, secrets)
 	if _, err := app.EnsureAdmin(context.Background()); err != nil {
 		t.Fatal(err)
@@ -249,7 +368,7 @@ func performanceFixture(t *testing.T) (*service.App, *httptest.Server, string) {
 		t.Fatal(err)
 	}
 	api := New(app, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	return app, httptest.NewServer(api.Handler()), clientLogin.Token
+	return app, httptest.NewServer(api.Handler()), clientLogin
 }
 
 func concurrentRequests(count int, request func(int) error) (int, time.Duration) {
