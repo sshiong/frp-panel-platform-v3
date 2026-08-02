@@ -176,7 +176,7 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 | UI-004 | 本地通过 | Cloudflare capability missing 列表在 Admin UI 展示。 |
 | UI-005 | 本地通过 | DNS adopt/overwrite/cancel 与 managed/adopted 文案一致。 |
 | UI-006 | 本地通过 | Token 页面只显示 configured/status/version/verified_at。 |
-| UI-007 | 本地通过 | Admin/Client 构建后运行 axe WCAG 2.1 AA、表单标签、键盘 Tab/reduced-motion、390px 无横向溢出检查均通过；CI 复跑证据待新分支提交。 |
+| UI-007 | 本地/CI 通过 | Admin/Client 构建后运行 axe WCAG 2.1 AA、表单标签、键盘 Tab/reduced-motion、390px 无横向溢出检查均通过；PR #2 的 `web (admin)` 与 `web (client)` 门禁通过。 |
 | UI-008 | 本地通过 | Operations 展示阶段、步骤、失败原因、residue 和 retry。 |
 | DOD-001 | 待外部 | 所有 P0/P1 尚未完成真实 Cloudflare、ACME、Linux/FRP、灾备和签字，因此当前版本不是 Release Candidate。 |
 

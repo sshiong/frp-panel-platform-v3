@@ -94,7 +94,7 @@
 | 2026-08-02 | Development-standard gate completion | 本地通过；`make lint`、`make test`、`make build`、`make contract`、`make migration-check`、`make license` 通过；响应契约、迁移升级、Router 请求边界、独立版本字段和逐项 [`acceptance-matrix.md`](docs/acceptance-matrix.md) 已入库 |
 | 2026-08-02 | Final GitHub CI and CodeQL gates | 通过；提交 [`2f73156`](https://github.com/sshiong/frp-panel-platform-v3/commit/2f731567da6933d4fc2ae1db333ad9d61fc2ca19) 的 [`ci` run 30745496136](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30745496136) 九个 job 全部成功，包含 security、双前端、双 Go 模块、fuzz、contract、container-scan、release-metadata；[`CodeQL run 30745496145`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30745496145) 成功，双 gosec SARIF 使用独立 category 上传 |
 
-| 2026-08-02 | 版本兼容、密钥轮换与 WCAG 本地门禁 | 通过；Server/Client 版本升级提示与 426 回归、版本化密钥环/`make key-rotate` 重包裹与重启兼容回归、两个已构建前端的 axe WCAG 2.1 AA/标签/键盘/移动端检查均通过；真实生产轮换和新的 hosted CI 复跑仍待完成 |
+| 2026-08-02 | 版本兼容、密钥轮换与 WCAG 托管门禁 | 通过；Server/Client 版本升级提示与 426 回归、版本化密钥环/`make key-rotate` 重包裹与重启兼容回归、两个已构建前端的 axe WCAG 2.1 AA/标签/键盘/移动端检查均通过；PR #2 的 [`ci` run 30757075940](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30757075940) 与 [`CodeQL run 30757075959`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30757075959) 全部成功，真实生产轮换仍待外部环境 |
 
 ## 未决与发布阻断项
 
