@@ -157,7 +157,7 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 | REL-006 | 本地通过 | WebSocket 断线后全量同步/心跳恢复测试通过。 |
 | REL-007 | 待外部 | 原子写入和错误路径单测通过；真实 disk-full 注入待外部。 |
 | REL-008 | 待外部 | Provider Date/clock skew 检测已有单测；系统时钟偏差/ACME 实验待外部。 |
-| SEC-001 | 部分通过 | 本地 gosec/govulncheck 复现和 secret scan 清零；最新 GitHub CI 安全 job 需在本批改动后重新通过。 |
+| SEC-001 | 本地/CI 通过 | 本地 gosec/govulncheck 和 secret scan 清零；最终提交 [`2f73156`](https://github.com/sshiong/frp-panel-platform-v3/commit/2f731567da6933d4fc2ae1db333ad9d61fc2ca19) 的 [`ci` security job](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30745496136) 与 CodeQL 均成功，双 gosec SARIF 已独立上传。 |
 | SEC-002 | 本地通过 | Auth/domain/port/file path 权限测试和 race 测试通过。 |
 | SEC-003 | 本地通过 | CSRF、CORS、Origin、Host、WebSocket 和 XSS 边界测试通过。 |
 | SEC-004 | 本地通过 | Server URL parser 拒绝危险 Scheme/Userinfo/redirect 绕过。 |
@@ -182,8 +182,7 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 
 ## 发布前剩余动作
 
-1. 推送后等待 GitHub Actions 的 `ci`、CodeQL、container scan 和 release
-   metadata 全部通过，并把 run URL/commit 写入 [`PROGRESS.md`](../PROGRESS.md)。
+1. 已完成最终提交的 `ci`、CodeQL、container scan 和 release metadata 全绿，并把 run URL/commit 写入 [`PROGRESS.md`](../PROGRESS.md)。
 2. 配置公开仓库 `main` 分支保护、PR 至少一名评审和 CODEOWNERS；安全/数据库/
    加密变更需要两名评审。
 3. 在 Linux 目标机完成 FRPS/FRPC Plugin、PERF、disk-full/clock、clean-host
