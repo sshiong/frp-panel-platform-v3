@@ -1,13 +1,14 @@
 module github.com/ricardo/frp-panel-platform/server
 
-go 1.24
+go 1.25.0
 
 require (
 	github.com/go-chi/chi/v5 v5.2.3
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
-	golang.org/x/crypto v0.37.0
-	golang.org/x/net v0.37.0
+	golang.org/x/crypto v0.54.0
+	golang.org/x/net v0.56.0
+	golang.org/x/text v0.40.0
 	modernc.org/sqlite v1.36.1
 )
 

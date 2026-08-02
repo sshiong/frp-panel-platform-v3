@@ -3,7 +3,7 @@ set -euo pipefail
 
 unformatted=""
 for module in server client; do
-  files=$(rg --files "$module" -g '*.go')
+	files=$(find "$module" -type f -name '*.go' -print)
   if [ -n "$files" ]; then
     module_unformatted=$(gofmt -l $files)
     if [ -n "$module_unformatted" ]; then

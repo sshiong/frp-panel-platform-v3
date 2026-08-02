@@ -5,7 +5,7 @@ RUN npm ci --ignore-scripts
 COPY web/admin/ ./
 RUN npm run build
 
-FROM golang:1.24-bookworm AS server-build
+FROM golang:1.25-bookworm AS server-build
 WORKDIR /src/server
 COPY server/go.mod server/go.sum ./
 RUN go mod download
