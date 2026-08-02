@@ -1,10 +1,10 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import { api } from '../api'
+import { api, type UserSummary } from '../api'
 
 export const useSessionStore = defineStore('admin-session', () => {
   const authenticated = ref(false)
-  const user = ref<{ username: string; role: string; must_change_password: boolean; must_change_username: boolean } | null>(null)
+  const user = ref<UserSummary | null>(null)
   const loading = ref(true)
   const error = ref('')
   const needsPasswordChange = computed(() => Boolean(user.value?.must_change_password))

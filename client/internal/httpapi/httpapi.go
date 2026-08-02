@@ -7,8 +7,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -34,15 +32,29 @@ func New(a *app.App) *API {
 }
 
 func (a *API) Handler() http.Handler {
+	return a.routeTree()
+}
+
+// RouteManifestHandler exposes the production route tree to repository-level
+// contract tooling without constructing a database-backed App.
+func RouteManifestHandler() http.Handler {
+	return RouteManifestRoutes()
+}
+
+// RouteManifestRoutes returns the chi route tree so tooling can compare the
+// local Client API implementation with contracts/client-openapi.yaml.
+func RouteManifestRoutes() chi.Router {
+	return (&API{}).routeTree()
+}
+
+func (a *API) routeTree() chi.Router {
 	r := chi.NewRouter()
 	r.Use(a.headers, a.requestID, a.protocolV1, a.cors, a.rateLimit, a.concurrencyLimit, a.localAuth)
 	r.Get("/healthz", a.health)
 	r.Get("/", a.app)
-	r.Handle("/assets/*", http.StripPrefix("/assets/", http.FileServer(http.Dir(filepath.Join(a.webDir(), "assets")))))
-	r.Get("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, filepath.Join(a.webDir(), "favicon.svg"))
-	})
-	r.Handle("/favicon.svg", http.FileServer(http.Dir(a.webDir())))
+	r.Handle("/assets/*", http.FileServer(http.FS(a.webFS())))
+	r.Get("/favicon.ico", func(w http.ResponseWriter, r *http.Request) { serveWebFile(w, r, a.webFS(), "favicon.svg") })
+	r.Get("/favicon.svg", func(w http.ResponseWriter, r *http.Request) { serveWebFile(w, r, a.webFS(), "favicon.svg") })
 	r.Post("/api/v1/login", a.login)
 	r.Post("/api/v1/server/inspect", a.inspectServer)
 	r.Group(func(r chi.Router) {
@@ -60,6 +72,7 @@ func (a *API) Handler() http.Handler {
 		r.Post("/api/v1/mappings/{id}/toggle", a.toggleMapping)
 		r.Get("/api/v1/domains", a.domains)
 		r.Get("/api/v1/operations", a.operations)
+		r.Post("/api/v1/operations/{id}/retry", a.retryOperation)
 		r.Post("/api/v1/domains", a.createDomain)
 		r.Delete("/api/v1/domains/{id}", a.deleteDomain)
 		r.Post("/api/v1/domains/{id}/dns-action", a.domainDNSAction)
@@ -202,23 +215,7 @@ func (a *API) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]interface{}{"status": "ok", "service": "frp-panel-client"})
 }
 func (a *API) app(w http.ResponseWriter, r *http.Request) {
-	http.ServeFile(w, r, filepath.Join(a.webDir(), "index.html"))
-}
-
-func (a *API) webDir() string {
-	candidates := []string{a.App.Config.ClientWebDir, "web/client/dist", "../web/client/dist"}
-	for _, candidate := range candidates {
-		if candidate == "" {
-			continue
-		}
-		absolute, err := filepath.Abs(candidate)
-		if err == nil {
-			if _, err := os.Stat(filepath.Join(absolute, "index.html")); err == nil {
-				return absolute
-			}
-		}
-	}
-	return "web/client/dist"
+	serveWebFile(w, r, a.webFS(), "index.html")
 }
 
 func (a *API) login(w http.ResponseWriter, r *http.Request) {
@@ -448,6 +445,16 @@ func (a *API) operations(w http.ResponseWriter, r *http.Request) {
 	}
 	a.markDataSource(w)
 	writeJSON(w, 200, output)
+}
+
+func (a *API) retryOperation(w http.ResponseWriter, r *http.Request) {
+	var output interface{}
+	path := "/api/v1/operations/" + chi.URLParam(r, "id") + "/retry"
+	if err := a.App.Proxy(r.Context(), "POST", path, nil, r.Header.Get("X-CSRF-Token"), &output, r.Header.Get("Idempotency-Key")); err != nil {
+		problem(w, r, 400, "OPERATION_RETRY_FAILED", err.Error(), err)
+		return
+	}
+	writeJSON(w, 202, output)
 }
 
 func (a *API) createDomain(w http.ResponseWriter, r *http.Request) {

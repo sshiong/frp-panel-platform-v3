@@ -22,9 +22,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22.x'
+          cache: npm
+          cache-dependency-path: package-lock.json
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
+      - run: npm ci
       - run: npm ci
         working-directory: web/admin
       - run: npm ci

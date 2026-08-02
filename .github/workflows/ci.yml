@@ -38,6 +38,14 @@ jobs:
         with:
           go-version: '1.25.x'
           cache-dependency-path: server/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run generate:contracts
+      - run: git diff --exit-code -- contracts/generated/server-api.d.ts contracts/generated/client-api.d.ts
       - run: ruby scripts/validate-openapi.rb
       - run: go test ./internal/httpapi -run '^TestHTTPContract' -count=1
         working-directory: server

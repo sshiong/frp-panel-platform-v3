@@ -1,0 +1,563 @@
+openapi: 3.1.0
+info:
+  title: FRP Panel Client Local API
+  version: 1.0.0
+  description: Versioned local control boundary exposed by the independent Client Panel.
+servers:
+  - url: http://127.0.0.1:7410
+paths:
+  /api/v1/login:
+    post:
+      operationId: localLogin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LocalLoginRequest' }
+      responses:
+        '200': { description: Local browser session created, content: { application/json: { schema: { $ref: '#/components/schemas/ClientSession' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+  /api/v1/server/inspect:
+    post:
+      operationId: inspectServerCertificate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [server_panel_url]
+              properties:
+                server_panel_url: { type: string, format: uri }
+      responses:
+        '200': { description: Certificate metadata without sending a password, content: { application/json: { schema: { $ref: '#/components/schemas/CertificateInfo' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+  /api/v1/logout:
+    post:
+      operationId: localLogout
+      security: [{ localSession: [] }]
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      responses:
+        '200': { description: Local browser session revoked, content: { application/json: { schema: { $ref: '#/components/schemas/AcknowledgedResponse' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+  /api/v1/password:
+    post:
+      operationId: localChangePassword
+      security: [{ localSession: [] }]
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChangePasswordRequest' }
+      responses:
+        '200': { description: Password changed, content: { application/json: { schema: { $ref: '#/components/schemas/AcknowledgedResponse' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+  /api/v1/reauth:
+    post:
+      operationId: localReauth
+      security: [{ localSession: [] }]
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password]
+              properties:
+                current_password: { type: string, format: password }
+      responses:
+        '200': { description: Server-bound reauthentication ticket, content: { application/json: { schema: { $ref: '#/components/schemas/ReauthResponse' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+  /api/v1/frp-credential/reset:
+    post:
+      operationId: localResetFRPCredential
+      security: [{ localSession: [] }]
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                current_password: { type: string, format: password }
+                reauth_ticket: { type: string, minLength: 32 }
+      responses:
+        '200': { description: Credential reset result; local session is revoked, content: { application/json: { schema: { $ref: '#/components/schemas/FRPSecretResetResult' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+  /api/v1/session:
+    get:
+      operationId: localSession
+      security: [{ localSession: [] }]
+      responses:
+        '200': { description: Current local browser session, content: { application/json: { schema: { $ref: '#/components/schemas/ClientSession' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+  /api/v1/dashboard:
+    get:
+      operationId: localDashboard
+      security: [{ localSession: [] }]
+      responses:
+        '200': { description: Server-backed dashboard or current read cache, content: { application/json: { schema: { $ref: '#/components/schemas/Dashboard' } } } }
+        '503': { $ref: '#/components/responses/Problem' }
+  /api/v1/mappings:
+    get:
+      operationId: localListMappings
+      security: [{ localSession: [] }]
+      responses:
+        '200': { description: Server-backed mappings, content: { application/json: { schema: { $ref: '#/components/schemas/MappingPage' } } } }
+        '503': { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: localCreateMapping
+      security: [{ localSession: [] }]
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MappingRequest' }
+      responses:
+        '201': { description: Mapping created, content: { application/json: { schema: { $ref: '#/components/schemas/Mapping' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+  /api/v1/mappings/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    put:
+      operationId: localUpdateMapping
+      security: [{ localSession: [] }]
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MappingRequest' }
+      responses:
+        '200': { description: Mapping updated, content: { application/json: { schema: { $ref: '#/components/schemas/Mapping' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: localDeleteMapping
+      security: [{ localSession: [] }]
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      responses:
+        '202': { description: Mapping deletion queued, content: { application/json: { schema: { $ref: '#/components/schemas/OperationResult' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+  /api/v1/mappings/{id}/toggle:
+    post:
+      operationId: localToggleMapping
+      security: [{ localSession: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+                expected_config_version: { type: integer, format: int64 }
+                expected_revision: { type: integer, format: int64 }
+      responses:
+        '200': { description: Desired state updated, content: { application/json: { schema: { $ref: '#/components/schemas/AcknowledgedResponse' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+  /api/v1/domains:
+    get:
+      operationId: localListDomains
+      security: [{ localSession: [] }]
+      responses:
+        '200': { description: Server-backed Domain Bindings, content: { application/json: { schema: { $ref: '#/components/schemas/DomainPage' } } } }
+        '503': { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: localCreateDomain
+      security: [{ localSession: [] }]
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DomainRequest' }
+      responses:
+        '202': { description: Domain Binding queued, content: { application/json: { schema: { $ref: '#/components/schemas/Domain' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+  /api/v1/domains/{id}:
+    delete:
+      operationId: localDeleteDomain
+      security: [{ localSession: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      responses:
+        '202': { description: Domain deletion queued, content: { application/json: { schema: { $ref: '#/components/schemas/OperationResult' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+  /api/v1/domains/{id}/dns-action:
+    post:
+      operationId: localDomainDNSAction
+      security: [{ localSession: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [adopt, overwrite, cancel, sync] }
+      responses:
+        '202': { description: DNS operation queued, content: { application/json: { schema: { $ref: '#/components/schemas/OperationResult' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+  /api/v1/operations:
+    get:
+      operationId: localListOperations
+      security: [{ localSession: [] }]
+      responses:
+        '200': { description: Server-backed operations, content: { application/json: { schema: { $ref: '#/components/schemas/OperationPage' } } } }
+        '503': { $ref: '#/components/responses/Problem' }
+  /api/v1/operations/{id}/retry:
+    post:
+      operationId: localRetryOperation
+      security: [{ localSession: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      responses:
+        '202': { description: Operation requeued, content: { application/json: { schema: { $ref: '#/components/schemas/OperationResult' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+  /api/v1/config:
+    get:
+      operationId: localConfig
+      security: [{ localSession: [] }]
+      responses:
+        '200': { description: Signed desired configuration, content: { application/json: { schema: { $ref: '#/components/schemas/ConfigSnapshot' } } } }
+        '503': { $ref: '#/components/responses/Problem' }
+  /api/v1/sync:
+    post:
+      operationId: localSync
+      security: [{ localSession: [] }]
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      responses:
+        '200': { description: Configuration applied, content: { application/json: { schema: { $ref: '#/components/schemas/SyncResult' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+  /api/v1/local-status:
+    get:
+      operationId: localStatus
+      security: [{ localSession: [] }]
+      responses:
+        '200': { description: Local FRPC Supervisor status, content: { application/json: { schema: { $ref: '#/components/schemas/SupervisorStatus' } } } }
+  /api/v1/logs:
+    get:
+      operationId: localLogs
+      security: [{ localSession: [] }]
+      responses:
+        '200': { description: Redacted local logs, content: { application/json: { schema: { $ref: '#/components/schemas/LogPage' } } } }
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 16, maxLength: 128 }
+  securitySchemes:
+    localSession:
+      type: apiKey
+      in: cookie
+      name: frp_client_session
+  responses:
+    Problem:
+      description: RFC 9457 Problem Details
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status, detail, code, request_id]
+      properties:
+        type: { type: string, format: uri-reference }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        request_id: { type: string }
+        upgrade_required: { type: boolean }
+        client_version: { type: string }
+        minimum_client_version: { type: string }
+        latest_client_version: { type: string }
+    UserSummary:
+      type: object
+      required: [id, username, role, status, must_change_password, must_change_username]
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        role: { type: string, enum: [admin, user] }
+        status: { type: string }
+        must_change_password: { type: boolean }
+        must_change_username: { type: boolean }
+    LocalLoginRequest:
+      type: object
+      required: [server_panel_url, username, password]
+      properties:
+        server_panel_url: { type: string, format: uri }
+        username: { type: string, minLength: 1, maxLength: 80 }
+        password: { type: string, format: password, minLength: 12 }
+        trusted_spki_sha256: { type: string }
+    ClientSession:
+      type: object
+      required: [csrf_token, user, server_panel_url, expires_at]
+      properties:
+        csrf_token: { type: string }
+        user: { $ref: '#/components/schemas/UserSummary' }
+        server_panel_url: { type: string, format: uri }
+        expires_at: { type: string, format: date-time }
+        server_version: { type: string }
+        minimum_client_version: { type: string }
+        latest_client_version: { type: string }
+        upgrade_required: { type: boolean }
+        upgrade_suggested: { type: boolean }
+    CertificateInfo:
+      type: object
+      required: [server_panel_url, transport, verified]
+      properties:
+        server_panel_url: { type: string, format: uri }
+        transport: { type: string, enum: [http, https] }
+        verified: { type: boolean }
+        verification_error: { type: string }
+        subject: { type: string }
+        issuer: { type: string }
+        not_before: { type: string, format: date-time }
+        not_after: { type: string, format: date-time }
+        spki_sha256: { type: string }
+        dns_names: { type: array, items: { type: string } }
+        ip_addresses: { type: array, items: { type: string } }
+    Mapping:
+      type: object
+      required: [id, user_id, name, proxy_type, lifecycle_status, desired_state, observed_state, revision, local_ip, local_port]
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        name: { type: string }
+        proxy_type: { type: string, enum: [tcp, udp, http] }
+        lifecycle_status: { type: string }
+        desired_state: { type: string }
+        observed_state: { type: string }
+        revision: { type: integer, format: int64 }
+        local_ip: { type: string }
+        local_port: { type: integer, minimum: 1, maximum: 65535 }
+        remote_port: { type: [integer, 'null'], minimum: 0, maximum: 65535 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    MappingRequest:
+      type: object
+      required: [name, proxy_type, local_ip, local_port]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+        proxy_type: { type: string, enum: [tcp, udp, http] }
+        local_ip: { type: string }
+        local_port: { type: integer, minimum: 1, maximum: 65535 }
+        remote_port: { type: [integer, 'null'], minimum: 0, maximum: 65535 }
+        expected_config_version: { type: integer, format: int64 }
+        expected_revision: { type: integer, format: int64 }
+    Domain:
+      type: object
+      required: [id, mapping_id, hostname, normalized_domain, https_mode, http_redirect, dns_type, dns_content, dns_ttl, dns_proxied, dns_managed_by_panel, dns_adopted, status, revision]
+      properties:
+        id: { type: string, format: uuid }
+        mapping_id: { type: string, format: uuid }
+        hostname: { type: string }
+        normalized_domain: { type: string }
+        https_mode: { type: string, enum: [auto_certificate, cloudflare_proxy, http_only] }
+        http_redirect: { type: boolean }
+        dns_type: { type: string, enum: [A, AAAA, CNAME] }
+        dns_content: { type: string }
+        dns_ttl: { type: integer, minimum: 60, maximum: 86400 }
+        dns_proxied: { type: boolean }
+        dns_managed_by_panel: { type: boolean }
+        dns_adopted: { type: boolean }
+        status: { type: string }
+        revision: { type: integer, format: int64 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    DomainRequest:
+      type: object
+      required: [mapping_id, hostname, https_mode]
+      properties:
+        mapping_id: { type: string, format: uuid }
+        hostname: { type: string, minLength: 1, maxLength: 253 }
+        https_mode: { type: string, enum: [auto_certificate, cloudflare_proxy, http_only] }
+        http_redirect: { type: boolean }
+        dns_type: { type: string, enum: [A, AAAA, CNAME] }
+        dns_content: { type: string }
+        dns_ttl: { type: integer, minimum: 60, maximum: 86400 }
+        expected_config_version: { type: integer, format: int64 }
+    FRPCredentialStatus:
+      type: object
+      required: [present, secret_version, status]
+      properties:
+        present: { type: boolean }
+        secret_version: { type: integer, format: int64 }
+        rotated_at: { type: string, format: date-time }
+        status: { type: string }
+    DashboardCounts:
+      type: object
+      required: [total_mappings, running, pending, offline, errors]
+      properties:
+        total_mappings: { type: integer, minimum: 0 }
+        running: { type: integer, minimum: 0 }
+        pending: { type: integer, minimum: 0 }
+        offline: { type: integer, minimum: 0 }
+        errors: { type: integer, minimum: 0 }
+    Dashboard:
+      type: object
+      required: [user, desired_config_version, applied_config_version, observed_client_status, frp_credential, mappings, counts]
+      properties:
+        user: { $ref: '#/components/schemas/UserSummary' }
+        desired_config_version: { type: integer, format: int64 }
+        applied_config_version: { type: integer, format: int64 }
+        observed_client_status: { type: string }
+        frp_credential: { $ref: '#/components/schemas/FRPCredentialStatus' }
+        last_heartbeat_at: { type: string, format: date-time }
+        last_error_code: { type: string }
+        last_error_message: { type: string }
+        mappings: { type: array, items: { $ref: '#/components/schemas/Mapping' } }
+        counts: { $ref: '#/components/schemas/DashboardCounts' }
+    Operation:
+      type: object
+      required: [id, resource_type, operation_type, status, phase, step, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        resource_type: { type: string }
+        resource_id: { type: string }
+        operation_type: { type: string }
+        status: { type: string }
+        phase: { type: string }
+        step: { type: string }
+        error_code: { type: string }
+        error_message: { type: string }
+        compensation_status: { type: string }
+        external_residue_count: { type: integer, minimum: 0 }
+        external_residues: { type: array, items: { type: object, additionalProperties: true } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    MappingPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Mapping' } }
+        config_version: { type: integer, format: int64 }
+        page: { type: integer, minimum: 1 }
+        page_size: { type: integer, minimum: 1, maximum: 200 }
+        total: { type: integer, minimum: 0 }
+    DomainPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Domain' } }
+        page: { type: integer, minimum: 1 }
+        page_size: { type: integer, minimum: 1, maximum: 200 }
+        total: { type: integer, minimum: 0 }
+    OperationPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Operation' } }
+        page: { type: integer, minimum: 1 }
+        page_size: { type: integer, minimum: 1, maximum: 200 }
+        total: { type: integer, minimum: 0 }
+    OperationResult:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string }
+        operation_id: { type: string, format: uuid }
+        request_id: { type: string }
+    AcknowledgedResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok: { type: boolean }
+        status: { type: string }
+        request_id: { type: string }
+    ReauthResponse:
+      type: object
+      required: [reauth_ticket, expires_at]
+      properties:
+        reauth_ticket: { type: string }
+        expires_at: { type: string, format: date-time }
+    ChangePasswordRequest:
+      type: object
+      required: [current_password, new_password]
+      properties:
+        current_password: { type: string, format: password }
+        new_password: { type: string, format: password, minLength: 12 }
+    FRPSecretResetResult:
+      type: object
+      required: [status, secret_version, session_generation]
+      properties:
+        status: { type: string }
+        secret_version: { type: integer, format: int64 }
+        session_generation: { type: integer, format: int64 }
+    ConfigSnapshot:
+      type: object
+      required: [schema_version, config_version, session_generation, payload]
+      properties:
+        schema_version: { type: string }
+        config_version: { type: integer, format: int64 }
+        session_generation: { type: integer, format: int64 }
+        payload: { type: object, additionalProperties: true }
+        signature: { type: string }
+        config_hash: { type: string }
+    SyncResult:
+      type: object
+      required: [ok, status]
+      properties:
+        ok: { type: boolean }
+        status: { $ref: '#/components/schemas/SupervisorStatus' }
+        request_id: { type: string }
+    SupervisorStatus:
+      type: object
+      required: [state, mode, pid, desired_config_version, applied_config_version, config_hash, last_good_available, updated_at]
+      properties:
+        state: { type: string }
+        mode: { type: string }
+        pid: { type: integer, minimum: 0 }
+        desired_config_version: { type: integer, format: int64 }
+        applied_config_version: { type: integer, format: int64 }
+        config_hash: { type: string }
+        last_good_available: { type: boolean }
+        last_error: { type: string }
+        updated_at: { type: string, format: date-time }
+    LogPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [level, message, time]
+            properties:
+              level: { type: string }
+              message: { type: string }
+              time: { type: string, format: date-time }

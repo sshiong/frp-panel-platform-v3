@@ -9,12 +9,15 @@ FRPC_VERIFY_VERSION ?= 0.68.0
 .PHONY: install-web build test lint accessibility contract migration-check license security fuzz perf frpc-verify network-e2e plugin-e2e sbom checksums manifest sign release checkpoint key-rotate dev-server dev-client clean
 
 install-web:
-	cd web/admin && npm install
-	cd web/client && npm install
+	npm ci
+	cd web/admin && npm ci
+	cd web/client && npm ci
 
 build:
 	cd web/admin && npm run build
 	cd web/client && npm run build
+	./scripts/embed-web-assets.sh web/admin/dist server/internal/httpapi/static/generated
+	./scripts/embed-web-assets.sh web/client/dist client/internal/httpapi/static/generated
 	mkdir -p build
 	cd server && $(GO_ENV) go build -o ../build/frp-panel-server ./cmd/server
 	cd client && $(GO_ENV) go build -o ../build/frp-panel-client ./cmd/client
@@ -44,6 +47,7 @@ lint:
 	cd web/client && npm run test:policy
 
 contract:
+	npm run generate:contracts
 	ruby scripts/validate-openapi.rb
 	cd server && $(GO_ENV) go test ./internal/httpapi -run '^TestHTTPContract' -count=1
 
@@ -111,3 +115,5 @@ dev-client:
 
 clean:
 	rm -rf web/admin/dist web/client/dist server/bin client/bin
+	find server/internal/httpapi/static/generated -mindepth 1 -maxdepth 1 ! -name .gitkeep -exec rm -rf {} +
+	find client/internal/httpapi/static/generated -mindepth 1 -maxdepth 1 ! -name .gitkeep -exec rm -rf {} +

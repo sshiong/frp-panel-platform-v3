@@ -1,6 +1,6 @@
 # FRP Cloudflare Platform v3 进度跟踪
 
-> 最后更新：2026-08-02
+> 最后更新：2026-08-03
 >
 > 本文是实现进度的单一记录入口。每次完成一个可验证的垂直切片，更新状态、证据和未决项；未通过验收的能力不得标记为完成。
 
@@ -21,6 +21,7 @@
 ## 已实现
 
 - [x] 单仓库、多模块：`server/`、`client/`、`contracts/`、`web/admin/`、`web/client/`。
+- [x] 发行边界：`make build` 和 Docker 构建分别把 Admin/Client 静态资源嵌入对应 Go 二进制；外部 web 目录仅保留为显式开发/测试覆盖。
 - [x] Server SQLite WAL、外键、busy timeout、synchronous FULL、顺序 migration。
 - [x] 管理员初始化、Argon2id 密码哈希、首次改密限制。
 - [x] 不透明服务端 Session；普通用户 Client Panel 全局单活动 Session；Session generation 替换旧会话。
@@ -60,6 +61,7 @@
 - [x] OpenAPI 3.1 路径/operationId/WebSocket 元数据校验脚本、双模块 CI contract job、`make sbom`、`make checksums`、固定 FRP 版本下载归档校验和发布清单已加入；正式发布仍需签名和第三方扫描。
 - [x] 开发标准门禁已补齐：两个 Vue 应用的 ESLint/strict typecheck/build、OpenAPI 响应契约测试、上一稳定版 migration upgrade rehearsal、npm SPDX 许可证 allowlist、Router Header/Body/上游超时边界和独立 Server/Client 版本元数据。
 - [x] Client/Server 版本兼容边界已补齐：Client 发送 `X-FRP-Client-Version`，Server 对缺失/非法/过旧版本返回 426 与 `Upgrade-Required`，兼容但非 latest 版本显示升级建议；Server/Client 回归与 OpenAPI 契约测试通过。
+- [x] OpenAPI 类型化契约已补齐：`openapi-typescript` 生成 Server 与 Client Local API 的 `contracts/generated/*-api.d.ts`，两个面板请求层与页面模型引用对应生成类型，CI 检查生成文件漂移；root tooling 依赖纳入 SPDX SBOM 与许可证门禁。
 - [x] 密钥迁移期轮换已补齐：master/certificate wrapping key-ring 保留旧版本，`make key-rotate` 重包裹 FRP、Cloudflare 和证书私钥；重启兼容、旧密文解密、服务层行数/登录回归测试通过，真实生产轮换演练仍待外部环境。
 - [x] WCAG 2.1 AA 自动化已补齐：构建后的 Admin/Client 通过 axe、标签、键盘/reduced-motion 与 390px 横向溢出检查；脚本已接入既有 `web (admin)` CI job，新的分支 CI 证据待提交后更新。
 
@@ -95,6 +97,8 @@
 | 2026-08-02 | Final GitHub CI and CodeQL gates | 通过；提交 [`2f73156`](https://github.com/sshiong/frp-panel-platform-v3/commit/2f731567da6933d4fc2ae1db333ad9d61fc2ca19) 的 [`ci` run 30745496136](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30745496136) 九个 job 全部成功，包含 security、双前端、双 Go 模块、fuzz、contract、container-scan、release-metadata；[`CodeQL run 30745496145`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30745496145) 成功，双 gosec SARIF 使用独立 category 上传 |
 
 | 2026-08-02 | 版本兼容、密钥轮换与 WCAG 托管门禁 | 通过；Server/Client 版本升级提示与 426 回归、版本化密钥环/`make key-rotate` 重包裹与重启兼容回归、两个已构建前端的 axe WCAG 2.1 AA/标签/键盘/移动端检查均通过；PR #2 的 [`ci` run 30757304002](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30757304002) 与 [`CodeQL run 30757303990`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30757303990) 全部成功，真实生产轮换仍待外部环境 |
+
+| 2026-08-03 | 发行边界与生成契约补齐 | 通过；`make build` 将两个独立 Vue dist 分别嵌入 Server/Client Go 二进制，`go test ./internal/httpapi` 覆盖 fallback embed；Server/Client `go test -race ./...`、`make lint`、`make contract`、OpenAPI 生成文件漂移检查、npm 许可证门禁和 SPDX SBOM 均通过。新增 Client Local API OpenAPI 与独立 route manifest；Vite 仍只有非阻断的大 chunk 警告，真实 Cloudflare/ACME/Linux FRP 矩阵和签名仍待外部环境 |
 
 ## 未决与发布阻断项
 

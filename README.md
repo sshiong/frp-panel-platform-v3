@@ -19,6 +19,11 @@ make dev-server
 make dev-client
 ```
 
+`make build` first compiles both independent Vue panels and embeds their
+static assets into the matching Go binary. `FRP_ADMIN_WEB_DIR` and
+`FRP_CLIENT_WEB_DIR` remain optional development/test overrides; a release
+binary does not require an external web directory.
+
 默认地址：
 
 - Server Panel API/UI：`http://127.0.0.1:7400`

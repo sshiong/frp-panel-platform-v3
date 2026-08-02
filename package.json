@@ -3,10 +3,15 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "generate:contracts": "openapi-typescript contracts/openapi.yaml -o contracts/generated/server-api.d.ts && openapi-typescript contracts/client-openapi.yaml -o contracts/generated/client-api.d.ts",
     "test:accessibility": "node scripts/ui-accessibility.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.2",
+    "openapi-typescript": "^7.13.0",
     "playwright": "^1.52.0"
+  },
+  "dependencies": {
+    "openapi-fetch": "^0.17.0"
   }
 }

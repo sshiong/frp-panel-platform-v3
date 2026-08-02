@@ -16,7 +16,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -92,11 +91,9 @@ func (a *API) routeTree() chi.Router {
 	r.Get("/healthz", a.health)
 	r.Get("/metrics", a.metrics)
 	r.Get("/", a.adminApp)
-	r.Handle("/assets/*", http.StripPrefix("/assets/", http.FileServer(http.Dir(filepath.Join(a.webDir(), "assets")))))
-	r.Get("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, filepath.Join(a.webDir(), "favicon.svg"))
-	})
-	r.Handle("/favicon.svg", http.FileServer(http.Dir(a.webDir())))
+	r.Handle("/assets/*", http.FileServer(http.FS(a.webFS())))
+	r.Get("/favicon.ico", func(w http.ResponseWriter, r *http.Request) { serveWebFile(w, r, a.webFS(), "favicon.svg") })
+	r.Get("/favicon.svg", func(w http.ResponseWriter, r *http.Request) { serveWebFile(w, r, a.webFS(), "favicon.svg") })
 	r.With(a.loopbackOnly).HandleFunc("/internal/frp/plugin", a.frpPlugin)
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(a.protocolV1, a.responseMetadata)
@@ -598,26 +595,7 @@ func (a *API) metrics(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) adminApp(w http.ResponseWriter, r *http.Request) {
-	http.ServeFile(w, r, filepath.Join(a.webDir(), "index.html"))
-}
-
-func (a *API) webDir() string {
-	candidates := []string{"web/admin/dist", "../web/admin/dist"}
-	if a.App != nil {
-		candidates = append([]string{a.App.Config.AdminWebDir}, candidates...)
-	}
-	for _, candidate := range candidates {
-		if candidate == "" {
-			continue
-		}
-		absolute, err := filepath.Abs(candidate)
-		if err == nil {
-			if _, err := os.Stat(filepath.Join(absolute, "index.html")); err == nil {
-				return absolute
-			}
-		}
-	}
-	return "web/admin/dist"
+	serveWebFile(w, r, a.webFS(), "index.html")
 }
 
 func (a *API) compatibility(w http.ResponseWriter, r *http.Request) {

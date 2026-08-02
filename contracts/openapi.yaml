@@ -415,7 +415,7 @@ paths:
       operationId: cloudflareStatus
       security: [{ bearerAuth: [] }]
       responses:
-        '200': { description: Cloudflare credential and capability state, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        '200': { description: Cloudflare credential and capability state, content: { application/json: { schema: { $ref: '#/components/schemas/CloudflareStatus' } } } }
   /api/v1/cloudflare/token:
     post:
       operationId: saveCloudflareToken
@@ -606,7 +606,7 @@ paths:
       operationId: adminStats
       security: [{ bearerAuth: [] }]
       responses:
-        '200': { description: Server statistics, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        '200': { description: Server statistics, content: { application/json: { schema: { $ref: '#/components/schemas/AdminStats' } } } }
   /api/v1/admin/backups:
     post:
       operationId: createBackup
@@ -745,7 +745,49 @@ components:
         observed_client_status: { type: string }
         frp_credential: { $ref: '#/components/schemas/FRPCredentialStatus' }
         mappings: { type: array, items: { $ref: '#/components/schemas/Mapping' } }
-        counts: { type: object, additionalProperties: true }
+        counts: { $ref: '#/components/schemas/DashboardCounts' }
+    DashboardCounts:
+      type: object
+      additionalProperties: false
+      required: [total_mappings, running, pending, offline, errors]
+      properties:
+        total_mappings: { type: integer, minimum: 0 }
+        running: { type: integer, minimum: 0 }
+        pending: { type: integer, minimum: 0 }
+        offline: { type: integer, minimum: 0 }
+        errors: { type: integer, minimum: 0 }
+    AdminStats:
+      type: object
+      additionalProperties: false
+      required: [active_users, mappings, pending, errors, server_uptime_seconds, frps_public_host, frps_public_port]
+      properties:
+        active_users: { type: integer, minimum: 0 }
+        mappings: { type: integer, minimum: 0 }
+        pending: { type: integer, minimum: 0 }
+        errors: { type: integer, minimum: 0 }
+        server_uptime_seconds: { type: integer, minimum: 0 }
+        frps_public_host: { type: string }
+        frps_public_port: { type: integer, minimum: 1, maximum: 65535 }
+    CloudflareStatus:
+      type: object
+      additionalProperties: false
+      required: [configured, status]
+      properties:
+        configured: { type: boolean }
+        status: { type: string }
+        token_version: { type: integer, minimum: 1 }
+        verified_at: { type: string, format: date-time }
+        capabilities: { $ref: '#/components/schemas/CloudflareCapabilities' }
+    CloudflareCapabilities:
+      type: object
+      additionalProperties: true
+      properties:
+        token_valid: { type: boolean }
+        zone_read: { type: boolean }
+        dns_read: { type: boolean }
+        dns_write: { type: boolean }
+        dns_write_checked: { type: boolean }
+        missing: { type: array, items: { type: string } }
     UserRecord:
       allOf:
         - $ref: '#/components/schemas/UserSummary'
@@ -769,17 +811,20 @@ components:
         expected_config_version: { type: integer, format: int64 }
         expected_revision: { type: integer, format: int64 }
     Mapping:
-      allOf:
-        - $ref: '#/components/schemas/CreateMappingRequest'
-        - type: object
-          required: [id, user_id, lifecycle_status, desired_state, observed_state, revision]
-          properties:
-            id: { type: string, format: uuid }
-            user_id: { type: string, format: uuid }
-            lifecycle_status: { type: string }
-            desired_state: { type: string }
-            observed_state: { type: string }
-            revision: { type: integer, format: int64 }
+      type: object
+      required: [id, user_id, name, proxy_type, local_ip, local_port, remote_port, lifecycle_status, desired_state, observed_state, revision]
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        name: { type: string }
+        proxy_type: { type: string, enum: [tcp, udp, http] }
+        local_ip: { type: string }
+        local_port: { type: integer, minimum: 1, maximum: 65535 }
+        remote_port: { type: [integer, 'null'], minimum: 0, maximum: 65535 }
+        lifecycle_status: { type: string }
+        desired_state: { type: string }
+        observed_state: { type: string }
+        revision: { type: integer, format: int64 }
     CreateDomainRequest:
       type: object
       required: [mapping_id, hostname, https_mode]
@@ -793,21 +838,26 @@ components:
         dns_ttl: { type: integer, minimum: 60, maximum: 86400, default: 300 }
         expected_config_version: { type: integer, format: int64 }
     Domain:
-      allOf:
-        - $ref: '#/components/schemas/CreateDomainRequest'
-        - type: object
-          required: [id, normalized_domain, dns_managed_by_panel, dns_adopted, status, revision]
-          properties:
-            id: { type: string, format: uuid }
-            normalized_domain: { type: string }
-            dns_proxied: { type: boolean }
-            dns_managed_by_panel: { type: boolean }
-            dns_adopted: { type: boolean }
-            status: { type: string }
-            revision: { type: integer, format: int64 }
+      type: object
+      required: [id, mapping_id, hostname, normalized_domain, https_mode, http_redirect, dns_type, dns_content, dns_ttl, dns_proxied, dns_managed_by_panel, dns_adopted, status, revision]
+      properties:
+        id: { type: string, format: uuid }
+        mapping_id: { type: string, format: uuid }
+        hostname: { type: string }
+        normalized_domain: { type: string }
+        https_mode: { type: string, enum: [auto_certificate, cloudflare_proxy, http_only] }
+        http_redirect: { type: boolean }
+        dns_type: { type: string, enum: [A, AAAA, CNAME] }
+        dns_content: { type: string }
+        dns_ttl: { type: integer, minimum: 60, maximum: 86400 }
+        dns_proxied: { type: boolean }
+        dns_managed_by_panel: { type: boolean }
+        dns_adopted: { type: boolean }
+        status: { type: string }
+        revision: { type: integer, format: int64 }
     Operation:
       type: object
-      required: [id, resource_type, operation_type, status, phase, step]
+      required: [id, resource_type, operation_type, status, phase, step, created_at]
       properties:
         id: { type: string, format: uuid }
         resource_type: { type: string }

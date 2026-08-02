@@ -11,6 +11,10 @@ runtime/
 .env
 .env.*
 !.env.example
+server/internal/httpapi/static/generated/*
+!server/internal/httpapi/static/generated/.gitkeep
+client/internal/httpapi/static/generated/*
+!client/internal/httpapi/static/generated/.gitkeep
 .playwright-cli/
 server/server
 client/client
