@@ -64,6 +64,7 @@
 - [x] OpenAPI 类型化契约已补齐：`openapi-typescript` 生成 Server 与 Client Local API 的 `contracts/generated/*-api.d.ts`，两个面板请求层与页面模型引用对应生成类型，CI 检查生成文件漂移；root tooling 依赖纳入 SPDX SBOM 与许可证门禁。
 - [x] 密钥迁移期轮换已补齐：master/certificate wrapping key-ring 保留旧版本，`make key-rotate` 重包裹 FRP、Cloudflare 和证书私钥；重启兼容、旧密文解密、服务层行数/登录回归测试通过，真实生产轮换演练仍待外部环境。
 - [x] WCAG 2.1 AA 自动化已补齐：构建后的 Admin/Client 登录页、全部认证导航面板以及 Admin 创建用户、Client Mapping/Domain 对话框均通过 axe、标签、键盘/reduced-motion 与 390px 横向溢出检查；脚本使用无秘密的确定性 API fixture，并已接入既有 `web (admin)` CI job。
+- [x] 前端性能与颜色 token 收口已补齐：两个独立面板改为按需注册 Element Plus Dialog/Message/MessageBox，移除全量 Element Plus CSS；Admin/Client 生产 bundle 分别降至约 225.44/235.93 kB JS 与 66.13/69.74 kB CSS，Vite chunk 警告消失；重复面板、输入、侧栏、导航、对话框和边框颜色已集中到各自 `tokens.css`。
 - [x] API 成功响应契约已收紧：Server OpenAPI 为所有成功 JSON 响应声明 schema，统一 `request_id` 元数据，补齐 `/me` 实际会话字段、分页 envelope、异步 Operation、备份、Token、Router 和用户管理响应；`responseMetadata` 现在也覆盖 API GET 响应，契约回归验证通过。
 - [x] 外部验收证据收集器已补齐：`make external-acceptance` 运行本地契约/迁移/安全/许可证/构建门禁，在显式提供固定 FRP 二进制时运行真实网络 E2E，并对 Cloudflare Sandbox、ACME Staging、目标硬件、故障注入和签名证据缺失返回 `blocked`/退出码 2；流程见 [`external-acceptance.md`](docs/external-acceptance.md)。
 
@@ -111,6 +112,7 @@
 | 2026-08-03 | 认证面板可访问性与对比度收口 | 通过；`npm run test:accessibility` 扫描两个独立面板的全部导航 surface 与创建对话框，发现并修复导航类别标签、Mapping/Domain 元数据的 WCAG AA 对比度问题；登录页、认证页、对话框的 axe/标签/键盘/reduced-motion/390px 检查均通过 |
 | 2026-08-03 | 最终本地门禁与外部证据收集 | 本地通过；`make contract`（含证据 schema 回归）、`make test`、`make lint`、`make build`、`make perf`、`make security`、`make license`、`make migration-check`、`make sbom`、`make checksums` 和浏览器可访问性均通过；`make manifest` 因未提供固定 FRPS/FRPC 只拒绝生成正式清单，`make external-acceptance` 因同一固定版本依赖及 Cloudflare/ACME、目标硬件、故障注入和签名证据缺失按标准返回 blocked（退出码 2），未伪造发布通过 |
 | 2026-08-03 | 认证面板修复提交的最终托管复核 | 通过；提交 [`92cf1a3`](https://github.com/sshiong/frp-panel-platform-v3/commit/92cf1a379aab096dc2800a92eaa3d43e41a5e77c) 的 [`ci` run 30763715852](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30763715852) 与 [`CodeQL` run 30763715867](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30763715867) 全部成功，新增 evidence schema regression、双面板认证可访问性、fuzz、container scan 和 release metadata 均通过 |
+| 2026-08-03 | 前端性能与设计 token 收口 | 本地通过；两个面板按需加载 Element Plus 组件与样式，Admin/Client 生产 JS/CSS 分别为 225.44/66.13 kB 与 235.93/69.74 kB，Vite 大 chunk 警告消失；独立 token 层收敛重复颜色；两个面板 typecheck、lint、policy、build 与完整 WCAG/390px 认证面板扫描均通过 |
 
 ## 未决与发布阻断项
 

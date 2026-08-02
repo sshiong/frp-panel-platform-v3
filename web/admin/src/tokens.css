@@ -1,0 +1,13 @@
+:root {
+  --rail: #1b2426;
+  --panel: #171d20;
+  --input: #151a1d;
+  --sidebar: #151b1e;
+  --dialog: #1a2124;
+  --nav-active: #202a2d;
+  --nav-hover: #1d2528;
+  --pill: #182023;
+  --line-subtle: rgba(48, 57, 61, .65);
+  --label: #748888;
+  --avatar: #2e454c;
+}

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ArrowDown, ArrowRight, Check, Close, Clock, Connection, Cpu, DataLine, Delete, Files, Lock, Monitor, Operation, Plus, Refresh, Setting, VideoPause, VideoPlay } from '@element-plus/icons-vue'
 import { api, PanelAPIError } from './api'
 import { canCreateDomain, domainStatusClass as policyDomainStatusClass, mappingStatusClass } from './policy'

@@ -34,6 +34,7 @@ test:
 
 lint:
 	./scripts/check-format.sh
+	ruby scripts/css-token-policy.rb
 	cd server && $(GO_ENV) go vet ./...
 	cd client && $(GO_ENV) go vet ./...
 	@command -v $(STATICCHECK) >/dev/null || (echo "staticcheck is required for lint; install honnef.co/go/tools/cmd/staticcheck" >&2; exit 1)

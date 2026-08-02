@@ -54,6 +54,7 @@ jobs:
       - run: go test ./internal/db -run '^TestMigration' -count=1
         working-directory: server
       - run: ruby scripts/license-policy.rb
+      - run: ruby scripts/css-token-policy.rb
 
   web:
     runs-on: ubuntu-latest

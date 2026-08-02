@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ArrowDown, Bell, CircleCheckFilled, Clock, Connection, DataAnalysis, Files, Key, Lock, Operation as OperationIcon, Plus, Refresh, Setting, User, UserFilled, WarningFilled } from '@element-plus/icons-vue'
 import { api, type AdminStats, type CloudflareStatus, type Operation, type UserRecord } from './api'
 import { requiresCredentialSetup } from './policy'
