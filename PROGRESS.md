@@ -105,6 +105,7 @@
 | 2026-08-03 | Docker 构建修复与托管门禁 | 通过；提交 [`4e0cbc1`](https://github.com/sshiong/frp-panel-platform-v3/commit/4e0cbc1) 为镜像 UI 构建阶段复制生成契约类型，PR #2 的 [`ci` run 30760001938](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30760001938)（含 container-scan/release-metadata）与 [`CodeQL run 30760001941`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30760001941) 全部通过；正式签名和外部集成验收仍待发布环境 |
 
 | 2026-08-03 | 响应契约与外部证据门禁 | 通过；`make contract`、Server/Client `go test -race ./...`、`make lint`、`make build`、`npm run test:accessibility`、`make sbom`、校验和/发布清单和 secret/license/migration 门禁均通过；新增 `request_id`/`/me` 实际字段契约与 `scripts/external-acceptance.rb`，本机无外部 Provider/签名证据时按设计生成 `blocked`，不伪造 Release Candidate |
+| 2026-08-03 | 最终托管门禁记录 | 通过；提交 [`0f0b353`](https://github.com/sshiong/frp-panel-platform-v3/commit/0f0b3538ba678ec685deb72e283dce9d4df9b038) 的 [`ci` run 30761382419](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30761382419) 与 [`CodeQL run 30761382415`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30761382415) 全部成功；PR #2 检查全绿但仍需人工 review，外部真实环境证据仍按标准保持 blocked |
 
 ## 未决与发布阻断项
 
