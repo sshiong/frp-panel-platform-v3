@@ -28,7 +28,7 @@ func VerifyBinary(path, expectedSHA256 string) error {
 	if path == "" || expectedSHA256 == "" {
 		return errors.New("FRPS binary and SHA-256 are required")
 	}
-	file, err := os.Open(path)
+	file, err := os.Open(path) // #nosec G304 -- path is an operator-configured FRPS binary verified by SHA-256
 	if err != nil {
 		return err
 	}
@@ -48,7 +48,7 @@ func VerifyConfig(binary, configPath string) error {
 	if strings.TrimSpace(binary) == "" || strings.TrimSpace(configPath) == "" {
 		return errors.New("FRPS binary and config path are required")
 	}
-	command := exec.Command(binary, "verify", "-c", configPath)
+	command := exec.Command(binary, "verify", "-c", configPath) // #nosec G204 -- binary and config are validated deployment inputs
 	output, err := command.CombinedOutput()
 	if err != nil {
 		message := strings.TrimSpace(string(output))
@@ -70,7 +70,7 @@ func Start(config Config) (*Process, error) {
 	if err := VerifyConfig(config.Binary, config.Config); err != nil {
 		return nil, err
 	}
-	cmd := exec.Command(config.Binary, "-c", config.Config)
+	cmd := exec.Command(config.Binary, "-c", config.Config) // #nosec G204 -- fixed FRPC-compatible arguments and verified binary
 	cmd.Stdin = nil
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard

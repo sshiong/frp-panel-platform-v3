@@ -252,7 +252,7 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 	if a.loginLimit != nil {
 		a.loginLimit.reset(limitKey)
 	}
-	http.SetCookie(w, &http.Cookie{Name: "frp_client_session", Value: a.App.SessionCookie(), Path: "/", HttpOnly: true, Secure: a.App.Config.Environment == "production", SameSite: http.SameSiteStrictMode, MaxAge: 1800})
+	http.SetCookie(w, &http.Cookie{Name: "frp_client_session", Value: a.App.SessionCookie(), Path: "/", HttpOnly: true, Secure: a.App.Config.Environment == "production", SameSite: http.SameSiteStrictMode, MaxAge: 1800}) // #nosec G124 -- Secure is mandatory in production; development is loopback HTTP
 	writeJSON(w, 200, session)
 }
 
@@ -295,7 +295,7 @@ func (a *API) inspectServer(w http.ResponseWriter, r *http.Request) {
 }
 func (a *API) logout(w http.ResponseWriter, r *http.Request) {
 	_ = a.App.Logout(r.Context())
-	http.SetCookie(w, &http.Cookie{Name: "frp_client_session", Value: "", Path: "/", HttpOnly: true, Secure: a.App.Config.Environment == "production", MaxAge: -1, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: "frp_client_session", Value: "", Path: "/", HttpOnly: true, Secure: a.App.Config.Environment == "production", MaxAge: -1, SameSite: http.SameSiteStrictMode}) // #nosec G124 -- Secure is mandatory in production; development is loopback HTTP
 	writeJSON(w, 200, map[string]interface{}{"ok": true})
 }
 func (a *API) password(w http.ResponseWriter, r *http.Request) {
@@ -356,7 +356,7 @@ func (a *API) resetFRPCredential(w http.ResponseWriter, r *http.Request) {
 	// Server revokes the current session as part of the rotation. Clear the
 	// local session and all runtime material immediately after the 200 response.
 	_ = a.App.Logout(r.Context())
-	http.SetCookie(w, &http.Cookie{Name: "frp_client_session", Value: "", Path: "/", HttpOnly: true, Secure: a.App.Config.Environment == "production", MaxAge: -1, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: "frp_client_session", Value: "", Path: "/", HttpOnly: true, Secure: a.App.Config.Environment == "production", MaxAge: -1, SameSite: http.SameSiteStrictMode}) // #nosec G124 -- Secure is mandatory in production; development is loopback HTTP
 	writeJSON(w, 200, output)
 }
 func (a *API) session(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, a.App.Session()) }

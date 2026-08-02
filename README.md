@@ -33,3 +33,5 @@ Client 默认只监听回环地址。局域网部署必须显式设置 `CLIENT_A
 两个面板独立编译、独立运行、独立部署，不共享业务数据库；只通过版本化 HTTPS REST/WebSocket 和 `/contracts` 中的协议通信。代码中不包含设备注册、永久 `client_id`、`device_token` 或设备 HMAC 流程。
 
 完整开发与验收基线见 [frp_cloudflare_platform_v3_development_acceptance_standard.md](frp_cloudflare_platform_v3_development_acceptance_standard.md)，当前实现状态见 [PROGRESS.md](PROGRESS.md)。
+
+实现级逐项矩阵见 [`docs/acceptance-matrix.md`](docs/acceptance-matrix.md)；部署配置、用户操作、升级回滚和已知限制分别见 [`docs/config-reference.md`](docs/config-reference.md)、[`docs/user-manual.md`](docs/user-manual.md)、[`docs/upgrade-rollback.md`](docs/upgrade-rollback.md) 和 [`docs/known-issues.md`](docs/known-issues.md)。

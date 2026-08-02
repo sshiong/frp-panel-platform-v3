@@ -15,6 +15,7 @@ Server `/api/v1/compatibility` 始终返回：
 
 ```json
 {
+  "server_version": "0.1.0",
   "minimum_client_version": "0.1.0",
   "latest_client_version": "0.1.0",
   "minimum_frpc_version": "0.68.0",
@@ -22,5 +23,10 @@ Server `/api/v1/compatibility` 始终返回：
   "config_schema_version": "v1"
 }
 ```
+
+`server_version` and the two panel artifact versions are independent release
+metadata. The release manifest records them under `panel_versions.server` and
+`panel_versions.client`; a future release may advance one without silently
+changing the other.
 
 Patch/Minor 版本只增加可忽略字段；删除或改变字段必须升级 API 主版本或经过弃用周期。Server/Client 发行版本可以独立递增，但在兼容矩阵没有声明前不得应用配置。正式发布还要在 Linux release matrix 重复固定 FRPS/FRPC 和 Plugin 验证，并把具体二进制 hash 写入 `build/release-manifest.json`。

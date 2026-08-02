@@ -6,7 +6,7 @@ GO_ENV = GOCACHE=$(GO_CACHE) GOMODCACHE=$(GO_MODULE_CACHE)
 STATICCHECK ?= staticcheck
 FRPC_VERIFY_VERSION ?= 0.68.0
 
-.PHONY: install-web build test lint contract security fuzz perf frpc-verify network-e2e plugin-e2e sbom checksums manifest sign release checkpoint dev-server dev-client clean
+.PHONY: install-web build test lint contract migration-check license security fuzz perf frpc-verify network-e2e plugin-e2e sbom checksums manifest sign release checkpoint dev-server dev-client clean
 
 install-web:
 	cd web/admin && npm install
@@ -31,12 +31,21 @@ lint:
 	cd server && $(GO_ENV) $(STATICCHECK) ./...
 	cd client && $(GO_ENV) $(STATICCHECK) ./...
 	cd web/admin && npm run typecheck
+	cd web/admin && npm run lint
 	cd web/admin && npm run test:policy
 	cd web/client && npm run typecheck
+	cd web/client && npm run lint
 	cd web/client && npm run test:policy
 
 contract:
 	ruby scripts/validate-openapi.rb
+	cd server && $(GO_ENV) go test ./internal/httpapi -run '^TestHTTPContract' -count=1
+
+migration-check:
+	cd server && $(GO_ENV) go test ./internal/db -run '^TestMigration' -count=1
+
+license:
+	ruby scripts/license-policy.rb
 
 security:
 	ruby scripts/secret-scan.rb

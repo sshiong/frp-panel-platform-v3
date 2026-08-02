@@ -83,10 +83,10 @@ func InspectServerCertificate(ctx context.Context, serverPanelURL string) (Certi
 	// This is deliberately limited to the metadata inspection path. The
 	// application HTTP client below uses ordinary certificate verification unless
 	// the user explicitly confirms the displayed fingerprint.
-	connection, err := tls.DialWithDialer(dialer, "tcp", address, &tls.Config{ // #nosec G402 -- inspection does not send HTTP credentials
+	connection, err := tls.DialWithDialer(dialer, "tcp", address, &tls.Config{
 		MinVersion:         tls.VersionTLS12,
 		ServerName:         parsed.Hostname(),
-		InsecureSkipVerify: true,
+		InsecureSkipVerify: true, // #nosec G402 -- inspection does not send HTTP credentials
 	})
 	if err != nil {
 		return info, fmt.Errorf("TLS certificate inspection failed: %w", err)
@@ -146,10 +146,10 @@ func PinnedTLSConfig(serverName, rawPin string) (*tls.Config, error) {
 	if pin == "" {
 		return nil, fmt.Errorf("certificate pin is required")
 	}
-	return &tls.Config{ // #nosec G402 -- explicit SPKI pin is the trust decision
+	return &tls.Config{
 		MinVersion:         tls.VersionTLS12,
 		ServerName:         serverName,
-		InsecureSkipVerify: true,
+		InsecureSkipVerify: true, // #nosec G402 -- the user-confirmed SPKI pin is the trust decision
 		VerifyConnection: func(state tls.ConnectionState) error {
 			if len(state.PeerCertificates) == 0 {
 				return fmt.Errorf("server did not present a certificate")

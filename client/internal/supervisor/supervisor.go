@@ -147,7 +147,7 @@ func (s *Supervisor) RecoverOrphan(ctx context.Context) error {
 
 func (s *Supervisor) recoverOrphan(ctx context.Context) error {
 	pidPath := s.pidPath()
-	encoded, err := os.ReadFile(pidPath)
+	encoded, err := os.ReadFile(pidPath) // #nosec G304 -- pidPath is derived from the configured client data directory
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// No valid Server Session exists during startup. Even without a
@@ -218,7 +218,7 @@ func (s *Supervisor) recoverOrphan(ctx context.Context) error {
 func (s *Supervisor) processCommandLine(ctx context.Context, pid int) (string, error) {
 	commandCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(commandCtx, "ps", "-p", strconv.Itoa(pid), "-o", "command=").CombinedOutput()
+	output, err := exec.CommandContext(commandCtx, "ps", "-p", strconv.Itoa(pid), "-o", "command=").CombinedOutput() // #nosec G204 -- executable and arguments are fixed; pid is parsed as an integer
 	if err != nil {
 		return "", err
 	}
@@ -336,7 +336,7 @@ func (s *Supervisor) apply(ctx context.Context, snapshot Snapshot) error {
 	if err := s.verify(ctx, tmpPath); err != nil {
 		return s.fail("FRPC_VERIFY_FAILED: " + err.Error())
 	}
-	oldConfig, oldConfigErr := os.ReadFile(activePath)
+	oldConfig, oldConfigErr := os.ReadFile(activePath) // #nosec G304 -- activePath is derived from the configured client data directory
 	if oldConfigErr == nil {
 		_ = atomicWriteDurable(lastGoodPath, oldConfig, 0o600)
 	}
@@ -411,7 +411,7 @@ func (s *Supervisor) reload(ctx context.Context) error {
 	}
 	commandCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(commandCtx, s.binary, "reload", "-c", filepath.Join(s.dataDir, "config", "frpc.toml"))
+	cmd := exec.CommandContext(commandCtx, s.binary, "reload", "-c", filepath.Join(s.dataDir, "config", "frpc.toml")) // #nosec G204 -- s.binary is hash-verified and arguments are fixed
 	cmd.Stdin = nil
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
@@ -453,7 +453,7 @@ func (s *Supervisor) verify(ctx context.Context, path string) error {
 	}
 	commandCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(commandCtx, s.binary, "verify", "-c", path)
+	cmd := exec.CommandContext(commandCtx, s.binary, "verify", "-c", path) // #nosec G204 -- s.binary is hash-verified and path is generated in the client data directory
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("fixed frpc verify failed: %s", sanitize(string(output)))
 	}
@@ -475,7 +475,7 @@ func (s *Supervisor) restart(ctx context.Context) error {
 		return err
 	}
 	// The FRPC process outlives the short apply request; Stop owns its lifetime.
-	cmd := exec.Command(s.binary, "-c", filepath.Join(s.dataDir, "config", "frpc.toml"))
+	cmd := exec.Command(s.binary, "-c", filepath.Join(s.dataDir, "config", "frpc.toml")) // #nosec G204 -- s.binary is hash-verified and arguments are fixed
 	cmd.Stdin = nil
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
@@ -631,7 +631,7 @@ func writeDurableFile(path string, content []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode) // #nosec G304 -- path is generated under the configured client data directory
 	if err != nil {
 		return err
 	}

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown, Bell, CircleCheckFilled, Clock, Connection, DataAnalysis, Files, Key, Lock, Menu, Operation, Plus, Refresh, Setting, User, UserFilled, WarningFilled } from '@element-plus/icons-vue'
+import { ArrowDown, Bell, CircleCheckFilled, Clock, Connection, DataAnalysis, Files, Key, Lock, Operation, Plus, Refresh, Setting, User, UserFilled, WarningFilled } from '@element-plus/icons-vue'
 import { api } from './api'
 import { requiresCredentialSetup } from './policy'
 import { useSessionStore } from './stores/session'
@@ -9,17 +9,16 @@ import { useSessionStore } from './stores/session'
 type UserRow = { id: string; username: string; role: string; status: string; must_change_password: boolean; must_change_username: boolean; created_at: string; desired_config_version: number; applied_config_version: number; frp_credential: { present: boolean; secret_version: number; rotated_at?: string; status: string } }
 type Stats = { active_users: number; mappings: number; pending: number; errors: number; server_uptime_seconds: number; frps_public_host: string; frps_public_port: number }
 type ExternalResidue = { resource_type: string; resource_id: string; provider: string; identifier: string; reason: string; created_at: string; resolved_at?: string }
-type Operation = { id: string; operation_type: string; status: string; phase: string; step: string; error_code?: string; error_message?: string; compensation_status?: string; external_residue_count?: number; external_residues?: ExternalResidue[]; created_at: string }
+type OperationRow = { id: string; operation_type: string; status: string; phase: string; step: string; error_code?: string; error_message?: string; compensation_status?: string; external_residue_count?: number; external_residues?: ExternalResidue[]; created_at: string }
 
 const session = useSessionStore()
 const view = ref('overview')
 const stats = ref<Stats>({ active_users: 0, mappings: 0, pending: 0, errors: 0, server_uptime_seconds: 0, frps_public_host: '', frps_public_port: 0 })
 const users = ref<UserRow[]>([])
 const selectedFRPUserID = ref('')
-const operations = ref<Operation[]>([])
+const operations = ref<OperationRow[]>([])
 const loading = ref(false)
 const loginForm = ref({ username: 'admin', password: '' })
-const showAddress = ref(false)
 const showCreateUser = ref(false)
 const newUsername = ref('')
 const initialPassword = ref('')
@@ -40,7 +39,7 @@ async function loadData() {
   if (!session.authenticated) return
   loading.value = true
   try {
-    const [s, u, o, c] = await Promise.all([api<Stats>('/api/v1/admin/stats'), api<{ items: UserRow[] }>('/api/v1/admin/users'), api<{ items: Operation[] }>('/api/v1/admin/operations'), api<typeof cfStatus.value>('/api/v1/cloudflare/status')])
+    const [s, u, o, c] = await Promise.all([api<Stats>('/api/v1/admin/stats'), api<{ items: UserRow[] }>('/api/v1/admin/users'), api<{ items: OperationRow[] }>('/api/v1/admin/operations'), api<typeof cfStatus.value>('/api/v1/cloudflare/status')])
     stats.value = s; users.value = u.items; operations.value = o.items; cfStatus.value = c
   } catch (err) { ElMessage.error(err instanceof Error ? err.message : '数据加载失败') }
   finally { loading.value = false }
@@ -58,7 +57,7 @@ async function deleteUser(user: UserRow) { try { await ElMessageBox.confirm('删
 async function forceDeleteUser(user: UserRow) { try { await ElMessageBox.confirm('强制删除只移除本地用户和资源；Cloudflare 等外部清理失败会保留残留清单，必须由管理员后续处理。', '确认强制删除', { type: 'warning', confirmButtonText: '强制继续', cancelButtonText: '取消' }); const reauthTicket = await issueReauthTicket(); await api(`/api/v1/admin/users/${user.id}?force=true`, { method: 'DELETE', body: JSON.stringify({ reauth_ticket: reauthTicket }) }); await loadData(); ElMessage.warning('已进入强制补偿流程，请查看操作队列中的外部残留') } catch { /* cancelled */ } }
 async function saveCloudflare() { try { const reauthTicket = await issueReauthTicket(); await api('/api/v1/cloudflare/token', { method: 'POST', body: JSON.stringify({ token: cfToken.value, reauth_ticket: reauthTicket }) }); cfToken.value = ''; await loadData(); ElMessage.success('Token 已加密保存，等待权限验证') } catch (err) { if (err !== 'cancel') ElMessage.error(err instanceof Error ? err.message : 'Token 保存失败') } }
 async function clearCloudflare() { try { await ElMessageBox.confirm('清除后已有 DNS 记录不会自动删除；未完成的 DNS/证书任务会进入阻塞状态。', '确认清除 Cloudflare Token', { type: 'warning', confirmButtonText: '继续', cancelButtonText: '取消' }); const reauthTicket = await issueReauthTicket(); clearCountdown.value = 3; await new Promise<void>(resolve => { const timer = window.setInterval(() => { clearCountdown.value -= 1; if (clearCountdown.value <= 0) { window.clearInterval(timer); resolve() } }, 1000) }); await api('/api/v1/cloudflare/token', { method: 'DELETE', body: JSON.stringify({ reauth_ticket: reauthTicket }) }); await loadData(); ElMessage.success('Token 已清除') } catch (err) { if (err !== 'cancel') ElMessage.error(err instanceof Error ? err.message : 'Cloudflare Token 清除失败') } finally { clearCountdown.value = 0 } }
-async function retryOperation(operation: Operation) { try { await api(`/api/v1/operations/${operation.id}/retry`, { method: 'POST' }); await loadData(); ElMessage.success('操作已重新入队') } catch (err) { ElMessage.error(err instanceof Error ? err.message : '重试失败') } }
+async function retryOperation(operation: OperationRow) { try { await api(`/api/v1/operations/${operation.id}/retry`, { method: 'POST' }); await loadData(); ElMessage.success('操作已重新入队') } catch (err) { ElMessage.error(err instanceof Error ? err.message : '重试失败') } }
 function statusLabel(status: string) { return ({ active: 'ACTIVE', disabled: 'DISABLED', pending: 'PENDING', running: 'RUNNING', failed: 'FAILED', succeeded: 'SUCCEEDED' } as Record<string, string>)[status] ?? status.toUpperCase() }
 function formatUptime(seconds: number) { const hours = Math.floor(seconds / 3600); const minutes = Math.floor((seconds % 3600) / 60); return `${hours}h ${minutes}m` }
 function formatTime(value: string) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—' }

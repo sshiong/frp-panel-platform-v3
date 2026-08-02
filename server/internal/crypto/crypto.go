@@ -102,7 +102,7 @@ func (m *Manager) Sign(data []byte) string {
 }
 
 func loadOrCreate(path string, size int) ([]byte, error) {
-	if content, err := os.ReadFile(path); err == nil {
+	if content, err := os.ReadFile(path); err == nil { // #nosec G304 -- key path is a configured data-directory file
 		if len(content) != size {
 			return nil, fmt.Errorf("%s has invalid length", filepath.Base(path))
 		}

@@ -38,7 +38,17 @@ paths:
           description: Server and Client Panel compatibility metadata
           content:
             application/json:
-              schema: { type: object, additionalProperties: true }
+              schema:
+                type: object
+                additionalProperties: false
+                required: [server_version, minimum_client_version, latest_client_version, minimum_frpc_version, protocol_version, config_schema_version]
+                properties:
+                  server_version: { type: string }
+                  minimum_client_version: { type: string }
+                  latest_client_version: { type: string }
+                  minimum_frpc_version: { type: string }
+                  protocol_version: { type: string, enum: [v1] }
+                  config_schema_version: { type: string, enum: [v1] }
   /api/v1/auth/client-login:
     post:
       operationId: clientLogin

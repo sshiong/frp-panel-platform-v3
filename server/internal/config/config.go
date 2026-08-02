@@ -197,7 +197,7 @@ func LoadOrCreateTransportSecret(path string) (string, error) {
 }
 
 func readTransportSecret(path string) (string, error) {
-	encoded, err := os.ReadFile(path)
+	encoded, err := os.ReadFile(path) // #nosec G304 -- transport secret path is an operator-configured deployment file
 	if err != nil {
 		return "", err
 	}
@@ -209,7 +209,7 @@ func readTransportSecret(path string) (string, error) {
 }
 
 func syncDirectory(path string) error {
-	directory, err := os.Open(path)
+	directory, err := os.Open(path) // #nosec G304 -- directory is created from the operator-configured data path
 	if err != nil {
 		return err
 	}

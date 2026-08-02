@@ -16,7 +16,7 @@
 | 阶段 3：TCP/UDP Mapping | 本地实现完成，平台矩阵待执行 | Mapping/Revision/Port Lease/幂等 API、真实 FRP Plugin envelope 与固定 v0.68.0 FRPS/FRPC + loopback Plugin metadata 网络 E2E 已通过 |
 | 阶段 4：域名和 Cloudflare | 本地实现完成，外部 Sandbox 待执行 | Domain/DNS/Token 加密模型、权限分流、冲突语义、补偿 Job 和重定向隔离已实现；真实测试 Zone/Token 尚未配置 |
 | 阶段 5：Router 和证书 | 本地实现完成，ACME/TLS 待执行 | Router Snapshot control/business 分离、HMAC/last-good、DB-free Host runtime 与 ACME DNS-01 Provider 已实现；真实 ACME Staging、TLS/SNI 热切换仍需外部部署验收 |
-| 阶段 6：任务、删除、备份和发布 | 本地门禁完成，发布签署待执行 | Job/Audit、pending 配额、删除补偿、全数据加密备份 Decode/Restore、OpenAPI 34/39 路由校验、SPDX SBOM、SHA-256 清单已通过；正式签名和第三方扫描待完成 |
+| 阶段 6：任务、删除、备份和发布 | 本地门禁完成，CI/发布签署待执行 | Job/Audit、pending 配额、删除补偿、全数据加密备份 Decode/Restore、OpenAPI 34/39 路由与响应契约、上一稳定版 migration 演练、ESLint、许可证策略、SPDX SBOM、SHA-256 清单已通过；最新 CI 的 gosec 修复已在本地验证，等待推送后复验 |
 
 ## 已实现
 
@@ -58,6 +58,7 @@
 - [x] `http_only` 固定为无证书、无 HTTPS 跳转；API、服务层、Client 表单和 SQLite CHECK/trigger migration 均拒绝冲突配置。
 - [x] 正式 FPPB1 包包含数据库、受保护数据目录密钥/证书/ACME 文件，逐文件校验并安全恢复；Server 启动会重新排队 Router 快照。
 - [x] OpenAPI 3.1 路径/operationId/WebSocket 元数据校验脚本、双模块 CI contract job、`make sbom`、`make checksums`、固定 FRP 版本下载归档校验和发布清单已加入；正式发布仍需签名和第三方扫描。
+- [x] 开发标准门禁已补齐：两个 Vue 应用的 ESLint/strict typecheck/build、OpenAPI 响应契约测试、上一稳定版 migration upgrade rehearsal、npm SPDX 许可证 allowlist、Router Header/Body/上游超时边界和独立 Server/Client 版本元数据。
 
 ## 验证记录
 
@@ -86,6 +87,8 @@
 | 2026-08-02 | Database constraint and final regression | 通过；SQLite CHECK/trigger migration 拒绝 `http_only + redirect`，全量 `make test`（Server/Client race）、`make lint`、`make build`、SBOM/checksum/manifest、OpenAPI 和 secret scan 均通过；Vite 仅保留非阻断的大 chunk 警告 |
 | 2026-08-02 | Responsive/performance acceptance hardening | 通过；Admin/Client 390×844 Playwright 检查 `scrollWidth === innerWidth`，移动端断点、表格容器滚动、44px 触控目标和 reduced-motion 已接入；`make perf` 的 PERF-001~007 本地 profile 通过，其中 PERF-007 覆盖旧 HTTP/WS/FRP Plugin 会话替换失效 |
 | 2026-08-02 | Frontend technical audit | 通过并留有发布建议；`docs/ui-audit.md` 评分 15/20，未发现 P0/P1 UI 阻断项；P2 为生产 bundle 分包与颜色 token 收敛，P3 为将认证路由 WCAG 自动化纳入 CI |
+| 2026-08-02 | CI failure analysis and local gate repair | 本地通过；Ubuntu CI 的 go/web/contract/container/fuzz/release-metadata/CodeQL 已通过，security 仅因 gosec 新规则命中而失败；已逐项修复/说明 TLS inspection、文件边界、固定命令、Cookie 和整数转换，复跑本地 gosec Server/Client 均为 0 findings |
+| 2026-08-02 | Development-standard gate completion | 本地通过；`make lint`、`make test`、`make build`、`make contract`、`make migration-check`、`make license` 通过；响应契约、迁移升级、Router 请求边界、独立版本字段和逐项 [`acceptance-matrix.md`](docs/acceptance-matrix.md) 已入库 |
 
 ## 未决与发布阻断项
 
@@ -96,7 +99,7 @@
 3. 使用真实 Cloudflare Sandbox + ACME Staging 完成 DNS-01 传播、TXT 清理、证书原子替换与 Router TLS SNI/Host 热切换；本地 Provider 已实现但未伪造外部成功。
 4. 加密归档备份恢复的 clean-host 灾备演练、WAL checkpoint 受控执行和磁盘满/时钟偏差故障注入。
 5. 1000 Mapping/2000 Domain、200 Mapping、配置同步和会话替换等 PERF-003~007 的目标环境基线；本地开发 profile 已通过，但尚未替代 Linux/生产目标机的容量基线。
-6. GitHub Actions 实际运行、正式 SAST/SCA/依赖扫描、cosign 签名及发布负责人/安全负责人/测试负责人签字。
+6. GitHub Actions 在本批修复提交上的全绿结果、正式 SAST/SCA/依赖扫描、cosign 签名及发布负责人/安全负责人/测试负责人签字。
 7. 完成上述 P0/P1 外部验收前，仓库只能作为开发预览，不得声明生产就绪。
 
 ## 更新规则

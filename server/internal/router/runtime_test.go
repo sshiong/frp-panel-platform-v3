@@ -1,6 +1,7 @@
 package router
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"crypto/tls"
 	"fmt"
@@ -161,6 +162,38 @@ func TestRuntimeOfflineRouteReturns502(t *testing.T) {
 	runtime.ServeHTTP(response, request)
 	if response.Code != http.StatusBadGateway {
 		t.Fatalf("offline route status: %d", response.Code)
+	}
+}
+
+func TestRuntimeRejectsOversizedHeadersAndBodies(t *testing.T) {
+	key := []byte("bounds-key")
+	runtime, err := NewRuntime(key, "http://127.0.0.1:7400", "http://127.0.0.1:8080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := Build(1, nil, []Route{{Hostname: "app.example.com", Status: "active"}}, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.Load(snapshot); err != nil {
+		t.Fatal(err)
+	}
+
+	headerRequest := httptest.NewRequest(http.MethodGet, "http://app.example.com/", nil)
+	headerRequest.Host = "app.example.com"
+	headerRequest.Header.Set("X-Oversized", strings.Repeat("x", maxRouterHeaderBytes))
+	headerResponse := httptest.NewRecorder()
+	runtime.ServeHTTP(headerResponse, headerRequest)
+	if headerResponse.Code != http.StatusRequestHeaderFieldsTooLarge {
+		t.Fatalf("oversized header status=%d", headerResponse.Code)
+	}
+
+	bodyRequest := httptest.NewRequest(http.MethodPost, "http://app.example.com/", bytes.NewReader(bytes.Repeat([]byte("x"), maxRouterBodyBytes+1)))
+	bodyRequest.Host = "app.example.com"
+	bodyResponse := httptest.NewRecorder()
+	runtime.ServeHTTP(bodyResponse, bodyRequest)
+	if bodyResponse.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized body status=%d", bodyResponse.Code)
 	}
 }
 

@@ -72,7 +72,7 @@ func TestHTTPContractSmokeCoversProblemDetailsAuthAndPagination(t *testing.T) {
 	if err := json.Unmarshal(compatibilityResponse.Body.Bytes(), &compatibility); err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"minimum_client_version", "latest_client_version", "minimum_frpc_version", "protocol_version", "config_schema_version"} {
+	for _, field := range []string{"server_version", "minimum_client_version", "latest_client_version", "minimum_frpc_version", "protocol_version", "config_schema_version"} {
 		if compatibility[field] == nil || compatibility[field] == "" {
 			t.Fatalf("compatibility missing %q: %#v", field, compatibility)
 		}

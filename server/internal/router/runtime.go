@@ -5,20 +5,28 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os"
 	"strings"
 	"sync"
+	"time"
+)
+
+const (
+	maxRouterHeaderBytes = 64 << 10
+	maxRouterBodyBytes   = 8 << 20
 )
 
 type Runtime struct {
-	mu       sync.RWMutex
-	key      []byte
-	current  Snapshot
-	control  *url.URL
-	business *url.URL
+	mu        sync.RWMutex
+	key       []byte
+	current   Snapshot
+	control   *url.URL
+	business  *url.URL
+	transport http.RoundTripper
 }
 
 // CertificateStore is the Router-side, in-memory SNI certificate boundary.
@@ -72,11 +80,11 @@ func NewRuntime(key []byte, controlTarget, businessTarget string) (*Runtime, err
 	if err != nil || business.Scheme == "" || business.Host == "" {
 		return nil, errors.New("invalid router business target")
 	}
-	return &Runtime{key: append([]byte(nil), key...), control: control, business: business}, nil
+	return &Runtime{key: append([]byte(nil), key...), control: control, business: business, transport: routerTransport()}, nil
 }
 
 func (r *Runtime) LoadFile(path string) error {
-	content, err := os.ReadFile(path)
+	content, err := os.ReadFile(path) // #nosec G304 -- snapshot path is an operator-configured last-good file
 	if err != nil {
 		return err
 	}
@@ -110,6 +118,10 @@ func (r *Runtime) CurrentVersion() int64 {
 // refuses unknown or offline routes. Proxy targets are fixed deployment
 // targets; they are never supplied by a Domain Binding.
 func (r *Runtime) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	if requestHeaderBytes(req) > maxRouterHeaderBytes {
+		http.Error(w, "request headers too large", http.StatusRequestHeaderFieldsTooLarge)
+		return
+	}
 	r.mu.RLock()
 	snapshot := r.current
 	controlTarget, businessTarget := *r.control, *r.business
@@ -141,14 +153,19 @@ func (r *Runtime) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if req.TLS == nil && selected.HTTPRedirect {
-		location := "https://" + req.Host
-		if req.URL.RequestURI() != "" {
-			location += req.URL.RequestURI()
-		}
-		http.Redirect(w, req, location, http.StatusPermanentRedirect)
+		location := url.URL{Scheme: "https", Host: normalizeHost(selected.Hostname), Path: req.URL.Path, RawQuery: req.URL.RawQuery}
+		http.Redirect(w, req, location.String(), http.StatusPermanentRedirect)
 		return
 	}
+	if req.ContentLength > maxRouterBodyBytes {
+		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	if req.Body != nil {
+		req.Body = http.MaxBytesReader(w, req.Body, maxRouterBodyBytes)
+	}
 	proxy := httputil.NewSingleHostReverseProxy(&target)
+	proxy.Transport = r.transport
 	originalDirector := proxy.Director
 	proxy.Director = func(out *http.Request) {
 		stripForwardedHeaders(out.Header)
@@ -163,6 +180,31 @@ func (r *Runtime) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		http.Error(out, "upstream unavailable", http.StatusBadGateway)
 	}
 	proxy.ServeHTTP(w, req)
+}
+
+func routerTransport() http.RoundTripper {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	transport.DialContext = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+	transport.TLSHandshakeTimeout = 10 * time.Second
+	transport.ResponseHeaderTimeout = 15 * time.Second
+	transport.ExpectContinueTimeout = 1 * time.Second
+	transport.IdleConnTimeout = 90 * time.Second
+	return transport
+}
+
+func requestHeaderBytes(req *http.Request) int {
+	if req == nil {
+		return 0
+	}
+	total := len(req.Method) + len(req.RequestURI) + len(req.Proto) + 4
+	for name, values := range req.Header {
+		total += len(name) + 2
+		for _, value := range values {
+			total += len(value) + 2
+		}
+	}
+	return total
 }
 
 func stripForwardedHeaders(header http.Header) {

@@ -80,7 +80,7 @@ func AtomicWrite(path string, snapshot Snapshot) error {
 			_ = os.Remove(tmp)
 		}
 	}()
-	file, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	file, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600) // #nosec G304 -- temporary snapshot path is generated from the configured target
 	if err != nil {
 		return err
 	}

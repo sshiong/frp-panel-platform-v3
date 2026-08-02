@@ -97,7 +97,7 @@ func (a *App) RouterCertificates(ctx context.Context) (map[string]tls.Certificat
 		if certPath != root && !strings.HasPrefix(certPath, root+string(os.PathSeparator)) {
 			return nil, fmt.Errorf("certificate path escapes server data directory")
 		}
-		certPEM, err := os.ReadFile(certPath)
+		certPEM, err := os.ReadFile(certPath) // #nosec G304 -- certPath is required to stay under the configured data directory
 		if err != nil {
 			return nil, err
 		}

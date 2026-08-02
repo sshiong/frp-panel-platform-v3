@@ -42,7 +42,7 @@ jobs:
           mkdir -p build
           cp /tmp/frp_0.68.0_linux_amd64/frps build/frps
           cp /tmp/frp_0.68.0_linux_amd64/frpc build/frpc
-      - run: FRPS_BINARY=build/frps FRPC_BINARY=build/frpc FRPS_VERSION=0.68.0 FRPC_VERSION=0.68.0 make build sbom checksums manifest
+      - run: SERVER_VERSION="${GITHUB_REF_NAME#v}" CLIENT_VERSION="${GITHUB_REF_NAME#v}" FRPS_BINARY=build/frps FRPC_BINARY=build/frpc FRPS_VERSION=0.68.0 FRPC_VERSION=0.68.0 make contract migration-check license build sbom checksums manifest
       - uses: sigstore/cosign-installer@v3
       - name: Sign release metadata and binaries
         run: |

@@ -20,7 +20,7 @@ end
     next if location == ""
     next unless item["version"]
     package_name = location.sub(%r{^node_modules/}, "")
-    packages << { "name" => "npm:#{package_name}", "versionInfo" => item["version"], "downloadLocation" => "NOASSERTION", "licenseConcluded" => "NOASSERTION" }
+    packages << { "name" => "npm:#{package_name}", "versionInfo" => item["version"], "downloadLocation" => item["resolved"] || "NOASSERTION", "licenseConcluded" => item["license"] || "NOASSERTION" }
   end
 end
 

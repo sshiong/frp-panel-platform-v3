@@ -113,7 +113,7 @@ func run(cfg config.Config, signals <-chan os.Signal) error {
 				logger.Error("router_watcher_stopped", "error", err)
 			}
 		}()
-		routerServer = &http.Server{Addr: cfg.RouterListenAddr, Handler: runtime, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 90 * time.Second}
+		routerServer = &http.Server{Addr: cfg.RouterListenAddr, Handler: runtime, MaxHeaderBytes: 64 << 10, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 90 * time.Second}
 		certificateStore := router.NewCertificateStore()
 		if cfg.RouterTLSEnabled {
 			if certificates, certificateErr := app.RouterCertificates(context.Background()); certificateErr != nil {
@@ -159,7 +159,7 @@ func run(cfg config.Config, signals <-chan os.Signal) error {
 		}()
 	}
 	api := httpapi.New(app, logger)
-	server := &http.Server{Addr: cfg.ListenAddr, Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	server := &http.Server{Addr: cfg.ListenAddr, Handler: api.Handler(), MaxHeaderBytes: 64 << 10, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {
 		logger.Info("server_started", "addr", cfg.ListenAddr, "frps_public_host", cfg.FRPSPublicHost, "frps_public_port", cfg.FRPSPublicPort)
 		var serveErr error

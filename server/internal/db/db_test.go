@@ -2,8 +2,11 @@ package db
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -30,6 +33,82 @@ func TestOpenAppliesWALAndAllMigrations(t *testing.T) {
 	var instanceID string
 	if err := database.QueryRow(`SELECT server_instance_id FROM system_identity WHERE singleton_id=1`).Scan(&instanceID); err != nil || instanceID == "" {
 		t.Fatalf("system identity missing: id=%q err=%v", instanceID, err)
+	}
+}
+
+func TestMigrationUpgradeFromPreviousStableBackup(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "stable-v3.0.db")
+	seedStableDatabase(t, path, 6)
+
+	database, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	var migrations int
+	if err := database.QueryRow(`SELECT COUNT(1) FROM schema_migrations`).Scan(&migrations); err != nil {
+		t.Fatal(err)
+	}
+	if migrations != 7 {
+		t.Fatalf("stable backup was not upgraded: migrations=%d", migrations)
+	}
+	var triggerName string
+	if err := database.QueryRow(`SELECT name FROM sqlite_master WHERE type='trigger' AND name=?`, "domain_bindings_http_only_redirect_insert").Scan(&triggerName); err != nil || triggerName == "" {
+		t.Fatalf("latest migration trigger missing: name=%q err=%v", triggerName, err)
+	}
+}
+
+func seedStableDatabase(t *testing.T, path string, latestVersion int) {
+	t.Helper()
+	conn, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn.SetMaxOpenConns(1)
+	defer conn.Close()
+	for _, pragma := range []string{"PRAGMA foreign_keys=ON", "PRAGMA busy_timeout=5000"} {
+		if _, err := conn.Exec(pragma); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := conn.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := migrationFS.ReadDir("migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		var version int
+		if _, err := fmt.Sscanf(entry.Name(), "%d_", &version); err != nil || version > latestVersion {
+			continue
+		}
+		contents, err := migrationFS.ReadFile("migrations/" + entry.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		tx, err := conn.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, statement := range strings.Split(string(contents), "-- statement") {
+			statement = strings.TrimSpace(statement)
+			if statement == "" {
+				continue
+			}
+			if _, err := tx.Exec(statement); err != nil {
+				_ = tx.Rollback()
+				t.Fatalf("seed migration %s: %v", entry.Name(), err)
+			}
+		}
+		if _, err := tx.Exec(`INSERT INTO schema_migrations(version, applied_at) VALUES (?, datetime('now'))`, version); err != nil {
+			_ = tx.Rollback()
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

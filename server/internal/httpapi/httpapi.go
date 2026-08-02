@@ -27,6 +27,7 @@ import (
 	"github.com/ricardo/frp-panel-platform/server/internal/backup"
 	"github.com/ricardo/frp-panel-platform/server/internal/id"
 	"github.com/ricardo/frp-panel-platform/server/internal/service"
+	"github.com/ricardo/frp-panel-platform/server/internal/version"
 )
 
 type contextKey string
@@ -619,7 +620,7 @@ func (a *API) webDir() string {
 }
 
 func (a *API) compatibility(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]interface{}{"protocol_version": "v1", "config_schema_version": "v1", "minimum_client_version": "0.1.0", "latest_client_version": "0.1.0", "minimum_frpc_version": "0.68.0"})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"server_version": version.ServerVersion, "protocol_version": version.ProtocolVersion, "config_schema_version": version.ConfigSchemaVersion, "minimum_client_version": version.MinimumClientVersion, "latest_client_version": version.LatestClientVersion, "minimum_frpc_version": version.MinimumFRPCVersion})
 }
 
 func (a *API) adminLogin(w http.ResponseWriter, r *http.Request) {
@@ -647,8 +648,8 @@ func (a *API) adminLogin(w http.ResponseWriter, r *http.Request) {
 	if a.loginLimit != nil {
 		a.loginLimit.reset(limitKey)
 	}
-	http.SetCookie(w, &http.Cookie{Name: "frp_server_session", Value: result.Token, Path: "/", HttpOnly: true, Secure: a.App.Config.Environment == "production", SameSite: http.SameSiteStrictMode, MaxAge: int(time.Until(result.SessionExpires).Seconds())})
-	http.SetCookie(w, &http.Cookie{Name: serverCSRFCookie, Value: result.CSRFToken, Path: "/", HttpOnly: false, Secure: a.App.Config.Environment == "production", SameSite: http.SameSiteStrictMode, MaxAge: int(time.Until(result.SessionExpires).Seconds())})
+	http.SetCookie(w, &http.Cookie{Name: "frp_server_session", Value: result.Token, Path: "/", HttpOnly: true, Secure: a.App.Config.Environment == "production", SameSite: http.SameSiteStrictMode, MaxAge: int(time.Until(result.SessionExpires).Seconds())})  // #nosec G124 -- Secure is mandatory in production; development is loopback HTTP
+	http.SetCookie(w, &http.Cookie{Name: serverCSRFCookie, Value: result.CSRFToken, Path: "/", HttpOnly: false, Secure: a.App.Config.Environment == "production", SameSite: http.SameSiteStrictMode, MaxAge: int(time.Until(result.SessionExpires).Seconds())}) // #nosec G124 -- double-submit CSRF cookie must be readable by the browser
 	result.Token = ""
 	result.RequestID = requestID(r)
 	writeJSON(w, http.StatusOK, result)
@@ -694,8 +695,8 @@ func (a *API) logout(w http.ResponseWriter, r *http.Request) {
 		problem(w, r, 500, "LOGOUT_FAILED", "退出登录失败。", err)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: "frp_server_session", Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: a.App.Config.Environment == "production", SameSite: http.SameSiteStrictMode})
-	http.SetCookie(w, &http.Cookie{Name: serverCSRFCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: false, Secure: a.App.Config.Environment == "production", SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: "frp_server_session", Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: a.App.Config.Environment == "production", SameSite: http.SameSiteStrictMode}) // #nosec G124 -- Secure is mandatory in production; development is loopback HTTP
+	http.SetCookie(w, &http.Cookie{Name: serverCSRFCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: false, Secure: a.App.Config.Environment == "production", SameSite: http.SameSiteStrictMode})    // #nosec G124 -- double-submit CSRF cookie must be readable by the browser
 	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
 }
 

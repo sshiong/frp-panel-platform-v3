@@ -23,6 +23,7 @@ import (
 	"github.com/ricardo/frp-panel-platform/client/internal/id"
 	"github.com/ricardo/frp-panel-platform/client/internal/security"
 	"github.com/ricardo/frp-panel-platform/client/internal/supervisor"
+	"github.com/ricardo/frp-panel-platform/client/internal/version"
 )
 
 type App struct {
@@ -363,7 +364,7 @@ func (a *App) applySnapshot(ctx context.Context, snapshot supervisor.Snapshot) e
 	a.lastConfig = snapshot
 	a.mu.Unlock()
 	err := a.Supervisor.Apply(ctx, snapshot)
-	input := map[string]interface{}{"status": "succeeded", "config_version": snapshot.ConfigVersion, "applied_config_hash": snapshot.ConfigHash, "client_panel_version": "0.1.0", "frpc_version": a.Config.FRPCVersion}
+	input := map[string]interface{}{"status": "succeeded", "config_version": snapshot.ConfigVersion, "applied_config_hash": snapshot.ConfigHash, "client_panel_version": version.ClientVersion, "frpc_version": a.Config.FRPCVersion}
 	if err != nil {
 		input["status"] = "failed"
 		input["error_code"] = "FRPC_VERIFY_FAILED"

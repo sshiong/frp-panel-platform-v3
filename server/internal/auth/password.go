@@ -47,6 +47,9 @@ func VerifyPassword(encoded, password string) bool {
 	if err1 != nil || err2 != nil || len(expected) == 0 {
 		return false
 	}
-	actual := argon2.IDKey([]byte(password), salt, time, memory, uint8(threads), uint32(len(expected)))
+	if uint64(len(expected)) > uint64(^uint32(0)) {
+		return false
+	}
+	actual := argon2.IDKey([]byte(password), salt, time, memory, uint8(threads), uint32(len(expected))) // #nosec G115 -- the length is bounded to uint32 immediately above
 	return subtle.ConstantTimeCompare(actual, expected) == 1
 }
