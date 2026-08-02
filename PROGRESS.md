@@ -114,6 +114,7 @@
 | 2026-08-03 | 认证面板修复提交的最终托管复核 | 通过；提交 [`92cf1a3`](https://github.com/sshiong/frp-panel-platform-v3/commit/92cf1a379aab096dc2800a92eaa3d43e41a5e77c) 的 [`ci` run 30763715852](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30763715852) 与 [`CodeQL` run 30763715867](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30763715867) 全部成功，新增 evidence schema regression、双面板认证可访问性、fuzz、container scan 和 release metadata 均通过 |
 | 2026-08-03 | 前端性能与设计 token 收口 | 本地通过；两个面板按需加载 Element Plus 组件与样式，Admin/Client 生产 JS/CSS 分别为 225.44/66.13 kB 与 235.93/69.74 kB，Vite 大 chunk 警告消失；独立 token 层收敛重复颜色；两个面板 typecheck、lint、policy、build 与完整 WCAG/390px 认证面板扫描均通过 |
 | 2026-08-03 | 前端性能与设计 token 收口托管复核 | 通过；提交 [`b91412f`](https://github.com/sshiong/frp-panel-platform-v3/commit/b91412f00d73d70f54bbdae8eade65339f98f4be) 的 [`ci` run 30764876448](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30764876448) 与 [`CodeQL` run 30764876452](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30764876452) 全部成功，CSS token policy、双面板构建/可访问性、安全、fuzz、容器扫描和发布元数据均通过 |
+| 2026-08-03 | 仓库治理与 PR 验收模板收口 | 已核对公开仓库、`main` 分支保护、线性历史、禁止强推/删除、CODEOWNERS、两次审批和必需 CI/CodeQL 检查；新增 PR 验收/风险模板；第二位安全/数据库/加密指定评审者和外部发布签字仍待配置 |
 
 ## 未决与发布阻断项
 

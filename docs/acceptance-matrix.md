@@ -183,8 +183,7 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 ## 发布前剩余动作
 
 1. 已完成最终提交的 `ci`、CodeQL、container scan 和 release metadata 全绿，并把 run URL/commit 写入 [`PROGRESS.md`](../PROGRESS.md)。
-2. 配置公开仓库 `main` 分支保护、PR 至少一名评审和 CODEOWNERS；安全/数据库/
-   加密变更需要两名评审。
+2. 已完成仓库治理：仓库保持公开，`main` 启用保护、线性历史、禁止强推/删除、CODEOWNERS、两次审批和必需 CI/CodeQL 检查；正式安全/数据库/加密变更仍需在 CODEOWNERS 中补入指定的第二位专业评审者。
 3. 在 Linux 目标机完成 FRPS/FRPC Plugin、PERF、disk-full/clock、clean-host
    restore；在 Cloudflare Sandbox 与 ACME Staging 完成 DNS/证书链路。
 4. 以 tag 发布双发行物，验证签名、SBOM、SHA-256、migration、升级/回滚文档，
