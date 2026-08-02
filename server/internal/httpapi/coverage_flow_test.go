@@ -141,7 +141,7 @@ func TestServerHTTPAPIUserAndAdminFlow(t *testing.T) {
 		t.Fatal("coverage user was not created")
 	}
 
-	clientLoginHTTP := request(http.MethodPost, "/api/v1/auth/client-login", `{"username":"http-coverage-user","password":"`+initialPassword+`"}`, "", nil)
+	clientLoginHTTP := request(http.MethodPost, "/api/v1/auth/client-login", `{"username":"http-coverage-user","password":"`+initialPassword+`"}`, "", map[string]string{"X-FRP-Client-Version": "0.1.0"})
 	mustStatus(clientLoginHTTP, http.StatusOK)
 	var clientLogin service.LoginResult
 	parse(clientLoginHTTP, &clientLogin)

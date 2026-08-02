@@ -513,6 +513,7 @@ func idempotencyAAD(ac service.AuthContext, method, path, key string) string {
 
 type encryptedIdempotencyResponse struct {
 	Version    int    `json:"version"`
+	KeyVersion int64  `json:"key_version,omitempty"`
 	Ciphertext string `json:"ciphertext"`
 	Nonce      string `json:"nonce"`
 }
@@ -525,7 +526,7 @@ func (a *API) encryptIdempotencyResponse(body []byte, aad string) (string, error
 	if err != nil {
 		return "", err
 	}
-	envelope, err := json.Marshal(encryptedIdempotencyResponse{Version: 1, Ciphertext: base64.RawURLEncoding.EncodeToString(ciphertext), Nonce: base64.RawURLEncoding.EncodeToString(nonce)})
+	envelope, err := json.Marshal(encryptedIdempotencyResponse{Version: 1, KeyVersion: a.App.Crypto.CurrentMasterKeyVersion(), Ciphertext: base64.RawURLEncoding.EncodeToString(ciphertext), Nonce: base64.RawURLEncoding.EncodeToString(nonce)})
 	if err != nil {
 		return "", err
 	}
@@ -543,7 +544,7 @@ func (a *API) decryptIdempotencyResponse(stored, aad string) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		return a.App.Crypto.Decrypt(ciphertext, nonce, aad)
+		return a.App.Crypto.DecryptVersioned(envelope.KeyVersion, ciphertext, nonce, aad)
 	}
 	// Service-owned records created before this middleware used plaintext JSON
 	// response bodies. The middleware excludes those routes, but accepting the
@@ -656,6 +657,12 @@ func (a *API) adminLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) clientLogin(w http.ResponseWriter, r *http.Request) {
+	clientVersion := strings.TrimSpace(r.Header.Get("X-FRP-Client-Version"))
+	if !version.IsAtLeast(clientVersion, version.MinimumClientVersion) {
+		w.Header().Set("Upgrade-Required", "client/"+version.MinimumClientVersion)
+		problemWithClientUpgrade(w, r, clientVersion)
+		return
+	}
 	var input struct{ Username, Password string }
 	if !decodeJSON(w, r, &input) {
 		return
@@ -1680,16 +1687,33 @@ func writeJSON(w http.ResponseWriter, status int, value interface{}) {
 }
 
 type problemDetail struct {
-	Type      string `json:"type"`
-	Title     string `json:"title"`
-	Status    int    `json:"status"`
-	Detail    string `json:"detail"`
-	Instance  string `json:"instance"`
-	Code      string `json:"code"`
-	RequestID string `json:"request_id"`
+	Type                 string `json:"type"`
+	Title                string `json:"title"`
+	Status               int    `json:"status"`
+	Detail               string `json:"detail"`
+	Instance             string `json:"instance"`
+	Code                 string `json:"code"`
+	RequestID            string `json:"request_id"`
+	UpgradeRequired      bool   `json:"upgrade_required,omitempty"`
+	ClientVersion        string `json:"client_version,omitempty"`
+	MinimumClientVersion string `json:"minimum_client_version,omitempty"`
+	LatestClientVersion  string `json:"latest_client_version,omitempty"`
 }
 
 func problem(w http.ResponseWriter, r *http.Request, status int, code, detail string, err error) {
+	writeProblem(w, r, status, code, detail, problemDetail{}, err)
+}
+
+func problemWithClientUpgrade(w http.ResponseWriter, r *http.Request, clientVersion string) {
+	writeProblem(w, r, http.StatusUpgradeRequired, "CLIENT_VERSION_UNSUPPORTED", "Client Panel 版本过旧，必须升级后才能继续连接。", problemDetail{
+		UpgradeRequired:      true,
+		ClientVersion:        clientVersion,
+		MinimumClientVersion: version.MinimumClientVersion,
+		LatestClientVersion:  version.LatestClientVersion,
+	}, nil)
+}
+
+func writeProblem(w http.ResponseWriter, r *http.Request, status int, code, detail string, metadata problemDetail, err error) {
 	if w == nil {
 		return
 	}
@@ -1698,6 +1722,13 @@ func problem(w http.ResponseWriter, r *http.Request, status int, code, detail st
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(problemDetail{Type: "https://docs.example.invalid/problems/" + strings.ToLower(strings.ReplaceAll(code, "_", "-")), Title: code, Status: status, Detail: detail, Instance: r.URL.Path, Code: code, RequestID: requestID(r)})
+	metadata.Type = "https://docs.example.invalid/problems/" + strings.ToLower(strings.ReplaceAll(code, "_", "-"))
+	metadata.Title = code
+	metadata.Status = status
+	metadata.Detail = detail
+	metadata.Instance = r.URL.Path
+	metadata.Code = code
+	metadata.RequestID = requestID(r)
+	_ = json.NewEncoder(w).Encode(metadata)
 	_ = err
 }

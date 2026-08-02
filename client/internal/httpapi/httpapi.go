@@ -246,7 +246,7 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 	session, err := a.App.LoginWithTrust(r.Context(), input.ServerPanelURL, input.Username, input.Password, input.TrustedSPKI)
 	if err != nil {
 		status, code, detail := loginProblem(err)
-		problem(w, r, status, code, detail)
+		problem(w, r, status, code, detail, err)
 		return
 	}
 	if a.loginLimit != nil {
@@ -266,6 +266,8 @@ func loginProblem(err error) (int, string, string) {
 		detail := "用户名或密码不正确，或账号已停用。"
 		if code == "SERVER_TLS_VALIDATION_FAILED" {
 			detail = "Server Panel TLS 验证失败；请先检查证书并确认 SPKI 指纹。"
+		} else if remote.UpgradeRequired {
+			detail = "当前 Client Panel 版本已不兼容，必须升级后才能连接 Server Panel。"
 		}
 		return remote.Status, code, detail
 	}
@@ -593,6 +595,7 @@ func writeJSON(w http.ResponseWriter, status int, value interface{}) {
 }
 
 func problem(w http.ResponseWriter, r *http.Request, status int, code, detail string, causes ...error) {
+	var remoteUpgrade *app.RemoteError
 	for _, cause := range causes {
 		var remote app.RemoteError
 		if errors.As(cause, &remote) {
@@ -603,12 +606,20 @@ func problem(w http.ResponseWriter, r *http.Request, status int, code, detail st
 			if remote.Detail != "" {
 				detail = remote.Detail
 			}
+			remoteUpgrade = &remote
 			break
 		}
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{"type": "https://docs.example.invalid/problems/" + strings.ToLower(strings.ReplaceAll(code, "_", "-")), "title": code, "status": status, "detail": detail, "instance": r.URL.Path, "code": code, "request_id": requestID(r)})
+	payload := map[string]interface{}{"type": "https://docs.example.invalid/problems/" + strings.ToLower(strings.ReplaceAll(code, "_", "-")), "title": code, "status": status, "detail": detail, "instance": r.URL.Path, "code": code, "request_id": requestID(r)}
+	if remoteUpgrade != nil && remoteUpgrade.UpgradeRequired {
+		payload["upgrade_required"] = true
+		payload["client_version"] = remoteUpgrade.ClientVersion
+		payload["minimum_client_version"] = remoteUpgrade.MinimumClientVersion
+		payload["latest_client_version"] = remoteUpgrade.LatestClientVersion
+	}
+	_ = json.NewEncoder(w).Encode(payload)
 }
 
 func requestID(r *http.Request) string {

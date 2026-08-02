@@ -67,6 +67,21 @@ jobs:
         working-directory: web/${{ matrix.app }}
       - run: npm run build
         working-directory: web/${{ matrix.app }}
+      - name: Install accessibility tooling
+        if: matrix.app == 'admin'
+        run: npm ci
+      - name: Install Chromium for accessibility audit
+        if: matrix.app == 'admin'
+        run: npx playwright install --with-deps chromium
+      - name: Build Client for accessibility audit
+        if: matrix.app == 'admin'
+        run: |
+          npm ci
+          npm run build
+        working-directory: web/client
+      - name: Run WCAG accessibility audit
+        if: matrix.app == 'admin'
+        run: npm run test:accessibility
 
   release-metadata:
     runs-on: ubuntu-latest

@@ -6,7 +6,7 @@ GO_ENV = GOCACHE=$(GO_CACHE) GOMODCACHE=$(GO_MODULE_CACHE)
 STATICCHECK ?= staticcheck
 FRPC_VERIFY_VERSION ?= 0.68.0
 
-.PHONY: install-web build test lint contract migration-check license security fuzz perf frpc-verify network-e2e plugin-e2e sbom checksums manifest sign release checkpoint dev-server dev-client clean
+.PHONY: install-web build test lint accessibility contract migration-check license security fuzz perf frpc-verify network-e2e plugin-e2e sbom checksums manifest sign release checkpoint key-rotate dev-server dev-client clean
 
 install-web:
 	cd web/admin && npm install
@@ -18,6 +18,12 @@ build:
 	mkdir -p build
 	cd server && $(GO_ENV) go build -o ../build/frp-panel-server ./cmd/server
 	cd client && $(GO_ENV) go build -o ../build/frp-panel-client ./cmd/client
+
+accessibility:
+	npm ci
+	cd web/admin && npm run build
+	cd web/client && npm run build
+	npm run test:accessibility
 
 test:
 	cd server && $(GO_ENV) go test -race ./...
@@ -93,6 +99,9 @@ release: sign
 
 checkpoint:
 	cd server && $(GO_ENV) go run ./cmd/db-checkpoint -db "$${FRP_SERVER_DB:-./data/server.db}"
+
+key-rotate:
+	cd server && $(GO_ENV) go run ./cmd/key-rotate
 
 dev-server:
 	cd server && $(GO_ENV) go run ./cmd/server

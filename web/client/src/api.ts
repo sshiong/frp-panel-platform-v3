@@ -16,6 +16,26 @@ function requestID(): string {
 // is the non-sensitive last Server Panel URL.
 let inMemoryCSRF = ''
 
+export class PanelAPIError extends Error {
+  status: number
+  code: string
+  upgradeRequired: boolean
+  clientVersion?: string
+  minimumClientVersion?: string
+  latestClientVersion?: string
+
+  constructor(problem: { detail?: string; code?: string; status?: number; upgrade_required?: boolean; client_version?: string; minimum_client_version?: string; latest_client_version?: string }, fallbackStatus: number) {
+    super(problem.detail || problem.code || `HTTP ${fallbackStatus}`)
+    this.name = 'PanelAPIError'
+    this.status = problem.status ?? fallbackStatus
+    this.code = problem.code || ''
+    this.upgradeRequired = problem.upgrade_required === true
+    this.clientVersion = problem.client_version
+    this.minimumClientVersion = problem.minimum_client_version
+    this.latestClientVersion = problem.latest_client_version
+  }
+}
+
 export function setCSRFToken(value: string) {
   inMemoryCSRF = value
 }
@@ -25,6 +45,9 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers({ 'Content-Type': 'application/json', 'X-FRP-Protocol-Version': 'v1', ...(csrf ? { 'X-CSRF-Token': csrf } : {}), ...(init.headers ?? {}) })
   if (['POST', 'PUT', 'DELETE'].includes((init.method ?? 'GET').toUpperCase()) && !headers.has('Idempotency-Key')) headers.set('Idempotency-Key', requestID())
   const response = await fetch(path, { credentials: 'include', ...init, headers })
-  if (!response.ok) { const problem = await response.json().catch(() => ({})) as { detail?: string; code?: string }; throw new Error(problem.detail || problem.code || `HTTP ${response.status}`) }
+  if (!response.ok) {
+    const problem = await response.json().catch(() => ({})) as { detail?: string; code?: string; status?: number; upgrade_required?: boolean; client_version?: string; minimum_client_version?: string; latest_client_version?: string }
+    throw new PanelAPIError(problem, response.status)
+  }
   return response.json() as Promise<T>
 }

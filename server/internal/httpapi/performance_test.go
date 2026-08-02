@@ -130,6 +130,7 @@ func TestPerformanceSessionReplacement(t *testing.T) {
 	}
 	loginRequest.Header.Set("Content-Type", "application/json")
 	loginRequest.Header.Set("X-FRP-Protocol-Version", "v1")
+	loginRequest.Header.Set("X-FRP-Client-Version", "0.1.0")
 	loginResponse, err := http.DefaultClient.Do(loginRequest)
 	if err != nil {
 		t.Fatal(err)

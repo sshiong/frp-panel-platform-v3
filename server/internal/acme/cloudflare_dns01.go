@@ -38,6 +38,7 @@ type CloudflareDNS01Config struct {
 type CloudflareDNS01Provider struct {
 	config CloudflareDNS01Config
 	key    []byte
+	keys   [][]byte
 }
 
 type accountState struct {
@@ -46,8 +47,22 @@ type accountState struct {
 }
 
 func NewCloudflareDNS01(config CloudflareDNS01Config, wrappingKey []byte) (*CloudflareDNS01Provider, error) {
-	if len(wrappingKey) != 32 {
-		return nil, errors.New("ACME account wrapping key must be 32 bytes")
+	return NewCloudflareDNS01WithKeys(config, [][]byte{wrappingKey})
+}
+
+// NewCloudflareDNS01WithKeys keeps the newest wrapping key first while
+// retaining older keys for decrypting an ACME account during key migration.
+// New account material is always encrypted with the first key.
+func NewCloudflareDNS01WithKeys(config CloudflareDNS01Config, wrappingKeys [][]byte) (*CloudflareDNS01Provider, error) {
+	if len(wrappingKeys) == 0 {
+		return nil, errors.New("at least one ACME account wrapping key is required")
+	}
+	keys := make([][]byte, 0, len(wrappingKeys))
+	for _, wrappingKey := range wrappingKeys {
+		if len(wrappingKey) != 32 {
+			return nil, errors.New("ACME account wrapping key must be 32 bytes")
+		}
+		keys = append(keys, append([]byte(nil), wrappingKey...))
 	}
 	if strings.TrimSpace(config.DirectoryURL) == "" || strings.TrimSpace(config.Email) == "" || strings.TrimSpace(config.AccountKeyPath) == "" {
 		return nil, errors.New("ACME directory URL and email are required")
@@ -67,7 +82,7 @@ func NewCloudflareDNS01(config CloudflareDNS01Config, wrappingKey []byte) (*Clou
 		config.ClockTolerance = clock.DefaultTolerance
 	}
 	config.HTTPClient.Transport = clock.NewRoundTripper(config.HTTPClient.Transport, config.ClockTolerance)
-	return &CloudflareDNS01Provider{config: config, key: append([]byte(nil), wrappingKey...)}, nil
+	return &CloudflareDNS01Provider{config: config, key: append([]byte(nil), keys[0]...), keys: keys}, nil
 }
 
 func (p *CloudflareDNS01Provider) IssueDNS01(ctx context.Context, domain string) (Certificate, error) {
@@ -177,9 +192,20 @@ func (p *CloudflareDNS01Provider) loadOrRegisterAccount(ctx context.Context) (ac
 		if len(encoded) < 12 {
 			return accountMaterial{}, errors.New("invalid encrypted ACME account")
 		}
-		plaintext, err := crypto.DecryptWithKey(p.key, encoded[12:], encoded[:12], "acme-account:v1")
-		if err != nil {
-			return accountMaterial{}, err
+		var plaintext []byte
+		keys := p.keys
+		if len(keys) == 0 {
+			keys = [][]byte{p.key}
+		}
+		var decryptErr error
+		for _, key := range keys {
+			plaintext, decryptErr = crypto.DecryptWithKey(key, encoded[12:], encoded[:12], "acme-account:v1")
+			if decryptErr == nil {
+				break
+			}
+		}
+		if decryptErr != nil {
+			return accountMaterial{}, decryptErr
 		}
 		var stored accountState
 		if err := json.Unmarshal(plaintext, &stored); err != nil {

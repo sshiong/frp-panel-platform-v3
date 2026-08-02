@@ -59,6 +59,9 @@
 - [x] 正式 FPPB1 包包含数据库、受保护数据目录密钥/证书/ACME 文件，逐文件校验并安全恢复；Server 启动会重新排队 Router 快照。
 - [x] OpenAPI 3.1 路径/operationId/WebSocket 元数据校验脚本、双模块 CI contract job、`make sbom`、`make checksums`、固定 FRP 版本下载归档校验和发布清单已加入；正式发布仍需签名和第三方扫描。
 - [x] 开发标准门禁已补齐：两个 Vue 应用的 ESLint/strict typecheck/build、OpenAPI 响应契约测试、上一稳定版 migration upgrade rehearsal、npm SPDX 许可证 allowlist、Router Header/Body/上游超时边界和独立 Server/Client 版本元数据。
+- [x] Client/Server 版本兼容边界已补齐：Client 发送 `X-FRP-Client-Version`，Server 对缺失/非法/过旧版本返回 426 与 `Upgrade-Required`，兼容但非 latest 版本显示升级建议；Server/Client 回归与 OpenAPI 契约测试通过。
+- [x] 密钥迁移期轮换已补齐：master/certificate wrapping key-ring 保留旧版本，`make key-rotate` 重包裹 FRP、Cloudflare 和证书私钥；重启兼容、旧密文解密、服务层行数/登录回归测试通过，真实生产轮换演练仍待外部环境。
+- [x] WCAG 2.1 AA 自动化已补齐：构建后的 Admin/Client 通过 axe、标签、键盘/reduced-motion 与 390px 横向溢出检查；脚本已接入既有 `web (admin)` CI job，新的分支 CI 证据待提交后更新。
 
 ## 验证记录
 
@@ -90,6 +93,8 @@
 | 2026-08-02 | CI failure analysis and local gate repair | 本地通过；Ubuntu CI 的 go/web/contract/container/fuzz/release-metadata/CodeQL 已通过，security 仅因 gosec 新规则命中而失败；已逐项修复/说明 TLS inspection、文件边界、固定命令、Cookie 和整数转换，复跑本地 gosec Server/Client 均为 0 findings |
 | 2026-08-02 | Development-standard gate completion | 本地通过；`make lint`、`make test`、`make build`、`make contract`、`make migration-check`、`make license` 通过；响应契约、迁移升级、Router 请求边界、独立版本字段和逐项 [`acceptance-matrix.md`](docs/acceptance-matrix.md) 已入库 |
 | 2026-08-02 | Final GitHub CI and CodeQL gates | 通过；提交 [`2f73156`](https://github.com/sshiong/frp-panel-platform-v3/commit/2f731567da6933d4fc2ae1db333ad9d61fc2ca19) 的 [`ci` run 30745496136](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30745496136) 九个 job 全部成功，包含 security、双前端、双 Go 模块、fuzz、contract、container-scan、release-metadata；[`CodeQL run 30745496145`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30745496145) 成功，双 gosec SARIF 使用独立 category 上传 |
+
+| 2026-08-02 | 版本兼容、密钥轮换与 WCAG 本地门禁 | 通过；Server/Client 版本升级提示与 426 回归、版本化密钥环/`make key-rotate` 重包裹与重启兼容回归、两个已构建前端的 axe WCAG 2.1 AA/标签/键盘/移动端检查均通过；真实生产轮换和新的 hosted CI 复跑仍待完成 |
 
 ## 未决与发布阻断项
 

@@ -78,6 +78,15 @@ func TestHTTPContractSmokeCoversProblemDetailsAuthAndPagination(t *testing.T) {
 		}
 	}
 
+	legacyClientLogin := httptest.NewRequest(http.MethodPost, "/api/v1/auth/client-login", strings.NewReader(`{"username":"admin","password":"Admin-Password-2026!"}`))
+	legacyClientLogin.RemoteAddr = "127.0.0.1:12000"
+	legacyClientLogin.Header.Set("X-FRP-Client-Version", "0.0.9")
+	legacyClientLoginResponse := httptest.NewRecorder()
+	handler.ServeHTTP(legacyClientLoginResponse, legacyClientLogin)
+	if legacyClientLoginResponse.Code != http.StatusUpgradeRequired || legacyClientLoginResponse.Header().Get("Upgrade-Required") != "client/0.1.0" || !strings.Contains(legacyClientLoginResponse.Body.String(), "CLIENT_VERSION_UNSUPPORTED") || !strings.Contains(legacyClientLoginResponse.Body.String(), "upgrade_required") {
+		t.Fatalf("legacy Client version was not rejected with upgrade metadata: status=%d headers=%v body=%s", legacyClientLoginResponse.Code, legacyClientLoginResponse.Header(), legacyClientLoginResponse.Body.String())
+	}
+
 	reauthRequest := httptest.NewRequest(http.MethodPost, "/api/v1/auth/reauth", strings.NewReader(`{"current_password":"Admin-Password-2026!"}`))
 	reauthRequest.RemoteAddr = "127.0.0.1:12000"
 	reauthRequest.Header.Set("Authorization", "Bearer "+login.Token)

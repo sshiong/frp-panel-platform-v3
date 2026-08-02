@@ -102,13 +102,12 @@ func TestRouterServiceCertificateMaterialAndFailureEdges(t *testing.T) {
 		t.Fatalf("router status after snapshot: %#v %v", status, err)
 	}
 
-	broken := *app.Crypto
-	broken.RouterKey = nil
-	withoutRouterKey := *app
-	withoutRouterKey.Crypto = &broken
-	if _, err := withoutRouterKey.BuildRouterSnapshot(ctx); err == nil {
+	originalRouterKey := app.Crypto.RouterKey
+	app.Crypto.RouterKey = nil
+	if _, err := app.BuildRouterSnapshot(ctx); err == nil {
 		t.Fatal("router snapshot was built without a router key")
 	}
+	app.Crypto.RouterKey = originalRouterKey
 	if err := app.finalizeDomainRouterStates(ctx, []routeSource{{domainID: domain.ID, domainStatus: "pending_dns"}}, 1); err != nil {
 		t.Fatal(err)
 	}

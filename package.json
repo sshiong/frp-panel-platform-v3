@@ -1,0 +1,12 @@
+{
+  "name": "frp-panel-platform-v3-tooling",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:accessibility": "node scripts/ui-accessibility.mjs"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
+    "playwright": "^1.52.0"
+  }
+}

@@ -124,7 +124,7 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 | KEY-001 | 本地通过 | master、config signing、router、certificate wrapping、backup key 用途分离。 |
 | KEY-002 | 本地通过 | 主密钥文件重启稳定，旧密文可解密。 |
 | KEY-003 | 本地通过 | 主密钥不写普通 DB、不进日志。 |
-| KEY-004 | 部分通过 | key_version 与迁移读取边界已实现；完整轮换演练待发布环境。 |
+| KEY-004 | 部分通过 | 版本化 master/certificate key-ring、旧版本解密、`make key-rotate` 和 FRP/Cloudflare/证书私钥重包裹回归测试已通过；完整生产轮换窗口与回滚演练仍待外部环境。 |
 | BKP-001 | 本地通过 | FPPB1 全包 AES-GCM 加密、manifest SHA-256 校验。 |
 | BKP-002 | 本地通过 | SQLite WAL 下 VACUUM INTO/恢复和 integrity_check 测试通过。 |
 | BKP-003 | 本地通过 | 无密码无法解包读取秘密。 |
@@ -139,7 +139,7 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 | API-002 | 本地通过 | Problem Details、稳定 code、request_id 和错误测试通过。 |
 | API-003 | 本地通过 | 权限中间件分离，越权拒绝不暴露资源存在性。 |
 | API-004 | 本地通过 | 不支持 HTTP/WS protocol 返回 426。 |
-| API-005 | 部分通过 | compatibility 包含 panel/version/schema 元数据；完整旧 Client 升级 UI 矩阵待外部。 |
+| API-005 | 本地通过 | Client 发送 `X-FRP-Client-Version`；过旧/非法版本返回 426、`Upgrade-Required` 和 `CLIENT_VERSION_UNSUPPORTED`，兼容版本可登录并显示可升级提示，回归测试通过。 |
 | API-006 | 本地通过 | WebSocket 指数退避、抖动、lease heartbeat 测试通过。 |
 | API-007 | 本地通过 | 丢通知触发 full sync，配置 hash/version 收敛测试通过。 |
 | PERF-001 | 本地通过 | 本机 100 并发读 profile 通过；Linux 2 vCPU/2 GiB p95 基线待外部。 |
@@ -176,7 +176,7 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 | UI-004 | 本地通过 | Cloudflare capability missing 列表在 Admin UI 展示。 |
 | UI-005 | 本地通过 | DNS adopt/overwrite/cancel 与 managed/adopted 文案一致。 |
 | UI-006 | 本地通过 | Token 页面只显示 configured/status/version/verified_at。 |
-| UI-007 | 部分通过 | 关键标签、触控尺寸、对比度和 reduced-motion 已检查；完整 WCAG 2.1 AA 自动化待 CI。 |
+| UI-007 | 本地通过 | Admin/Client 构建后运行 axe WCAG 2.1 AA、表单标签、键盘 Tab/reduced-motion、390px 无横向溢出检查均通过；CI 复跑证据待新分支提交。 |
 | UI-008 | 本地通过 | Operations 展示阶段、步骤、失败原因、residue 和 retry。 |
 | DOD-001 | 待外部 | 所有 P0/P1 尚未完成真实 Cloudflare、ACME、Linux/FRP、灾备和签字，因此当前版本不是 Release Candidate。 |
 

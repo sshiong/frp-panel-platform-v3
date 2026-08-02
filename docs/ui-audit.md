@@ -7,7 +7,7 @@
 
 | Dimension | Score | Evidence / finding |
 |---|---:|---|
-| Accessibility | 3/4 | Form fields are label-wrapped, icon-only controls have accessible labels, focus-visible outlines are present, and semantic `main`/`nav`/`header` landmarks are used. A full automated WCAG contrast and keyboard audit still belongs in CI. |
+| Accessibility | 4/4 | The built Admin and Client entry surfaces pass axe WCAG 2.1 AA, unlabeled-control checks, keyboard Tab/reduced-motion checks, and the 390px overflow smoke test; authenticated-route coverage still depends on seeded browser sessions. |
 | Performance | 2/4 | No image-heavy surface or layout-thrashing loop was found, but each production JavaScript bundle is about 1.0 MB minified and Vite reports the chunk-size warning. |
 | Theming | 2/4 | Both panels share a deliberate graphite/ivory/steel-blue/state-color token base, but legacy selectors still contain repeated literal colors instead of a complete token layer. |
 | Responsive design | 4/4 | Admin and Client were checked at 390×844 with Playwright; `document.documentElement.scrollWidth` equals `window.innerWidth` (390px), mobile layouts stack, tables scroll within their panels, and key controls receive 44px touch targets. |
@@ -37,12 +37,12 @@
 - **Recommendation:** Move remaining repeated surface/text/border colors into shared documented tokens, then add a CSS token policy check for new literals. Keep panel-specific tokens only where the product surfaces intentionally differ.
 - **Suggested command:** `/normalize`
 
-### P3 — Full WCAG automation is not yet part of the local gate
+### P3 — Authenticated-route browser coverage is a follow-up
 
-- **Location:** frontend CI and browser QA workflow.
+- **Location:** `scripts/ui-accessibility.mjs` and authenticated panel routes.
 - **Category:** Accessibility.
-- **Impact:** Source-level labels and focus states are covered, but automated contrast, tab order, and live-page landmark checks are not yet recorded for every authenticated route.
-- **Recommendation:** Add an authenticated Playwright accessibility/contrast pass in CI once a deterministic seed session is available; keep the current manual mobile check as a smoke test.
+- **Impact:** The automated gate currently checks the login/entry surfaces, while full authenticated-route scans require a deterministic seed session and fixture data.
+- **Recommendation:** Add seeded Admin/Client route scans in a follow-up release hardening pass; the current entry-surface gate remains required in CI.
 - **Suggested command:** `/harden`
 
 ## Positive findings
@@ -57,5 +57,5 @@
 
 1. **[P2] `/optimize`** — split low-frequency panel views and measure operator-route loading.
 2. **[P2] `/normalize`** — centralize remaining repeated color literals across the two panels.
-3. **[P3] `/harden`** — add authenticated automated accessibility checks to CI.
+3. **[P3] `/harden`** — add seeded authenticated-route accessibility checks when a stable fixture session is available.
 4. **[P3] `/polish`** — perform the final visual pass after performance and token changes.

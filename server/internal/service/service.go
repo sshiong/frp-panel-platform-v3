@@ -266,7 +266,7 @@ func (a *App) EnsureAdmin(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	_, err = a.DB.ExecContext(ctx, `INSERT INTO frp_credentials(id,user_id,frp_username,secret_hash,secret_ciphertext,secret_nonce,created_at) VALUES(?,?,?,?,?,?,?)`, id.New(), userID, "admin-"+shortID(userID), secretHash, ciphertext, nonce, now)
+	_, err = a.DB.ExecContext(ctx, `INSERT INTO frp_credentials(id,user_id,frp_username,secret_hash,secret_ciphertext,secret_nonce,key_version,created_at) VALUES(?,?,?,?,?,?,?,?)`, id.New(), userID, "admin-"+shortID(userID), secretHash, ciphertext, nonce, a.Crypto.CurrentMasterKeyVersion(), now)
 	return passwordIfNeeded(a.Config.AdminPassword, password), err
 }
 
@@ -344,10 +344,11 @@ func (a *App) Login(ctx context.Context, username, password, channel, sourceIP, 
 		}
 		runtimeCredential = runtimeToken
 		var ciphertext, nonce []byte
-		if err := tx.QueryRowContext(ctx, `SELECT frp_username,secret_ciphertext,secret_nonce FROM frp_credentials WHERE user_id=?`, user.ID).Scan(&frpUsername, &ciphertext, &nonce); err != nil {
+		var keyVersion int64
+		if err := tx.QueryRowContext(ctx, `SELECT frp_username,secret_ciphertext,secret_nonce,key_version FROM frp_credentials WHERE user_id=?`, user.ID).Scan(&frpUsername, &ciphertext, &nonce, &keyVersion); err != nil {
 			return LoginResult{}, err
 		}
-		secret, err := a.Crypto.Decrypt(ciphertext, nonce, "user:"+user.ID+":frp_secret:v1")
+		secret, err := a.Crypto.DecryptVersioned(keyVersion, ciphertext, nonce, "user:"+user.ID+":frp_secret:v1")
 		if err != nil {
 			return LoginResult{}, err
 		}
@@ -1522,7 +1523,7 @@ func (a *App) CreateUser(ctx context.Context, ac AuthContext, username string) (
 	if err != nil {
 		return UserRecord{}, "", err
 	}
-	_, err = a.DB.ExecContext(ctx, `INSERT INTO frp_credentials(id,user_id,frp_username,secret_hash,secret_ciphertext,secret_nonce,created_at) VALUES(?,?,?,?,?,?,?)`, id.New(), userID, "user-"+shortID(userID), sha256Hex(secret), ciphertext, nonce, now)
+	_, err = a.DB.ExecContext(ctx, `INSERT INTO frp_credentials(id,user_id,frp_username,secret_hash,secret_ciphertext,secret_nonce,key_version,created_at) VALUES(?,?,?,?,?,?,?,?)`, id.New(), userID, "user-"+shortID(userID), sha256Hex(secret), ciphertext, nonce, a.Crypto.CurrentMasterKeyVersion(), now)
 	if err != nil {
 		return UserRecord{}, "", err
 	}
@@ -1655,7 +1656,7 @@ func (a *App) ResetFRPCredential(ctx context.Context, ac AuthContext, targetUser
 	}
 	nextSecretVersion := currentSecretVersion + 1
 	now := nowString()
-	if _, err := tx.ExecContext(ctx, `UPDATE frp_credentials SET secret_hash=?,secret_ciphertext=?,secret_nonce=?,secret_version=?,rotated_at=? WHERE user_id=?`, sha256Hex(secret), ciphertext, nonce, nextSecretVersion, now, targetUserID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE frp_credentials SET secret_hash=?,secret_ciphertext=?,secret_nonce=?,key_version=?,secret_version=?,rotated_at=? WHERE user_id=?`, sha256Hex(secret), ciphertext, nonce, a.Crypto.CurrentMasterKeyVersion(), nextSecretVersion, now, targetUserID); err != nil {
 		return FRPSecretResetResult{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE users SET active_session_generation=active_session_generation+1,desired_config_version=desired_config_version+1,updated_at=? WHERE id=?`, now, targetUserID); err != nil {
@@ -1904,7 +1905,7 @@ func (a *App) SaveCloudflareToken(ctx context.Context, ac AuthContext, token str
 	// Keep the previous active credential until the new pending version has
 	// completed capability verification. A failed replacement must not take a
 	// working DNS integration offline.
-	_, err = a.DB.ExecContext(ctx, `INSERT INTO cloudflare_credentials(id,user_id,token_version,ciphertext,nonce,status,capabilities_json,created_at) VALUES(?,?,?,?,?,'pending','{}',?)`, id.New(), ac.UserID, next, ciphertext, nonce, now)
+	_, err = a.DB.ExecContext(ctx, `INSERT INTO cloudflare_credentials(id,user_id,token_version,ciphertext,nonce,key_version,status,capabilities_json,created_at) VALUES(?,?,?,?,?,?,?,'{}',?)`, id.New(), ac.UserID, next, ciphertext, nonce, a.Crypto.CurrentMasterKeyVersion(), "pending", now)
 	if err == nil {
 		_ = a.Audit(ctx, ac, "cloudflare_token_uploaded", "cloudflare_token", fmt.Sprint(next), "pending", nil, "")
 		version := int64(next)
