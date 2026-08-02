@@ -106,6 +106,30 @@ func (s *Store) Claim(ctx context.Context) (Job, error) {
 	if err != nil {
 		return Job{}, err
 	}
+	decodedPayload := map[string]interface{}{}
+	if payload != "" {
+		if err := json.Unmarshal([]byte(payload), &decodedPayload); err != nil {
+			message := fmt.Sprintf("decode job payload: %v", err)
+			if len(message) > 500 {
+				message = message[:500]
+			}
+			completedAt := now.Format(time.RFC3339Nano)
+			result, updateErr := tx.ExecContext(ctx, `UPDATE jobs SET status='failed',last_error=?,lock_owner=NULL,locked_at=NULL,lock_expires_at=NULL,heartbeat_at=NULL,completed_at=?,updated_at=? WHERE id=? AND status IN ('pending','retry_wait','running') AND (lock_expires_at IS NULL OR lock_expires_at <= ?)`, message, completedAt, completedAt, job.ID, now.Format(time.RFC3339Nano))
+			if updateErr != nil {
+				return Job{}, updateErr
+			}
+			if affected, _ := result.RowsAffected(); affected != 1 {
+				return Job{}, ErrNoJob
+			}
+			if err := tx.Commit(); err != nil {
+				return Job{}, err
+			}
+			return Job{}, fmt.Errorf("decode job payload: %w", err)
+		}
+		if decodedPayload == nil {
+			decodedPayload = map[string]interface{}{}
+		}
+	}
 	expires := now.Add(s.Lease)
 	result, err := tx.ExecContext(ctx, `UPDATE jobs SET status='running',attempts=attempts+1,lock_owner=?,locked_at=?,lock_expires_at=?,heartbeat_at=?,updated_at=? WHERE id=? AND status IN ('pending','retry_wait','running') AND (lock_expires_at IS NULL OR lock_expires_at <= ?)`, s.Owner, now.Format(time.RFC3339Nano), expires.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), job.ID, now.Format(time.RFC3339Nano))
 	if err != nil {
@@ -129,12 +153,7 @@ func (s *Store) Claim(ctx context.Context) (Job, error) {
 		v := tokenVersion.Int64
 		job.TokenVersion = &v
 	}
-	job.Payload = map[string]interface{}{}
-	if payload != "" {
-		if err := json.Unmarshal([]byte(payload), &job.Payload); err != nil {
-			return Job{}, fmt.Errorf("decode job payload: %w", err)
-		}
-	}
+	job.Payload = decodedPayload
 	return job, nil
 }
 

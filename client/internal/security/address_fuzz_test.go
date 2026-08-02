@@ -6,7 +6,7 @@ import (
 )
 
 func FuzzNormalizeServerURL(f *testing.F) {
-	for _, seed := range []string{"panel.example.com", "https://127.0.0.1:8443", "https://[2001:db8::1]", "file:///tmp/panel", "https://user:pass@example.com"} {
+	for _, seed := range []string{"panel.example.com", "https://127.0.0.1:8443", "https://[2001:db8::1]", "https://[:]", "file:///tmp/panel", "https://user:pass@example.com"} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, value string) {

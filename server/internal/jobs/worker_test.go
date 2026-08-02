@@ -138,6 +138,9 @@ func TestWorkerFailureAndLifecycleEdges(t *testing.T) {
 	if _, err := store.Claim(ctx); err == nil {
 		t.Fatal("malformed payload was accepted")
 	}
+	if err := database.QueryRowContext(ctx, `SELECT status FROM jobs WHERE id=?`, malformedID).Scan(&status); err != nil || status != "failed" {
+		t.Fatalf("malformed payload status=%q err=%v", status, err)
+	}
 
 	blockedID, err := store.Enqueue(ctx, "blocked", "domain", "domain-3", "blocked:1", nil, nil)
 	if err != nil {

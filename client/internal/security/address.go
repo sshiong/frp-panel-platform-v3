@@ -27,7 +27,13 @@ func NormalizeServerURL(raw string, development bool) (string, error) {
 		return "", fmt.Errorf("server address host is required")
 	}
 	host := strings.ToLower(u.Hostname())
-	if ip := net.ParseIP(host); ip != nil {
+	if strings.Contains(host, ":") {
+		ip := net.ParseIP(host)
+		if ip == nil {
+			return "", fmt.Errorf("server address host is invalid")
+		}
+		host = ip.String()
+	} else if ip := net.ParseIP(host); ip != nil {
 		host = ip.String()
 	}
 	port := u.Port()

@@ -3,6 +3,7 @@
 require "yaml"
 require "json"
 require "open3"
+require "tmpdir"
 
 path = File.expand_path("../contracts/openapi.yaml", __dir__)
 document = YAML.load_file(path)
@@ -26,8 +27,8 @@ abort "WebSocket protocol metadata is missing" unless ws && ws["protocol_version
 
 server_dir = File.expand_path("../server", __dir__)
 go_env = {
-	"GOCACHE" => ENV.fetch("GOCACHE", "/private/tmp/frp-cf-gocache"),
-	"GOMODCACHE" => ENV.fetch("GOMODCACHE", "/private/tmp/frp-cf-gomodcache")
+	"GOCACHE" => ENV.fetch("GOCACHE", File.join(Dir.tmpdir, "frp-panel-go-build-cache")),
+	"GOMODCACHE" => ENV.fetch("GOMODCACHE", File.join(Dir.tmpdir, "frp-panel-go-module-cache"))
 }
 stdout, stderr, status = Open3.capture3(go_env, "go", "run", "./cmd/route-manifest", chdir: server_dir)
 abort "implementation route manifest failed:\n#{stderr}\n#{stdout}" unless status.success?

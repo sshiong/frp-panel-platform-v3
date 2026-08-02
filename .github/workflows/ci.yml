@@ -118,7 +118,7 @@ jobs:
       - run: npm audit --audit-level=high
         working-directory: web/client
       - name: Filesystem dependency and secret scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -140,7 +140,7 @@ jobs:
       - name: Build Client image
         run: docker build --file docker/client.Dockerfile --tag frp-panel-client:ci .
       - name: Scan Server image
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
           image-ref: frp-panel-server:ci
@@ -149,7 +149,7 @@ jobs:
           ignore-unfixed: true
           exit-code: '1'
       - name: Scan Client image
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
           image-ref: frp-panel-client:ci
