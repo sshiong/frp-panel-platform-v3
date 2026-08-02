@@ -1,9 +1,22 @@
 export type Problem = { code?: string; detail?: string; status?: number }
 
+function requestID(): string {
+  const bytes = new Uint8Array(16)
+  crypto.getRandomValues(bytes)
+  const timestamp = BigInt(Date.now())
+  for (let index = 5; index >= 0; index -= 1) {
+    bytes[index] = Number(timestamp >> BigInt((5 - index) * 8)) & 0xff
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x70
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const csrf = document.cookie.split(';').map(item => item.trim()).find(item => item.startsWith('frp_server_csrf='))?.slice('frp_server_csrf='.length) ?? ''
   const headers = new Headers({ 'Content-Type': 'application/json', ...(csrf ? { 'X-CSRF-Token': decodeURIComponent(csrf) } : {}), ...(init.headers ?? {}) })
-  if (['POST', 'PUT', 'DELETE'].includes((init.method ?? 'GET').toUpperCase()) && !headers.has('Idempotency-Key')) headers.set('Idempotency-Key', crypto.randomUUID())
+  if (['POST', 'PUT', 'DELETE'].includes((init.method ?? 'GET').toUpperCase()) && !headers.has('Idempotency-Key')) headers.set('Idempotency-Key', requestID())
   const response = await fetch(path, { credentials: 'include', ...init, headers })
   if (!response.ok) {
     const problem = await response.json().catch(() => ({})) as Problem

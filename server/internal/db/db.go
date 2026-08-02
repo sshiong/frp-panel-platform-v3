@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ricardo/frp-panel-platform/server/internal/id"
 	_ "modernc.org/sqlite"
 )
 
@@ -42,7 +43,16 @@ func Open(path string) (*DB, error) {
 		_ = conn.Close()
 		return nil, err
 	}
+	if err := d.ensureSystemIdentity(context.Background()); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
 	return d, nil
+}
+
+func (d *DB) ensureSystemIdentity(ctx context.Context) error {
+	_, err := d.ExecContext(ctx, `INSERT OR IGNORE INTO system_identity(singleton_id,server_instance_id,created_at) VALUES(1,?,datetime('now'))`, id.New())
+	return err
 }
 
 func (d *DB) migrate(ctx context.Context) error {

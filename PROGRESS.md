@@ -30,6 +30,7 @@
 - [x] Client Server 地址规范化（Scheme/Host/端口/IPv6/Userinfo/Path 校验）。
 - [x] Client 内存 Local Proxy Session；Server token 不进入 localStorage；单 Supervisor 队列、原子配置回滚、last-good 启动可读状态和代理项优先 reload。
 - [x] 两个独立 Vue 前端，采用石墨/象牙/钢蓝/状态色视觉体系，不使用浅紫色。
+- [x] 前端关键策略模块有 Node test runner 覆盖：Admin 首次身份设置/危险操作再认证与 Client 状态/危险操作 guard 均为 100% line/branch/function coverage。
 - [x] Client Panel 提供 Mapping 与 Domain Binding 独立导航，展示 IDNA 标准化结果、HTTPS 模式和 pending/active 状态。
 - [x] Cloudflare Provider HTTP 适配器支持 Verify/ListZones/UpsertDNS/DeleteDNS，并以独立单元测试覆盖请求方法与路径。
 - [x] Domain DNS 意图支持 A/AAAA/CNAME、TTL 和由 HTTPS 模式派生的 proxied；目标记录先落库再进入可重试 Provider Operation，Client Domain 页面展示记录状态。
@@ -47,6 +48,7 @@
 - [x] Server/Client WebSocket 使用固定 v1 envelope；Client 心跳续租、指数退避抖动重连、Session 替换/停用安全停机和配置事件全量同步已实现。
 - [x] Pending 配额检查覆盖 Mapping、端口租约、Domain Operation 和证书任务；指标端点增加 Port Lease、Job、Certificate、Router lag 与 SQLite WAL gauges。
 - [x] Mapping 删除保留 Domain Binding 直到 managed DNS 清理完成；Domain 删除失败可重试，Mapping 删除操作在补偿完成后才成功；端口更新成功后释放旧租约。
+- [x] Client 应用失败事务化回滚 pending Revision：Revision 留存为 `failed`、`pending_revision_id` 清空、旧 active Revision/端口保持有效、新端口 pending lease 释放，失败后可继续创建下一条不可变 Revision。
 - [x] 管理员用户删除进入 `deleting` 状态并立即撤销 Session/运行时凭据；Domain、Mapping 按依赖顺序进入持久化补偿队列，强制删除会记录 `external_residues`，本地用户删除后保留用户级 Operation 证据。
 - [x] Client 固定 FRPC 进程写入受保护 PID 标记；启动时只回收命令行匹配固定二进制的孤儿进程，PID 复用时拒绝终止并清除运行时秘密。
 - [x] 正式 FPPB1 包包含数据库、受保护数据目录密钥/证书/ACME 文件，逐文件校验并安全恢复；Server 启动会重新排队 Router 快照。
@@ -71,6 +73,8 @@
 | 2026-08-01 | Contract and release helpers | 通过；Ruby OpenAPI 结构校验与 `make checksums` 目标已加入，CI 仍需在 GitHub Actions 实际运行并补齐外部扫描工具 |
 | 2026-08-01 | Final hardening regression | 通过；Server/Client `go test -race ./...`、用户删除补偿与孤儿 FRPC 回收测试、`make test lint build contract sbom checksums`、`git diff --check` 和敏感凭据模式扫描均通过；发行构建为 Server/Client 两个产物，前端仅保留 Vite 大 chunk 警告 |
 | 2026-08-02 | Security and release gates | 通过；OpenAPI 34 paths/39 operations、Server/Client 全量 race、go vet/staticcheck、Vue typecheck/build、secret scan、3 个 2 秒 fuzz、PERF-001/002、官方 FRPC/FRPS v0.68.0 verify、带归档 SHA-256 的原生 transport E2E、真实 FRPS/FRPC + loopback Plugin metadata E2E、SPDX SBOM、产物校验和与 release manifest 均通过 |
+| 2026-08-02 | Coverage and Revision rollback gate | 通过；Server Go 总体行覆盖率 75.1%，Client 76.0%；认证 94.7%、Token 加密 91.4%、Router runtime/snapshot 92.1%，Session/端口租约错误路径与 Revision 成功切换/失败回滚测试通过；失败回滚保留旧 active Revision/旧端口并释放新端口 |
+| 2026-08-02 | Frontend policy guard gate | 通过；Admin 与 Client `npm run test:policy` 均通过，策略模块 line/branch/function coverage 100%，并纳入 `make lint` 与 GitHub Actions web job |
 
 ## 未决与发布阻断项
 

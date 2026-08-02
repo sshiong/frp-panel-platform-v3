@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"testing"
+	"time"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -92,6 +94,19 @@ func TestNewDoesNotFollowRedirects(t *testing.T) {
 	}
 	if err := provider.Client.CheckRedirect(nil, nil); err != http.ErrUseLastResponse {
 		t.Fatalf("unexpected redirect policy error: %v", err)
+	}
+}
+
+func TestHTTPProviderPropagatesSandboxTimeout(t *testing.T) {
+	provider := New("test-token")
+	provider.Client = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		<-request.Context().Done()
+		return nil, request.Context().Err()
+	})}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, _, err := provider.ListZones(ctx, 1); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("sandbox timeout was not propagated: %v", err)
 	}
 }
 

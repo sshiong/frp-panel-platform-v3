@@ -310,6 +310,9 @@ func (s *Supervisor) apply(ctx context.Context, snapshot Snapshot) error {
 	if snapshot.SchemaVersion != "v1" || snapshot.ConfigVersion < 0 || snapshot.UserID == "" || snapshot.SessionGeneration < 1 {
 		return s.fail("FRPC_VERIFY_FAILED: invalid signed config metadata")
 	}
+	if !frpcVersionAtLeast(s.frpcVersion, "0.68.0") {
+		return s.fail("FRPC_VERSION_UNSUPPORTED: platform requires FRPC 0.68.0 or newer")
+	}
 	if err := ctx.Err(); err != nil {
 		return s.fail(err.Error())
 	}
@@ -734,9 +737,9 @@ func renderTOMLForVersion(snapshot Snapshot, dataDir, frpcVersion string) string
 	if frpcVersionAtLeast(frpcVersion, "0.64.0") {
 		fmt.Fprintf(&b, "auth.tokenSource.type = \"file\"\nauth.tokenSource.file.path = %s\n", tomlString(transportPath))
 	} else {
-		// tokenSource.file was introduced in FRP v0.64.0. Older fixed
-		// binaries remain parseable, but production releases must use the
-		// file-backed branch above so the native token is not embedded.
+		// This branch exists only for source-level compatibility with legacy
+		// tooling. Supervisor.Apply rejects versions below the platform
+		// minimum, so production never embeds the native token in TOML.
 		fmt.Fprintf(&b, "auth.token = %s\n", tomlString(transportSecret))
 	}
 	fmt.Fprintf(&b, "metadatas = { frp_runtime_credential = %s, session_generation = %s, frp_user_secret = %s }\n\n", tomlString(runtimeCredential), tomlString(strconv.FormatInt(snapshot.SessionGeneration, 10)), tomlString(userSecret))

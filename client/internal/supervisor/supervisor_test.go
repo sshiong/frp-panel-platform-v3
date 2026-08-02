@@ -34,6 +34,14 @@ func TestVerifySnapshot(t *testing.T) {
 	}
 }
 
+func TestApplyRejectsUnsupportedFRPCVersion(t *testing.T) {
+	s := NewWithBinaryHashAndVersion(t.TempDir(), "", "", "0.63.0")
+	snapshot := Snapshot{SchemaVersion: "v1", ConfigVersion: 1, UserID: "user-1", SessionGeneration: 1, Payload: map[string]interface{}{"frps_public_host": "frp.example.com", "frps_public_port": 7000, "frp_secret": "secret", "frp_username": "user-1", "runtime_credential": "runtime", "mappings": []interface{}{}}}
+	if err := s.Apply(t.Context(), snapshot); err == nil || !strings.Contains(err.Error(), "FRPC_VERSION_UNSUPPORTED") {
+		t.Fatalf("unsupported FRPC version was not rejected: %v", err)
+	}
+}
+
 func TestStartupLoadsLastGoodAvailability(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "state"), 0o700); err != nil {

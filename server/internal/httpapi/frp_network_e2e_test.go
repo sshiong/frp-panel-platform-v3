@@ -199,6 +199,10 @@ metadatas = { mapping_id = %q, mapping_revision = %q }
 			body, readErr := io.ReadAll(response.Body)
 			_ = response.Body.Close()
 			if readErr == nil && response.StatusCode == http.StatusOK && strings.Contains(string(body), "frp-panel-plugin-network-e2e") {
+				// Let the successful user connection fully close before cleanup
+				// interrupts FRPC; FRP v0.68.0 can otherwise race its final
+				// work-connection registration with server shutdown.
+				time.Sleep(500 * time.Millisecond)
 				return
 			}
 			lastErr = fmt.Errorf("unexpected proxy response: status=%d body=%q", response.StatusCode, string(body))

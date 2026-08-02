@@ -12,19 +12,28 @@ import (
 func main() {
 	databasePath := flag.String("db", os.Getenv("FRP_SERVER_DB"), "SQLite database path")
 	flag.Parse()
-	if *databasePath == "" {
-		fmt.Fprintln(os.Stderr, "-db or FRP_SERVER_DB is required")
-		os.Exit(2)
-	}
-	database, err := db.Open(*databasePath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "open database: %v\n", err)
-		os.Exit(1)
-	}
-	defer database.Close()
-	if err := database.Checkpoint(context.Background()); err != nil {
-		fmt.Fprintf(os.Stderr, "checkpoint failed: %v\n", err)
+	if err := run(*databasePath); err != nil {
+		if *databasePath == "" {
+			fmt.Fprintln(os.Stderr, "-db or FRP_SERVER_DB is required")
+		} else {
+			fmt.Fprintf(os.Stderr, "%v\n", err)
+		}
 		os.Exit(1)
 	}
 	fmt.Println("SQLite WAL checkpoint completed")
+}
+
+func run(databasePath string) error {
+	if databasePath == "" {
+		return fmt.Errorf("-db or FRP_SERVER_DB is required")
+	}
+	database, err := db.Open(databasePath)
+	if err != nil {
+		return fmt.Errorf("open database: %w", err)
+	}
+	defer database.Close()
+	if err := database.Checkpoint(context.Background()); err != nil {
+		return fmt.Errorf("checkpoint failed: %w", err)
+	}
+	return nil
 }

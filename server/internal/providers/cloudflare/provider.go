@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"strconv"
 	"time"
+
+	"github.com/ricardo/frp-panel-platform/server/internal/clock"
 )
 
 type Capabilities struct {
@@ -107,6 +109,9 @@ func (p *HTTPProvider) request(ctx context.Context, method, path string, body in
 		return err
 	}
 	defer resp.Body.Close()
+	if err := clock.ValidateResponse(resp, clock.DefaultTolerance); err != nil {
+		return err
+	}
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err

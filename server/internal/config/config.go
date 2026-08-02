@@ -4,6 +4,8 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -12,6 +14,8 @@ import (
 
 type Config struct {
 	ListenAddr              string
+	TLSCertFile             string
+	TLSKeyFile              string
 	DataDir                 string
 	DBPath                  string
 	MasterKeyPath           string
@@ -59,6 +63,8 @@ func Load() Config {
 	}
 	return Config{
 		ListenAddr:              getenv("SERVER_LISTEN_ADDR", "127.0.0.1:7400"),
+		TLSCertFile:             os.Getenv("SERVER_TLS_CERT_FILE"),
+		TLSKeyFile:              os.Getenv("SERVER_TLS_KEY_FILE"),
 		DataDir:                 dataDir,
 		DBPath:                  getenv("FRP_SERVER_DB", filepath.Join(dataDir, "server.db")),
 		MasterKeyPath:           getenv("FRP_SERVER_MASTER_KEY_FILE", filepath.Join(dataDir, "server-master.key")),
@@ -91,6 +97,50 @@ func Load() Config {
 		ACMEDirectoryURL:        getenv("FRP_ACME_DIRECTORY_URL", "https://acme-v02.api.letsencrypt.org/directory"),
 		ACMEEmail:               os.Getenv("FRP_ACME_EMAIL"),
 	}
+}
+
+// ValidateTransportSecurity prevents a production control plane from
+// starting in plaintext or with browser origins that can downgrade requests.
+// Development may intentionally use loopback HTTP for local setup.
+func (c Config) ValidateTransportSecurity() error {
+	if (strings.TrimSpace(c.TLSCertFile) == "") != (strings.TrimSpace(c.TLSKeyFile) == "") {
+		return fmt.Errorf("server TLS certificate and key must be configured together")
+	}
+	if c.RouterTLSEnabled && strings.TrimSpace(c.RouterListenAddr) == "" {
+		return fmt.Errorf("router TLS cannot be enabled without FRP_ROUTER_LISTEN_ADDR")
+	}
+	if strings.TrimSpace(c.RouterListenAddr) != "" {
+		if _, _, err := net.SplitHostPort(strings.TrimSpace(c.RouterListenAddr)); err != nil {
+			return fmt.Errorf("router listen address is invalid: %w", err)
+		}
+	}
+	if strings.EqualFold(strings.TrimSpace(c.Environment), "production") {
+		if strings.TrimSpace(c.TLSCertFile) == "" || strings.TrimSpace(c.TLSKeyFile) == "" {
+			return fmt.Errorf("production Server Panel requires SERVER_TLS_CERT_FILE and SERVER_TLS_KEY_FILE")
+		}
+		if len(c.AllowedOrigins) == 0 {
+			return fmt.Errorf("production Server Panel requires explicit FRP_ALLOWED_ORIGINS")
+		}
+		for _, origin := range c.AllowedOrigins {
+			parsed, err := url.Parse(origin)
+			if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+				return fmt.Errorf("production allowed origin must be an https origin: %q", origin)
+			}
+		}
+		if strings.TrimSpace(c.RouterListenAddr) != "" && !routerListenerIsLoopback(c.RouterListenAddr) && !c.RouterTLSEnabled {
+			return fmt.Errorf("production Router listener requires FRP_ROUTER_TLS_ENABLED=true")
+		}
+	}
+	return nil
+}
+
+func routerListenerIsLoopback(address string) bool {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(address))
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	return ip != nil && ip.IsLoopback()
 }
 
 // LoadOrCreateTransportSecret keeps the FRPS native auth token outside the

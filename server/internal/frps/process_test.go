@@ -33,3 +33,30 @@ func TestVerifyAndStartFixedBinary(t *testing.T) {
 		t.Fatal("wrong FRPS checksum must fail")
 	}
 }
+
+func TestProcessValidationAndNilEdges(t *testing.T) {
+	if err := VerifyBinary("", ""); err == nil {
+		t.Fatal("empty FRPS verification inputs were accepted")
+	}
+	if err := VerifyBinary(filepath.Join(t.TempDir(), "missing"), "deadbeef"); err == nil {
+		t.Fatal("missing FRPS binary was accepted")
+	}
+	if err := VerifyConfig("", ""); err == nil {
+		t.Fatal("empty FRPS config verification inputs were accepted")
+	}
+	if err := VerifyConfig("/bin/sh", filepath.Join(t.TempDir(), "missing.toml")); err == nil {
+		t.Fatal("a failing FRPS config verifier was accepted")
+	}
+	if _, err := Start(Config{}); err == nil {
+		t.Fatal("empty FRPS start config was accepted")
+	}
+	if (*Process)(nil).PID() != 0 || (&Process{}).PID() != 0 {
+		t.Fatal("nil FRPS process PID was non-zero")
+	}
+	if err := (*Process)(nil).Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&Process{}).Stop(); err != nil {
+		t.Fatal(err)
+	}
+}

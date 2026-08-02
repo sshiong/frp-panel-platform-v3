@@ -27,6 +27,15 @@ func TestWebsocketURL(t *testing.T) {
 	}
 }
 
+func TestLocalOriginMatchesClientListenerTransport(t *testing.T) {
+	if got := localOrigin(config.Config{ListenAddr: "127.0.0.1:7410"}); got != "http://127.0.0.1:7410" {
+		t.Fatalf("development origin=%q", got)
+	}
+	if got := localOrigin(config.Config{ListenAddr: "192.0.2.10:8443", TLSCertFile: "/etc/client.crt", TLSKeyFile: "/etc/client.key"}); got != "https://192.0.2.10:8443" {
+		t.Fatalf("TLS origin=%q", got)
+	}
+}
+
 func TestServerRequestDoesNotFollowRedirects(t *testing.T) {
 	var redirected int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

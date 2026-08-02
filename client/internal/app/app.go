@@ -17,9 +17,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/ricardo/frp-panel-platform/client/internal/config"
+	"github.com/ricardo/frp-panel-platform/client/internal/id"
 	"github.com/ricardo/frp-panel-platform/client/internal/security"
 	"github.com/ricardo/frp-panel-platform/client/internal/supervisor"
 )
@@ -299,14 +299,14 @@ func (a *App) serverRequest(ctx context.Context, baseURL, method, path string, p
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	req.Header.Set("X-Request-ID", uuid.NewString())
+	req.Header.Set("X-Request-ID", id.New())
 	if method == "POST" || method == "PUT" || method == "DELETE" {
 		idempotencyKey := ""
 		if len(idempotencyKeys) > 0 {
 			idempotencyKey = strings.TrimSpace(idempotencyKeys[0])
 		}
 		if idempotencyKey == "" {
-			idempotencyKey = uuid.NewString()
+			idempotencyKey = id.New()
 		}
 		req.Header.Set("Idempotency-Key", idempotencyKey)
 	}
@@ -448,7 +448,7 @@ func (a *App) runWebSocketConnection(ctx context.Context, conn *websocket.Conn, 
 	defer cancel()
 	var writeMu sync.Mutex
 	write := func(messageType string, payload interface{}) error {
-		message := wsEnvelope{MessageID: uuid.NewString(), ProtocolVersion: "v1", Timestamp: time.Now().UTC(), Type: messageType, Payload: payload}
+		message := wsEnvelope{MessageID: id.New(), ProtocolVersion: "v1", Timestamp: time.Now().UTC(), Type: messageType, Payload: payload}
 		writeMu.Lock()
 		defer writeMu.Unlock()
 		_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
@@ -576,7 +576,11 @@ func localOrigin(cfg config.Config) string {
 	if host == "" || host == "0.0.0.0" || host == "::" || host == "[::]" {
 		host = "127.0.0.1"
 	}
-	return "http://" + net.JoinHostPort(host, port)
+	scheme := "http"
+	if cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
+		scheme = "https"
+	}
+	return scheme + "://" + net.JoinHostPort(host, port)
 }
 
 func waitWebSocket(ctx context.Context, delay time.Duration) bool {

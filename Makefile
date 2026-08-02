@@ -31,7 +31,9 @@ lint:
 	cd server && $(GO_ENV) $(STATICCHECK) ./...
 	cd client && $(GO_ENV) $(STATICCHECK) ./...
 	cd web/admin && npm run typecheck
+	cd web/admin && npm run test:policy
 	cd web/client && npm run typecheck
+	cd web/client && npm run test:policy
 
 contract:
 	ruby scripts/validate-openapi.rb
@@ -45,7 +47,8 @@ fuzz:
 	cd client && $(GO_ENV) go test -run='^$$' -fuzz=FuzzNormalizeServerURL -fuzztime=$${FUZZ_TIME:-15s} ./internal/security
 
 perf:
-	cd server && $(GO_ENV) FRP_PERF=1 go test -run '^TestPerformanceBaseline$$' -count=1 ./internal/httpapi
+	cd server && $(GO_ENV) FRP_PERF=1 FRP_PERF_SCALE=1 go test -run '^TestPerformance(Baseline|Scale)$$' -count=1 ./internal/httpapi
+	cd client && $(GO_ENV) FRP_PERF_SCALE=1 go test -run '^TestPerformanceConfigSubmitToClientApply$$' -count=1 ./internal/app
 
 frpc-verify:
 	@test -n "$(FRPC_VERIFY_BINARY)" || (echo "FRPC_VERIFY_BINARY is required" >&2; exit 1)

@@ -18,12 +18,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/ricardo/frp-panel-platform/server/internal/acme"
 	"github.com/ricardo/frp-panel-platform/server/internal/auth"
 	"github.com/ricardo/frp-panel-platform/server/internal/config"
 	"github.com/ricardo/frp-panel-platform/server/internal/crypto"
 	"github.com/ricardo/frp-panel-platform/server/internal/db"
+	"github.com/ricardo/frp-panel-platform/server/internal/id"
 	"github.com/ricardo/frp-panel-platform/server/internal/jobs"
 	"golang.org/x/net/idna"
 )
@@ -51,16 +51,20 @@ type App struct {
 }
 
 type AuthContext struct {
-	SessionID     string    `json:"session_id"`
-	UserID        string    `json:"user_id"`
-	Username      string    `json:"username"`
-	Role          string    `json:"role"`
-	Status        string    `json:"status"`
-	Generation    int64     `json:"generation"`
-	Channel       string    `json:"channel"`
-	MustChange    bool      `json:"must_change_password"`
-	ExpiresAt     time.Time `json:"expires_at"`
-	CSRFTokenHash string    `json:"-"`
+	SessionID          string    `json:"session_id"`
+	UserID             string    `json:"user_id"`
+	Username           string    `json:"username"`
+	Role               string    `json:"role"`
+	Status             string    `json:"status"`
+	Generation         int64     `json:"generation"`
+	Channel            string    `json:"channel"`
+	MustChange         bool      `json:"must_change_password"`
+	MustChangeUsername bool      `json:"must_change_username"`
+	ExpiresAt          time.Time `json:"expires_at"`
+	CSRFTokenHash      string    `json:"-"`
+	SourceIP           string    `json:"-"`
+	UserAgent          string    `json:"-"`
+	RequestID          string    `json:"-"`
 }
 
 type UserSummary struct {
@@ -69,6 +73,7 @@ type UserSummary struct {
 	Role               string `json:"role"`
 	Status             string `json:"status"`
 	MustChangePassword bool   `json:"must_change_password"`
+	MustChangeUsername bool   `json:"must_change_username"`
 }
 
 type LoginResult struct {
@@ -210,6 +215,12 @@ type UserRecord struct {
 	FRPCredential    FRPCredentialStatus `json:"frp_credential"`
 }
 
+type PageInfo struct {
+	Page     int `json:"page"`
+	PageSize int `json:"page_size"`
+	Total    int `json:"total"`
+}
+
 func New(dbConn *db.DB, cfg config.Config, secrets *crypto.Manager) *App {
 	return &App{DB: dbConn, Config: cfg, Crypto: secrets, Jobs: jobs.New(dbConn, "server-worker"), Started: time.Now().UTC()}
 }
@@ -239,7 +250,7 @@ func (a *App) EnsureAdmin(ctx context.Context) (string, error) {
 		return "", err
 	}
 	now := nowString()
-	userID := uuid.NewString()
+	userID := id.New()
 	secret, err := randomSecret()
 	if err != nil {
 		return "", err
@@ -250,12 +261,12 @@ func (a *App) EnsureAdmin(ctx context.Context) (string, error) {
 	}
 	secretHash := sha256Hex(secret)
 	_, err = a.DB.ExecContext(ctx, `
-		INSERT INTO users(id, username, password_hash, role, status, must_change_password, active_session_generation, created_at, updated_at)
-		VALUES(?, 'admin', ?, 'admin', 'active', ?, 1, ?, ?)`, userID, hash, boolInt(a.Config.AdminPassword == ""), now, now)
+		INSERT INTO users(id, username, password_hash, role, status, must_change_password, must_change_username, active_session_generation, created_at, updated_at)
+		VALUES(?, 'admin', ?, 'admin', 'active', ?, ?, 1, ?, ?)`, userID, hash, boolInt(a.Config.AdminPassword == ""), boolInt(a.Config.AdminPassword == ""), now, now)
 	if err != nil {
 		return "", err
 	}
-	_, err = a.DB.ExecContext(ctx, `INSERT INTO frp_credentials(id,user_id,frp_username,secret_hash,secret_ciphertext,secret_nonce,created_at) VALUES(?,?,?,?,?,?,?)`, uuid.NewString(), userID, "admin-"+shortID(userID), secretHash, ciphertext, nonce, now)
+	_, err = a.DB.ExecContext(ctx, `INSERT INTO frp_credentials(id,user_id,frp_username,secret_hash,secret_ciphertext,secret_nonce,created_at) VALUES(?,?,?,?,?,?,?)`, id.New(), userID, "admin-"+shortID(userID), secretHash, ciphertext, nonce, now)
 	return passwordIfNeeded(a.Config.AdminPassword, password), err
 }
 
@@ -278,9 +289,12 @@ func (a *App) Login(ctx context.Context, username, password, channel, sourceIP, 
 	var user UserSummary
 	var passwordHash string
 	var generation int64
-	if err := tx.QueryRowContext(ctx, `SELECT id,username,password_hash,role,status,must_change_password,active_session_generation FROM users WHERE username=? AND status <> 'deleted'`, username).Scan(&user.ID, &user.Username, &passwordHash, &user.Role, &user.Status, &user.MustChangePassword, &generation); err != nil {
+	var mustChangePassword, mustChangeUsername int
+	if err := tx.QueryRowContext(ctx, `SELECT id,username,password_hash,role,status,must_change_password,must_change_username,active_session_generation FROM users WHERE username=? AND status <> 'deleted'`, username).Scan(&user.ID, &user.Username, &passwordHash, &user.Role, &user.Status, &mustChangePassword, &mustChangeUsername, &generation); err != nil {
 		return LoginResult{}, ErrInvalidCredentials
 	}
+	user.MustChangePassword = mustChangePassword == 1
+	user.MustChangeUsername = mustChangeUsername == 1
 	if !auth.VerifyPassword(passwordHash, password) {
 		return LoginResult{}, ErrInvalidCredentials
 	}
@@ -308,7 +322,7 @@ func (a *App) Login(ctx context.Context, username, password, channel, sourceIP, 
 	if err != nil {
 		return LoginResult{}, err
 	}
-	sessionID := uuid.NewString()
+	sessionID := id.New()
 	var runtimeCredential, frpUsername, frpSecret, frpsTransportSecret, csrfToken, csrfTokenHash string
 	if channel == "admin_panel" {
 		csrfToken, err = randomToken()
@@ -339,7 +353,7 @@ func (a *App) Login(ctx context.Context, username, password, channel, sourceIP, 
 		}
 		frpSecret = string(secret)
 		frpsTransportSecret = a.Config.FRPSTransportSecret
-		if _, err := tx.ExecContext(ctx, `INSERT INTO frp_runtime_credentials(id,user_id,server_session_id,session_generation,token_hash,expires_at,created_at) VALUES(?,?,?,?,?,?,?)`, uuid.NewString(), user.ID, sessionID, generation, sha256Hex(runtimeToken), expires.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO frp_runtime_credentials(id,user_id,server_session_id,session_generation,token_hash,expires_at,created_at) VALUES(?,?,?,?,?,?,?)`, id.New(), user.ID, sessionID, generation, sha256Hex(runtimeToken), expires.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)); err != nil {
 			return LoginResult{}, err
 		}
 	}
@@ -358,15 +372,16 @@ func (a *App) Authenticate(ctx context.Context, bearer string) (AuthContext, err
 		return AuthContext{}, ErrSessionInvalid
 	}
 	var ac AuthContext
-	var mustChange int
+	var mustChange, mustChangeUsername int
 	var expires, idle, revokedAt string
-	if err := a.DB.QueryRowContext(ctx, `SELECT s.id,s.user_id,u.username,u.role,u.status,u.must_change_password,s.session_generation,s.login_channel,s.expires_at,s.idle_expires_at,COALESCE(s.revoked_at,''),COALESCE(s.csrf_token_hash,'') FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.session_hash=?`, sha256Hex(bearer)).Scan(&ac.SessionID, &ac.UserID, &ac.Username, &ac.Role, &ac.Status, &mustChange, &ac.Generation, &ac.Channel, &expires, &idle, &revokedAt, &ac.CSRFTokenHash); err != nil {
+	if err := a.DB.QueryRowContext(ctx, `SELECT s.id,s.user_id,u.username,u.role,u.status,u.must_change_password,u.must_change_username,s.session_generation,s.login_channel,s.source_ip,s.user_agent,s.expires_at,s.idle_expires_at,COALESCE(s.revoked_at,''),COALESCE(s.csrf_token_hash,'') FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.session_hash=?`, sha256Hex(bearer)).Scan(&ac.SessionID, &ac.UserID, &ac.Username, &ac.Role, &ac.Status, &mustChange, &mustChangeUsername, &ac.Generation, &ac.Channel, &ac.SourceIP, &ac.UserAgent, &expires, &idle, &revokedAt, &ac.CSRFTokenHash); err != nil {
 		return AuthContext{}, ErrSessionInvalid
 	}
 	if revokedAt != "" {
 		return AuthContext{}, errors.New("session replaced")
 	}
 	ac.MustChange = mustChange == 1
+	ac.MustChangeUsername = mustChangeUsername == 1
 	ac.ExpiresAt, _ = time.Parse(time.RFC3339Nano, expires)
 	idleAt, _ := time.Parse(time.RFC3339Nano, idle)
 	now := time.Now().UTC()
@@ -402,8 +417,31 @@ func (a *App) Logout(ctx context.Context, ac AuthContext, reason string) error {
 }
 
 func (a *App) ChangePassword(ctx context.Context, ac AuthContext, currentPassword, newPassword string) error {
+	return a.ChangeCredentials(ctx, ac, currentPassword, "", newPassword)
+}
+
+// ChangeCredentials updates the authenticated user's password and, when
+// requested, username in one transaction. The initial generated admin
+// identity sets both must-change flags, so a first login cannot proceed until
+// the operator chooses a new username and password.
+func (a *App) ChangeCredentials(ctx context.Context, ac AuthContext, currentPassword, newUsername, newPassword string) error {
 	if len(newPassword) < 12 {
 		return fmt.Errorf("password must be at least 12 characters")
+	}
+	newUsername = strings.TrimSpace(newUsername)
+	if ac.MustChangeUsername && newUsername == "" {
+		return fmt.Errorf("a new username is required for the initial administrator login")
+	}
+	if newUsername != "" {
+		if ac.Role != "admin" {
+			return ErrForbidden
+		}
+		if !validUsername(newUsername) || newUsername == "admin" && newUsername != ac.Username {
+			return fmt.Errorf("invalid username")
+		}
+		if ac.MustChangeUsername && newUsername == ac.Username {
+			return fmt.Errorf("initial username must be changed")
+		}
 	}
 	var currentHash string
 	if err := a.DB.QueryRowContext(ctx, `SELECT password_hash FROM users WHERE id=?`, ac.UserID).Scan(&currentHash); err != nil || !auth.VerifyPassword(currentHash, currentPassword) {
@@ -413,11 +451,27 @@ func (a *App) ChangePassword(ctx context.Context, ac AuthContext, currentPasswor
 	if err != nil {
 		return err
 	}
-	_, err = a.DB.ExecContext(ctx, `UPDATE users SET password_hash=?, must_change_password=0, auth_version=auth_version+1, updated_at=? WHERE id=?`, hash, nowString(), ac.UserID)
-	if err == nil {
-		_ = a.Audit(ctx, ac, "password_changed", "user", ac.UserID, "success", nil, "")
+	tx, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
 	}
-	return err
+	defer tx.Rollback()
+	if newUsername == "" {
+		_, err = tx.ExecContext(ctx, `UPDATE users SET password_hash=?,must_change_password=0,must_change_username=0,auth_version=auth_version+1,updated_at=? WHERE id=?`, hash, nowString(), ac.UserID)
+	} else {
+		_, err = tx.ExecContext(ctx, `UPDATE users SET username=?,password_hash=?,must_change_password=0,must_change_username=0,auth_version=auth_version+1,updated_at=? WHERE id=?`, newUsername, hash, nowString(), ac.UserID)
+	}
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	metadata := map[string]interface{}{}
+	if newUsername != "" {
+		metadata["username"] = newUsername
+	}
+	return a.Audit(ctx, ac, "credentials_changed", "user", ac.UserID, "success", metadata, "")
 }
 
 // IssueReauthTicket turns a password check into a short-lived, session-bound
@@ -440,7 +494,7 @@ func (a *App) IssueReauthTicket(ctx context.Context, ac AuthContext, currentPass
 	if _, err := a.DB.ExecContext(ctx, `DELETE FROM reauth_tickets WHERE expires_at <= ?`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		return "", time.Time{}, err
 	}
-	if _, err := a.DB.ExecContext(ctx, `INSERT INTO reauth_tickets(id,user_id,session_generation,token_hash,expires_at,created_at) VALUES(?,?,?,?,?,?)`, uuid.NewString(), ac.UserID, ac.Generation, sha256Hex(ticket), expires.Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+	if _, err := a.DB.ExecContext(ctx, `INSERT INTO reauth_tickets(id,user_id,session_generation,token_hash,expires_at,created_at) VALUES(?,?,?,?,?,?)`, id.New(), ac.UserID, ac.Generation, sha256Hex(ticket), expires.Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		return "", time.Time{}, err
 	}
 	return ticket, expires, nil
@@ -485,12 +539,13 @@ func (a *App) RequireReauthTicket(ctx context.Context, ac AuthContext, ticket st
 
 func (a *App) Dashboard(ctx context.Context, ac AuthContext) (Dashboard, error) {
 	var out Dashboard
-	var mustChange, secretVersion int
+	var mustChange, mustChangeUsername, secretVersion int
 	var rotatedAt string
-	if err := a.DB.QueryRowContext(ctx, `SELECT id,username,role,status,must_change_password,desired_config_version,applied_config_version FROM users WHERE id=?`, ac.UserID).Scan(&out.User.ID, &out.User.Username, &out.User.Role, &out.User.Status, &mustChange, &out.DesiredConfigVersion, &out.AppliedConfigVersion); err != nil {
+	if err := a.DB.QueryRowContext(ctx, `SELECT id,username,role,status,must_change_password,must_change_username,desired_config_version,applied_config_version FROM users WHERE id=?`, ac.UserID).Scan(&out.User.ID, &out.User.Username, &out.User.Role, &out.User.Status, &mustChange, &mustChangeUsername, &out.DesiredConfigVersion, &out.AppliedConfigVersion); err != nil {
 		return out, err
 	}
 	out.User.MustChangePassword = mustChange == 1
+	out.User.MustChangeUsername = mustChangeUsername == 1
 	if err := a.DB.QueryRowContext(ctx, `SELECT secret_version,COALESCE(rotated_at,'') FROM frp_credentials WHERE user_id=?`, ac.UserID).Scan(&secretVersion, &rotatedAt); err == nil {
 		out.FRPCredential = FRPCredentialStatus{Present: true, SecretVersion: int64(secretVersion), RotatedAt: rotatedAt, Status: "active"}
 	} else if !errors.Is(err, sql.ErrNoRows) {
@@ -522,20 +577,31 @@ func (a *App) Dashboard(ctx context.Context, ac AuthContext) (Dashboard, error) 
 }
 
 func (a *App) ListMappings(ctx context.Context, userID string) ([]Mapping, error) {
-	rows, err := a.DB.QueryContext(ctx, `SELECT m.id,m.user_id,m.name,m.proxy_type,m.lifecycle_status,m.desired_state,m.observed_state,COALESCE(r.revision,0),COALESCE(r.local_ip,''),COALESCE(r.local_port,0),r.remote_port,m.created_at,m.updated_at FROM mappings m LEFT JOIN mapping_revisions r ON r.id=COALESCE(m.pending_revision_id,m.active_revision_id) WHERE m.user_id=? AND m.lifecycle_status <> 'deleted' ORDER BY m.created_at DESC`, userID)
+	items, _, err := a.ListMappingsPage(ctx, userID, 1, 1000000)
+	return items, err
+}
+
+func (a *App) ListMappingsPage(ctx context.Context, userID string, page, pageSize int) ([]Mapping, PageInfo, error) {
+	page, pageSize = normalizePage(page, pageSize)
+	var total int
+	if err := a.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM mappings WHERE user_id=? AND lifecycle_status <> 'deleted'`, userID).Scan(&total); err != nil {
+		return nil, PageInfo{}, err
+	}
+	offset := (page - 1) * pageSize
+	rows, err := a.DB.QueryContext(ctx, `SELECT m.id,m.user_id,m.name,m.proxy_type,m.lifecycle_status,m.desired_state,m.observed_state,COALESCE(r.revision,0),COALESCE(r.local_ip,''),COALESCE(r.local_port,0),r.remote_port,m.created_at,m.updated_at FROM mappings m LEFT JOIN mapping_revisions r ON r.id=COALESCE(m.pending_revision_id,m.active_revision_id) WHERE m.user_id=? AND m.lifecycle_status <> 'deleted' ORDER BY m.created_at DESC LIMIT ? OFFSET ?`, userID, pageSize, offset)
 	if err != nil {
-		return nil, err
+		return nil, PageInfo{}, err
 	}
 	defer rows.Close()
 	result := make([]Mapping, 0)
 	for rows.Next() {
 		var item Mapping
 		if err := rows.Scan(&item.ID, &item.UserID, &item.Name, &item.ProxyType, &item.LifecycleStatus, &item.DesiredState, &item.ObservedState, &item.Revision, &item.LocalIP, &item.LocalPort, &item.RemotePort, &item.CreatedAt, &item.UpdatedAt); err != nil {
-			return nil, err
+			return nil, PageInfo{}, err
 		}
 		result = append(result, item)
 	}
-	return result, rows.Err()
+	return result, PageInfo{Page: page, PageSize: pageSize, Total: total}, rows.Err()
 }
 
 func (a *App) CreateMapping(ctx context.Context, ac AuthContext, req MappingRequest, idempotencyKey string) (Mapping, error) {
@@ -543,7 +609,7 @@ func (a *App) CreateMapping(ctx context.Context, ac AuthContext, req MappingRequ
 		return Mapping{}, err
 	}
 	if idempotencyKey == "" {
-		idempotencyKey = uuid.NewString()
+		idempotencyKey = id.New()
 	}
 	bodyHash := requestHash(req)
 	tx, err := a.DB.BeginTx(ctx, nil)
@@ -603,7 +669,7 @@ func (a *App) CreateMapping(ctx context.Context, ac AuthContext, req MappingRequ
 		}
 	}
 	now := nowString()
-	mappingID, revisionID := uuid.NewString(), uuid.NewString()
+	mappingID, revisionID := id.New(), id.New()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO mappings(id,user_id,name,proxy_type,lifecycle_status,desired_state,observed_state,pending_revision_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, mappingID, ac.UserID, strings.TrimSpace(req.Name), req.ProxyType, "pending_apply", "enabled", "offline", revisionID, now, now); err != nil {
 		return Mapping{}, err
 	}
@@ -611,7 +677,7 @@ func (a *App) CreateMapping(ctx context.Context, ac AuthContext, req MappingRequ
 		return Mapping{}, err
 	}
 	if remotePort != nil {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO port_leases(id,server_id,mapping_id,mapping_revision_id,remote_port,lease_role,created_at) VALUES(?,?,?,?,?,?,?)`, uuid.NewString(), "default", mappingID, revisionID, *remotePort, "active", now); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO port_leases(id,server_id,mapping_id,mapping_revision_id,remote_port,lease_role,created_at) VALUES(?,?,?,?,?,?,?)`, id.New(), "default", mappingID, revisionID, *remotePort, "active", now); err != nil {
 			if strings.Contains(err.Error(), "UNIQUE") {
 				return Mapping{}, ErrPortReserved
 			}
@@ -622,13 +688,13 @@ func (a *App) CreateMapping(ctx context.Context, ac AuthContext, req MappingRequ
 	if _, err := tx.ExecContext(ctx, `UPDATE users SET desired_config_version=?, updated_at=? WHERE id=?`, newVersion, now, ac.UserID); err != nil {
 		return Mapping{}, err
 	}
-	operationID := uuid.NewString()
+	operationID := id.New()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO operations(id,user_id,resource_type,resource_id,operation_type,status,phase,step,idempotency_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, operationID, ac.UserID, "mapping", mappingID, "create", "pending", "mapping", "reserved", idempotencyKey, now, now); err != nil {
 		return Mapping{}, err
 	}
 	item := Mapping{ID: mappingID, UserID: ac.UserID, Name: strings.TrimSpace(req.Name), ProxyType: req.ProxyType, LifecycleStatus: "pending_apply", DesiredState: "enabled", ObservedState: "offline", Revision: 1, LocalIP: req.LocalIP, LocalPort: req.LocalPort, RemotePort: remotePort, CreatedAt: now, UpdatedAt: now}
 	encoded, _ := json.Marshal(item)
-	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,operation_id,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), ac.UserID, ac.Generation, "POST", "/api/v1/mappings", idempotencyKey, bodyHash, 201, string(encoded), operationID, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,operation_id,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, id.New(), ac.UserID, ac.Generation, "POST", "/api/v1/mappings", idempotencyKey, bodyHash, 201, string(encoded), operationID, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
 		return Mapping{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -643,7 +709,7 @@ func (a *App) UpdateMapping(ctx context.Context, ac AuthContext, mappingID strin
 		return Mapping{}, err
 	}
 	if idempotencyKey == "" {
-		idempotencyKey = uuid.NewString()
+		idempotencyKey = id.New()
 	}
 	tx, err := a.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -665,7 +731,7 @@ func (a *App) UpdateMapping(ctx context.Context, ac AuthContext, mappingID strin
 	}
 	var current Mapping
 	var activeID, pendingID string
-	if err := tx.QueryRowContext(ctx, `SELECT m.id,m.user_id,m.name,m.proxy_type,m.lifecycle_status,m.desired_state,m.observed_state,COALESCE(r.revision,0),COALESCE(r.local_ip,''),COALESCE(r.local_port,0),r.remote_port,m.created_at,m.updated_at,m.active_revision_id,COALESCE(m.pending_revision_id,'') FROM mappings m LEFT JOIN mapping_revisions r ON r.id=COALESCE(m.pending_revision_id,m.active_revision_id) WHERE m.id=? AND m.user_id=? AND m.lifecycle_status <> 'deleted'`, mappingID, ac.UserID).Scan(&current.ID, &current.UserID, &current.Name, &current.ProxyType, &current.LifecycleStatus, &current.DesiredState, &current.ObservedState, &current.Revision, &current.LocalIP, &current.LocalPort, &current.RemotePort, &current.CreatedAt, &current.UpdatedAt, &activeID, &pendingID); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT m.id,m.user_id,m.name,m.proxy_type,m.lifecycle_status,m.desired_state,m.observed_state,COALESCE(r.revision,0),COALESCE(r.local_ip,''),COALESCE(r.local_port,0),r.remote_port,m.created_at,m.updated_at,COALESCE(m.active_revision_id,''),COALESCE(m.pending_revision_id,'') FROM mappings m LEFT JOIN mapping_revisions r ON r.id=COALESCE(m.pending_revision_id,m.active_revision_id) WHERE m.id=? AND m.user_id=? AND m.lifecycle_status <> 'deleted'`, mappingID, ac.UserID).Scan(&current.ID, &current.UserID, &current.Name, &current.ProxyType, &current.LifecycleStatus, &current.DesiredState, &current.ObservedState, &current.Revision, &current.LocalIP, &current.LocalPort, &current.RemotePort, &current.CreatedAt, &current.UpdatedAt, &activeID, &pendingID); err != nil {
 		return Mapping{}, ErrNotFound
 	}
 	var desired int64
@@ -707,13 +773,29 @@ func (a *App) UpdateMapping(ctx context.Context, ac AuthContext, mappingID strin
 		}
 	}
 	now := nowString()
-	newRevision := current.Revision + 1
-	revisionID := uuid.NewString()
+	// A new immutable revision supersedes an older, not-yet-applied revision.
+	// This keeps one authoritative pending revision per mapping and prevents a
+	// later successful apply from activating stale revisions or leaking their
+	// temporary port leases.
+	if pendingID != "" {
+		if _, err := tx.ExecContext(ctx, `UPDATE mapping_revisions SET status='superseded' WHERE id=? AND status IN ('pending','applying')`, pendingID); err != nil {
+			return Mapping{}, err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM port_leases WHERE mapping_revision_id=? AND lease_role='pending'`, pendingID); err != nil {
+			return Mapping{}, err
+		}
+	}
+	var latestRevision int64
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(revision),0) FROM mapping_revisions WHERE mapping_id=?`, mappingID).Scan(&latestRevision); err != nil {
+		return Mapping{}, err
+	}
+	newRevision := latestRevision + 1
+	revisionID := id.New()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO mapping_revisions(id,mapping_id,revision,local_ip,local_port,remote_port,status,created_at) VALUES(?,?,?,?,?,?,?,?)`, revisionID, mappingID, newRevision, req.LocalIP, req.LocalPort, nullablePort(remotePort), "pending", now); err != nil {
 		return Mapping{}, err
 	}
 	if remotePort != nil && (current.RemotePort == nil || *remotePort != *current.RemotePort) {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO port_leases(id,server_id,mapping_id,mapping_revision_id,remote_port,lease_role,created_at) VALUES(?,?,?,?,?,?,?)`, uuid.NewString(), "default", mappingID, revisionID, *remotePort, "pending", now); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO port_leases(id,server_id,mapping_id,mapping_revision_id,remote_port,lease_role,created_at) VALUES(?,?,?,?,?,?,?)`, id.New(), "default", mappingID, revisionID, *remotePort, "pending", now); err != nil {
 			if strings.Contains(err.Error(), "UNIQUE") {
 				return Mapping{}, ErrPortReserved
 			}
@@ -727,14 +809,14 @@ func (a *App) UpdateMapping(ctx context.Context, ac AuthContext, mappingID strin
 	if _, err := tx.ExecContext(ctx, `UPDATE users SET desired_config_version=?,updated_at=? WHERE id=?`, newVersion, now, ac.UserID); err != nil {
 		return Mapping{}, err
 	}
-	operationID := uuid.NewString()
+	operationID := id.New()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO operations(id,user_id,resource_type,resource_id,operation_type,status,phase,step,idempotency_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, operationID, ac.UserID, "mapping", mappingID, "update", "pending", "mapping", "reserved", idempotencyKey, now, now); err != nil {
 		return Mapping{}, err
 	}
 	current.Name, current.ProxyType, current.LifecycleStatus, current.LocalIP, current.LocalPort, current.RemotePort, current.Revision, current.UpdatedAt = strings.TrimSpace(req.Name), req.ProxyType, "pending_apply", req.LocalIP, req.LocalPort, remotePort, newRevision, now
 	current.ObservedState = "offline"
 	encoded, _ := json.Marshal(current)
-	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,operation_id,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), ac.UserID, ac.Generation, "PUT", normalizedPath, idempotencyKey, bodyHash, 200, string(encoded), operationID, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,operation_id,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, id.New(), ac.UserID, ac.Generation, "PUT", normalizedPath, idempotencyKey, bodyHash, 200, string(encoded), operationID, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
 		return Mapping{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -756,7 +838,7 @@ func (a *App) DeleteMapping(ctx context.Context, ac AuthContext, mappingID strin
 		idempotencyKey = strings.TrimSpace(idempotencyKeys[0])
 	}
 	if idempotencyKey == "" {
-		idempotencyKey = uuid.NewString()
+		idempotencyKey = id.New()
 	}
 	bodyHash := requestHash(map[string]bool{"force": force})
 	var existingHash, existingOperation string
@@ -805,7 +887,7 @@ func (a *App) DeleteMapping(ctx context.Context, ac AuthContext, mappingID strin
 		var existing string
 		err := tx.QueryRowContext(ctx, `SELECT id FROM operations WHERE resource_type='domain' AND resource_id=? AND operation_type='delete' AND status IN ('pending','running') LIMIT 1`, domainID).Scan(&existing)
 		if errors.Is(err, sql.ErrNoRows) {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO operations(id,user_id,resource_type,resource_id,operation_type,status,phase,step,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), ac.UserID, "domain", domainID, "delete", "pending", "router", "awaiting_client", now, now); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO operations(id,user_id,resource_type,resource_id,operation_type,status,phase,step,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, id.New(), ac.UserID, "domain", domainID, "delete", "pending", "router", "awaiting_client", now, now); err != nil {
 				return "", err
 			}
 		} else if err != nil {
@@ -815,12 +897,12 @@ func (a *App) DeleteMapping(ctx context.Context, ac AuthContext, mappingID strin
 	if _, err := tx.ExecContext(ctx, `UPDATE users SET desired_config_version=desired_config_version+1,updated_at=? WHERE id=?`, now, ac.UserID); err != nil {
 		return "", err
 	}
-	opID := uuid.NewString()
+	opID := id.New()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO operations(id,user_id,resource_type,resource_id,operation_type,status,phase,step,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, opID, ac.UserID, "mapping", mappingID, "delete", "pending", "client", "awaiting_apply", now, now); err != nil {
 		return "", err
 	}
 	responseBody, _ := json.Marshal(map[string]interface{}{"operation_id": opID, "status": "pending"})
-	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,operation_id,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), ac.UserID, ac.Generation, "DELETE", "/api/v1/mappings/"+mappingID, idempotencyKey, bodyHash, 202, string(responseBody), opID, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,operation_id,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, id.New(), ac.UserID, ac.Generation, "DELETE", "/api/v1/mappings/"+mappingID, idempotencyKey, bodyHash, 202, string(responseBody), opID, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
 		return "", err
 	}
 	if err := tx.Commit(); err != nil {
@@ -845,7 +927,7 @@ func (a *App) ToggleMapping(ctx context.Context, ac AuthContext, mappingID strin
 	}
 	idempotencyKey := strings.TrimSpace(option.IdempotencyKey)
 	if idempotencyKey == "" {
-		idempotencyKey = uuid.NewString()
+		idempotencyKey = id.New()
 	}
 	normalizedPath := "/api/v1/mappings/" + mappingID + "/toggle"
 	bodyHash := requestHash(map[string]interface{}{
@@ -892,7 +974,7 @@ func (a *App) ToggleMapping(ctx context.Context, ac AuthContext, mappingID strin
 		return err
 	}
 	responseBody, _ := json.Marshal(map[string]bool{"ok": true})
-	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), ac.UserID, ac.Generation, "POST", normalizedPath, idempotencyKey, bodyHash, 200, string(responseBody), time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id.New(), ac.UserID, ac.Generation, "POST", normalizedPath, idempotencyKey, bodyHash, 200, string(responseBody), time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -906,9 +988,20 @@ func (a *App) ToggleMapping(ctx context.Context, ac AuthContext, mappingID strin
 }
 
 func (a *App) ListDomains(ctx context.Context, userID string) ([]Domain, error) {
-	rows, err := a.DB.QueryContext(ctx, `SELECT b.id,b.mapping_id,b.hostname,b.normalized_domain,b.https_mode,b.http_redirect,b.status,b.revision,b.created_at,b.updated_at,COALESCE((SELECT type FROM dns_records WHERE domain_binding_id=b.id ORDER BY last_synced_at DESC LIMIT 1),'CNAME'),COALESCE((SELECT content FROM dns_records WHERE domain_binding_id=b.id ORDER BY last_synced_at DESC LIMIT 1),''),COALESCE((SELECT ttl FROM dns_records WHERE domain_binding_id=b.id ORDER BY last_synced_at DESC LIMIT 1),300),COALESCE((SELECT proxied FROM dns_records WHERE domain_binding_id=b.id ORDER BY last_synced_at DESC LIMIT 1),0),COALESCE((SELECT managed_by_panel FROM dns_records WHERE domain_binding_id=b.id ORDER BY last_synced_at DESC LIMIT 1),0),COALESCE((SELECT adopted FROM dns_records WHERE domain_binding_id=b.id ORDER BY last_synced_at DESC LIMIT 1),0) FROM domain_bindings b WHERE b.user_id=? AND b.status <> 'deleted' ORDER BY b.created_at DESC`, userID)
+	items, _, err := a.ListDomainsPage(ctx, userID, 1, 1000000)
+	return items, err
+}
+
+func (a *App) ListDomainsPage(ctx context.Context, userID string, page, pageSize int) ([]Domain, PageInfo, error) {
+	page, pageSize = normalizePage(page, pageSize)
+	var total int
+	if err := a.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM domain_bindings WHERE user_id=? AND status <> 'deleted'`, userID).Scan(&total); err != nil {
+		return nil, PageInfo{}, err
+	}
+	offset := (page - 1) * pageSize
+	rows, err := a.DB.QueryContext(ctx, `SELECT b.id,b.mapping_id,b.hostname,b.normalized_domain,b.https_mode,b.http_redirect,b.status,b.revision,b.created_at,b.updated_at,COALESCE((SELECT type FROM dns_records WHERE domain_binding_id=b.id ORDER BY last_synced_at DESC LIMIT 1),'CNAME'),COALESCE((SELECT content FROM dns_records WHERE domain_binding_id=b.id ORDER BY last_synced_at DESC LIMIT 1),''),COALESCE((SELECT ttl FROM dns_records WHERE domain_binding_id=b.id ORDER BY last_synced_at DESC LIMIT 1),300),COALESCE((SELECT proxied FROM dns_records WHERE domain_binding_id=b.id ORDER BY last_synced_at DESC LIMIT 1),0),COALESCE((SELECT managed_by_panel FROM dns_records WHERE domain_binding_id=b.id ORDER BY last_synced_at DESC LIMIT 1),0),COALESCE((SELECT adopted FROM dns_records WHERE domain_binding_id=b.id ORDER BY last_synced_at DESC LIMIT 1),0) FROM domain_bindings b WHERE b.user_id=? AND b.status <> 'deleted' ORDER BY b.created_at DESC LIMIT ? OFFSET ?`, userID, pageSize, offset)
 	if err != nil {
-		return nil, err
+		return nil, PageInfo{}, err
 	}
 	defer rows.Close()
 	items := make([]Domain, 0)
@@ -916,7 +1009,7 @@ func (a *App) ListDomains(ctx context.Context, userID string) ([]Domain, error) 
 		var item Domain
 		var redirect, proxied, managed, adopted int
 		if err := rows.Scan(&item.ID, &item.MappingID, &item.Hostname, &item.Normalized, &item.HTTPSMode, &redirect, &item.Status, &item.Revision, &item.CreatedAt, &item.UpdatedAt, &item.DNSRecordType, &item.DNSContent, &item.DNSTTL, &proxied, &managed, &adopted); err != nil {
-			return nil, err
+			return nil, PageInfo{}, err
 		}
 		item.HTTPRedirect = redirect == 1
 		item.DNSProxied = proxied == 1
@@ -924,7 +1017,7 @@ func (a *App) ListDomains(ctx context.Context, userID string) ([]Domain, error) 
 		item.DNSAdopted = adopted == 1
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	return items, PageInfo{Page: page, PageSize: pageSize, Total: total}, rows.Err()
 }
 
 func (a *App) CreateDomain(ctx context.Context, ac AuthContext, req DomainRequest, idempotencyKeys ...string) (Domain, error) {
@@ -949,7 +1042,7 @@ func (a *App) CreateDomain(ctx context.Context, ac AuthContext, req DomainReques
 		idempotencyKey = strings.TrimSpace(idempotencyKeys[0])
 	}
 	if idempotencyKey == "" {
-		idempotencyKey = uuid.NewString()
+		idempotencyKey = id.New()
 	}
 	bodyHash := requestHash(req)
 	var existingHash, existingBody string
@@ -995,27 +1088,27 @@ func (a *App) CreateDomain(ctx context.Context, ac AuthContext, req DomainReques
 		}
 	}
 	now := nowString()
-	domainID := uuid.NewString()
+	domainID := id.New()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO domain_bindings(id,user_id,mapping_id,hostname,normalized_domain,https_mode,http_redirect,status,revision,created_at,updated_at) VALUES(?,?,?,?,?,?,?,'pending_dns',1,?,?)`, domainID, ac.UserID, req.MappingID, strings.TrimSpace(req.Hostname), normalized, req.HTTPSMode, boolInt(req.HTTPRedirect), now, now); err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return Domain{}, fmt.Errorf("domain already reserved")
 		}
 		return Domain{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO dns_records(id,user_id,domain_binding_id,type,name,normalized_name,content,ttl,proxied,managed_by_panel,adopted,locked,sync_status) VALUES(?,?,?,?,?,?,?,?,?,0,0,0,'pending')`, uuid.NewString(), ac.UserID, domainID, dnsType, normalized, normalized, dnsContent, dnsTTL, boolInt(dnsProxied)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO dns_records(id,user_id,domain_binding_id,type,name,normalized_name,content,ttl,proxied,managed_by_panel,adopted,locked,sync_status) VALUES(?,?,?,?,?,?,?,?,?,0,0,0,'pending')`, id.New(), ac.UserID, domainID, dnsType, normalized, normalized, dnsContent, dnsTTL, boolInt(dnsProxied)); err != nil {
 		return Domain{}, err
 	}
 	newVersion := desired + 1
 	if _, err := tx.ExecContext(ctx, `UPDATE users SET desired_config_version=?,updated_at=? WHERE id=?`, newVersion, now, ac.UserID); err != nil {
 		return Domain{}, err
 	}
-	opID := uuid.NewString()
+	opID := id.New()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO operations(id,user_id,resource_type,resource_id,operation_type,status,phase,step,idempotency_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, opID, ac.UserID, "domain", domainID, "create", "pending", "dns", "awaiting_provider", idempotencyKey, now, now); err != nil {
 		return Domain{}, err
 	}
 	item := Domain{ID: domainID, MappingID: req.MappingID, Hostname: strings.TrimSpace(req.Hostname), Normalized: normalized, HTTPSMode: req.HTTPSMode, HTTPRedirect: req.HTTPRedirect, DNSRecordType: dnsType, DNSContent: dnsContent, DNSTTL: dnsTTL, DNSProxied: dnsProxied, Status: "pending_dns", Revision: 1, CreatedAt: now, UpdatedAt: now}
 	encoded, _ := json.Marshal(item)
-	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,operation_id,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), ac.UserID, ac.Generation, "POST", "/api/v1/domains", idempotencyKey, bodyHash, 202, string(encoded), opID, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,operation_id,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, id.New(), ac.UserID, ac.Generation, "POST", "/api/v1/domains", idempotencyKey, bodyHash, 202, string(encoded), opID, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
 		return Domain{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1042,7 +1135,7 @@ func (a *App) ResolveDomainDNS(ctx context.Context, ac AuthContext, domainID, ac
 		idempotencyKey = strings.TrimSpace(idempotencyKeys[0])
 	}
 	if idempotencyKey == "" {
-		idempotencyKey = uuid.NewString()
+		idempotencyKey = id.New()
 	}
 	normalizedPath := "/api/v1/domains/" + domainID + "/dns-action"
 	bodyHash := requestHash(map[string]string{"action": action})
@@ -1085,12 +1178,12 @@ func (a *App) ResolveDomainDNS(ctx context.Context, ac AuthContext, domainID, ac
 		if _, err := tx.ExecContext(ctx, `UPDATE domain_bindings SET status='pending_dns',updated_at=? WHERE id=?`, now, domainID); err != nil {
 			return err
 		}
-		opID := uuid.NewString()
+		opID := id.New()
 		if _, err := tx.ExecContext(ctx, `INSERT INTO operations(id,user_id,resource_type,resource_id,operation_type,status,phase,step,idempotency_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, opID, owner, "domain", domainID, "dns_sync", "pending", "dns", "awaiting_provider", idempotencyKey, now, now); err != nil {
 			return err
 		}
 		responseBody, _ := json.Marshal(map[string]string{"operation_id": opID, "status": "pending", "action": action})
-		if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,operation_id,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), ac.UserID, ac.Generation, "POST", normalizedPath, idempotencyKey, bodyHash, 202, string(responseBody), opID, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,operation_id,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, id.New(), ac.UserID, ac.Generation, "POST", normalizedPath, idempotencyKey, bodyHash, 202, string(responseBody), opID, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
 			return err
 		}
 		if err := tx.Commit(); err != nil {
@@ -1106,7 +1199,7 @@ func (a *App) ResolveDomainDNS(ctx context.Context, ac AuthContext, domainID, ac
 		return err
 	}
 	responseBody, _ := json.Marshal(map[string]string{"status": "pending", "action": action})
-	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), ac.UserID, ac.Generation, "POST", normalizedPath, idempotencyKey, bodyHash, 202, string(responseBody), time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id.New(), ac.UserID, ac.Generation, "POST", normalizedPath, idempotencyKey, bodyHash, 202, string(responseBody), time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1128,7 +1221,7 @@ func (a *App) DeleteDomain(ctx context.Context, ac AuthContext, domainID string,
 		idempotencyKey = strings.TrimSpace(idempotencyKeys[0])
 	}
 	if idempotencyKey == "" {
-		idempotencyKey = uuid.NewString()
+		idempotencyKey = id.New()
 	}
 	normalizedPath := "/api/v1/domains/" + domainID
 	bodyHash := requestHash(map[string]interface{}{})
@@ -1151,12 +1244,12 @@ func (a *App) DeleteDomain(ctx context.Context, ac AuthContext, domainID string,
 	if _, err := tx.ExecContext(ctx, `UPDATE users SET desired_config_version=desired_config_version+1,updated_at=? WHERE id=?`, now, ac.UserID); err != nil {
 		return "", err
 	}
-	opID := uuid.NewString()
+	opID := id.New()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO operations(id,user_id,resource_type,resource_id,operation_type,status,phase,step,idempotency_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, opID, ac.UserID, "domain", domainID, "delete", "pending", "router", "awaiting_client", idempotencyKey, now, now); err != nil {
 		return "", err
 	}
 	responseBody, _ := json.Marshal(map[string]string{"operation_id": opID, "status": "pending"})
-	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,operation_id,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), ac.UserID, ac.Generation, "DELETE", normalizedPath, idempotencyKey, bodyHash, 202, string(responseBody), opID, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,operation_id,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, id.New(), ac.UserID, ac.Generation, "DELETE", normalizedPath, idempotencyKey, bodyHash, 202, string(responseBody), opID, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
 		return "", err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1204,7 +1297,7 @@ func (a *App) FullConfig(ctx context.Context, ac AuthContext) (ConfigSnapshot, e
 	unsigned, _ = json.Marshal(snapshot)
 	snapshot.Signature = a.Crypto.Sign(unsigned)
 	encoded, _ := json.Marshal(snapshot)
-	_, _ = a.DB.ExecContext(ctx, `INSERT OR REPLACE INTO config_snapshots(id,user_id,version,schema_version,session_generation,config_json,config_hash,config_signing_key_id,config_signature,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), ac.UserID, version, snapshot.SchemaVersion, generation, string(encoded), snapshot.ConfigHash, snapshot.SigningKeyID, snapshot.Signature, nowString())
+	_, _ = a.DB.ExecContext(ctx, `INSERT OR REPLACE INTO config_snapshots(id,user_id,version,schema_version,session_generation,config_json,config_hash,config_signing_key_id,config_signature,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, id.New(), ac.UserID, version, snapshot.SchemaVersion, generation, string(encoded), snapshot.ConfigHash, snapshot.SigningKeyID, snapshot.Signature, nowString())
 	return snapshot, nil
 }
 
@@ -1288,13 +1381,34 @@ func (a *App) ApplyResult(ctx context.Context, ac AuthContext, req ApplyResultRe
 		_ = a.EnqueueRouterSnapshot(ctx)
 		return a.Audit(ctx, ac, "config_apply_succeeded", "config", fmt.Sprint(req.ConfigVersion), "success", map[string]interface{}{"config_version": req.ConfigVersion}, "")
 	}
-	_, err := a.DB.ExecContext(ctx, `UPDATE users SET last_failed_config_version=?,updated_at=? WHERE id=?`, req.ConfigVersion, now, ac.UserID)
-	if err == nil {
-		_, _ = a.DB.ExecContext(ctx, `UPDATE mappings SET lifecycle_status='config_error',observed_state='offline',updated_at=? WHERE user_id=? AND lifecycle_status NOT IN ('deleted','disabled','deleting')`, now, ac.UserID)
-		_, _ = a.DB.ExecContext(ctx, `UPDATE user_runtime_state SET observed_client_status='online',last_error_code=?,last_error_message=?,updated_at=? WHERE user_id=?`, req.ErrorCode, safeError(req.ErrorMessage), now, ac.UserID)
-		_ = a.Audit(ctx, ac, "config_apply_failed", "config", fmt.Sprint(req.ConfigVersion), "failure", map[string]interface{}{"error_code": req.ErrorCode}, "")
+	tx, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
 	}
-	return err
+	defer tx.Rollback()
+	// A failed replacement remains in the immutable revision history, but it
+	// must no longer be the mapping's pending revision. The previous active
+	// revision stays authoritative while the newly reserved port is released.
+	if _, err := tx.ExecContext(ctx, `UPDATE mapping_revisions SET status='failed' WHERE mapping_id IN (SELECT id FROM mappings WHERE user_id=?) AND status IN ('pending','applying')`, ac.UserID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE mappings SET pending_revision_id=NULL,lifecycle_status=CASE WHEN lifecycle_status IN ('deleted','disabled','deleting') THEN lifecycle_status ELSE 'config_error' END,observed_state=CASE WHEN lifecycle_status IN ('deleted','disabled','deleting') THEN observed_state ELSE 'offline' END,updated_at=? WHERE user_id=?`, now, ac.UserID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM port_leases WHERE mapping_id IN (SELECT id FROM mappings WHERE user_id=?) AND lease_role='pending'`, ac.UserID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET last_failed_config_version=?,updated_at=? WHERE id=?`, req.ConfigVersion, now, ac.UserID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE user_runtime_state SET observed_client_status='online',last_error_code=?,last_error_message=?,updated_at=? WHERE user_id=?`, req.ErrorCode, safeError(req.ErrorMessage), now, ac.UserID); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	_ = a.Audit(ctx, ac, "config_apply_failed", "config", fmt.Sprint(req.ConfigVersion), "failure", map[string]interface{}{"error_code": req.ErrorCode}, "")
+	return nil
 }
 
 func (a *App) Heartbeat(ctx context.Context, ac AuthContext, clientVersion, frpcVersion string) error {
@@ -1319,31 +1433,46 @@ func (a *App) TouchSession(ctx context.Context, ac AuthContext) error {
 }
 
 func (a *App) AdminUsers(ctx context.Context) ([]UserRecord, error) {
-	rows, err := a.DB.QueryContext(ctx, `SELECT u.id,u.username,u.role,u.status,u.must_change_password,u.created_at,u.desired_config_version,u.applied_config_version,u.active_session_generation,COALESCE(fc.secret_version,0),COALESCE(fc.rotated_at,'') FROM users u LEFT JOIN frp_credentials fc ON fc.user_id=u.id WHERE u.status <> 'deleted' ORDER BY u.created_at DESC`)
+	items, _, err := a.AdminUsersPage(ctx, 1, 200)
+	return items, err
+}
+
+func (a *App) AdminUsersPage(ctx context.Context, page, pageSize int) ([]UserRecord, PageInfo, error) {
+	page, pageSize = normalizePage(page, pageSize)
+	var total int
+	if err := a.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM users WHERE status <> 'deleted'`).Scan(&total); err != nil {
+		return nil, PageInfo{}, err
+	}
+	offset := (page - 1) * pageSize
+	rows, err := a.DB.QueryContext(ctx, `SELECT u.id,u.username,u.role,u.status,u.must_change_password,u.must_change_username,u.created_at,u.desired_config_version,u.applied_config_version,u.active_session_generation,COALESCE(fc.secret_version,0),COALESCE(fc.rotated_at,'') FROM users u LEFT JOIN frp_credentials fc ON fc.user_id=u.id WHERE u.status <> 'deleted' ORDER BY u.created_at DESC LIMIT ? OFFSET ?`, pageSize, offset)
 	if err != nil {
-		return nil, err
+		return nil, PageInfo{}, err
 	}
 	defer rows.Close()
 	result := make([]UserRecord, 0)
 	for rows.Next() {
 		var item UserRecord
-		var must int
+		var must, mustUsername int
 		var secretVersion int
 		var rotatedAt string
-		if err := rows.Scan(&item.ID, &item.Username, &item.Role, &item.Status, &must, &item.CreatedAt, &item.DesiredConfig, &item.AppliedConfig, &item.ActiveSessionGen, &secretVersion, &rotatedAt); err != nil {
-			return nil, err
+		if err := rows.Scan(&item.ID, &item.Username, &item.Role, &item.Status, &must, &mustUsername, &item.CreatedAt, &item.DesiredConfig, &item.AppliedConfig, &item.ActiveSessionGen, &secretVersion, &rotatedAt); err != nil {
+			return nil, PageInfo{}, err
 		}
 		item.MustChangePassword = must == 1
+		item.MustChangeUsername = mustUsername == 1
 		item.FRPCredential = FRPCredentialStatus{Present: secretVersion > 0, SecretVersion: int64(secretVersion), RotatedAt: rotatedAt, Status: "active"}
 		if item.Status != "active" {
 			item.FRPCredential.Status = item.Status
 		}
 		result = append(result, item)
 	}
-	return result, rows.Err()
+	return result, PageInfo{Page: page, PageSize: pageSize, Total: total}, rows.Err()
 }
 
 func (a *App) CreateUser(ctx context.Context, ac AuthContext, username string) (UserRecord, string, error) {
+	if ac.Role != "admin" {
+		return UserRecord{}, "", ErrForbidden
+	}
 	username = strings.TrimSpace(username)
 	if !validUsername(username) || username == "admin" {
 		return UserRecord{}, "", fmt.Errorf("invalid username")
@@ -1356,7 +1485,7 @@ func (a *App) CreateUser(ctx context.Context, ac AuthContext, username string) (
 	if err != nil {
 		return UserRecord{}, "", err
 	}
-	userID := uuid.NewString()
+	userID := id.New()
 	secret, err := randomSecret()
 	if err != nil {
 		return UserRecord{}, "", err
@@ -1366,11 +1495,11 @@ func (a *App) CreateUser(ctx context.Context, ac AuthContext, username string) (
 		return UserRecord{}, "", err
 	}
 	now := nowString()
-	_, err = a.DB.ExecContext(ctx, `INSERT INTO users(id,username,password_hash,role,status,must_change_password,active_session_generation,created_at,updated_at) VALUES(?,?,?,'user','active',1,0,?,?)`, userID, username, hash, now, now)
+	_, err = a.DB.ExecContext(ctx, `INSERT INTO users(id,username,password_hash,role,status,must_change_password,must_change_username,active_session_generation,created_at,updated_at) VALUES(?,?,?,'user','active',1,0,0,?,?)`, userID, username, hash, now, now)
 	if err != nil {
 		return UserRecord{}, "", err
 	}
-	_, err = a.DB.ExecContext(ctx, `INSERT INTO frp_credentials(id,user_id,frp_username,secret_hash,secret_ciphertext,secret_nonce,created_at) VALUES(?,?,?,?,?,?,?)`, uuid.NewString(), userID, "user-"+shortID(userID), sha256Hex(secret), ciphertext, nonce, now)
+	_, err = a.DB.ExecContext(ctx, `INSERT INTO frp_credentials(id,user_id,frp_username,secret_hash,secret_ciphertext,secret_nonce,created_at) VALUES(?,?,?,?,?,?,?)`, id.New(), userID, "user-"+shortID(userID), sha256Hex(secret), ciphertext, nonce, now)
 	if err != nil {
 		return UserRecord{}, "", err
 	}
@@ -1379,6 +1508,9 @@ func (a *App) CreateUser(ctx context.Context, ac AuthContext, username string) (
 }
 
 func (a *App) SetUserStatus(ctx context.Context, ac AuthContext, userID, status string) error {
+	if ac.Role != "admin" {
+		return ErrForbidden
+	}
 	if status != "active" && status != "disabled" {
 		return fmt.Errorf("invalid user status")
 	}
@@ -1398,6 +1530,9 @@ func (a *App) SetUserStatus(ctx context.Context, ac AuthContext, userID, status 
 }
 
 func (a *App) ResetUserPassword(ctx context.Context, ac AuthContext, userID string) (string, error) {
+	if ac.Role != "admin" {
+		return "", ErrForbidden
+	}
 	password, err := config.GenerateInitialPassword()
 	if err != nil {
 		return "", err
@@ -1406,7 +1541,7 @@ func (a *App) ResetUserPassword(ctx context.Context, ac AuthContext, userID stri
 	if err != nil {
 		return "", err
 	}
-	result, err := a.DB.ExecContext(ctx, `UPDATE users SET password_hash=?,must_change_password=1,auth_version=auth_version+1,active_session_generation=active_session_generation+1,updated_at=? WHERE id=? AND role='user'`, hash, nowString(), userID)
+	result, err := a.DB.ExecContext(ctx, `UPDATE users SET password_hash=?,must_change_password=1,must_change_username=0,auth_version=auth_version+1,active_session_generation=active_session_generation+1,updated_at=? WHERE id=? AND role='user'`, hash, nowString(), userID)
 	if err != nil {
 		return "", err
 	}
@@ -1457,7 +1592,7 @@ func (a *App) ResetFRPCredential(ctx context.Context, ac AuthContext, targetUser
 	}
 
 	if strings.TrimSpace(idempotencyKey) == "" {
-		idempotencyKey = uuid.NewString()
+		idempotencyKey = id.New()
 	}
 	bodyHash := requestHash(map[string]string{"target_user_id": targetUserID, "current_password": currentPassword})
 	tx, err := a.DB.BeginTx(ctx, nil)
@@ -1518,7 +1653,7 @@ func (a *App) ResetFRPCredential(ctx context.Context, ac AuthContext, targetUser
 	}
 	result := FRPSecretResetResult{Status: "rotated", SecretVersion: nextSecretVersion, SessionGeneration: nextGeneration}
 	encoded, _ := json.Marshal(result)
-	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), ac.UserID, ac.Generation, "POST", normalizedPath, idempotencyKey, bodyHash, 200, string(encoded), time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id.New(), ac.UserID, ac.Generation, "POST", normalizedPath, idempotencyKey, bodyHash, 200, string(encoded), time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
 		return FRPSecretResetResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1539,7 +1674,7 @@ func (a *App) DeleteUser(ctx context.Context, ac AuthContext, userID string, for
 	}
 	idempotencyKey := strings.TrimSpace(requestedKey)
 	if idempotencyKey == "" {
-		idempotencyKey = uuid.NewString()
+		idempotencyKey = id.New()
 	}
 	normalizedPath := "/api/v1/admin/users/" + userID
 	bodyHash := requestHash(map[string]bool{"force": force})
@@ -1577,7 +1712,7 @@ func (a *App) DeleteUser(ctx context.Context, ac AuthContext, userID string, for
 			return "", err
 		}
 		responseBody, _ := json.Marshal(map[string]string{"operation_id": existingOperation, "status": "pending"})
-		if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,operation_id,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), ac.UserID, ac.Generation, "DELETE", normalizedPath, idempotencyKey, bodyHash, 202, string(responseBody), existingOperation, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), nowString()); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,operation_id,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, id.New(), ac.UserID, ac.Generation, "DELETE", normalizedPath, idempotencyKey, bodyHash, 202, string(responseBody), existingOperation, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), nowString()); err != nil {
 			return "", err
 		}
 		if err := tx.Commit(); err != nil {
@@ -1655,7 +1790,7 @@ func (a *App) DeleteUser(ctx context.Context, ac AuthContext, userID string, for
 	if _, err := tx.ExecContext(ctx, `UPDATE mappings SET lifecycle_status='deleting',desired_state='disabled',updated_at=? WHERE user_id=? AND lifecycle_status <> 'deleted'`, now, userID); err != nil {
 		return "", err
 	}
-	operationID := uuid.NewString()
+	operationID := id.New()
 	compensationStatus := "not_required"
 	if force {
 		compensationStatus = "force_requested"
@@ -1664,17 +1799,17 @@ func (a *App) DeleteUser(ctx context.Context, ac AuthContext, userID string, for
 		return "", err
 	}
 	for _, domainID := range domainIDs {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO operations(id,user_id,resource_type,resource_id,operation_type,status,phase,step,idempotency_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), userID, "domain", domainID, "delete", "pending", "dns", "awaiting_external", "user-delete:"+operationID+":"+domainID, now, now); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO operations(id,user_id,resource_type,resource_id,operation_type,status,phase,step,idempotency_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id.New(), userID, "domain", domainID, "delete", "pending", "dns", "awaiting_external", "user-delete:"+operationID+":"+domainID, now, now); err != nil {
 			return "", err
 		}
 	}
 	for _, mappingID := range mappingIDs {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO operations(id,user_id,resource_type,resource_id,operation_type,status,phase,step,idempotency_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), userID, "mapping", mappingID, "delete", "pending", "user", "awaiting_domains", "user-delete:"+operationID+":"+mappingID, now, now); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO operations(id,user_id,resource_type,resource_id,operation_type,status,phase,step,idempotency_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id.New(), userID, "mapping", mappingID, "delete", "pending", "user", "awaiting_domains", "user-delete:"+operationID+":"+mappingID, now, now); err != nil {
 			return "", err
 		}
 	}
 	responseBody, _ := json.Marshal(map[string]string{"operation_id": operationID, "status": "pending"})
-	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,operation_id,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), ac.UserID, ac.Generation, "DELETE", normalizedPath, idempotencyKey, bodyHash, 202, string(responseBody), operationID, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_records(id,user_id,session_generation,http_method,normalized_path,idempotency_key,request_body_hash,response_status,response_body_json,operation_id,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, id.New(), ac.UserID, ac.Generation, "DELETE", normalizedPath, idempotencyKey, bodyHash, 202, string(responseBody), operationID, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano), now); err != nil {
 		return "", err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1746,7 +1881,7 @@ func (a *App) SaveCloudflareToken(ctx context.Context, ac AuthContext, token str
 	// Keep the previous active credential until the new pending version has
 	// completed capability verification. A failed replacement must not take a
 	// working DNS integration offline.
-	_, err = a.DB.ExecContext(ctx, `INSERT INTO cloudflare_credentials(id,user_id,token_version,ciphertext,nonce,status,capabilities_json,created_at) VALUES(?,?,?,?,?,'pending','{}',?)`, uuid.NewString(), ac.UserID, next, ciphertext, nonce, now)
+	_, err = a.DB.ExecContext(ctx, `INSERT INTO cloudflare_credentials(id,user_id,token_version,ciphertext,nonce,status,capabilities_json,created_at) VALUES(?,?,?,?,?,'pending','{}',?)`, id.New(), ac.UserID, next, ciphertext, nonce, now)
 	if err == nil {
 		_ = a.Audit(ctx, ac, "cloudflare_token_uploaded", "cloudflare_token", fmt.Sprint(next), "pending", nil, "")
 		version := int64(next)
@@ -1850,16 +1985,33 @@ func (a *App) authorizeFRP(ctx context.Context, operation, frpUsername, runtimeC
 }
 
 func (a *App) Operations(ctx context.Context, userID string, admin bool) ([]map[string]interface{}, error) {
+	items, _, err := a.OperationsPage(ctx, userID, admin, 1, 200)
+	return items, err
+}
+
+func (a *App) OperationsPage(ctx context.Context, userID string, admin bool, page, pageSize int) ([]map[string]interface{}, PageInfo, error) {
+	page, pageSize = normalizePage(page, pageSize)
 	query := `SELECT o.id,COALESCE(o.user_id,''),o.resource_type,COALESCE(o.resource_id,''),o.operation_type,o.status,o.phase,o.step,COALESCE(o.error_code,''),COALESCE(o.error_message,''),o.created_at,o.updated_at,COALESCE(o.compensation_status,'not_required'),(SELECT COUNT(1) FROM external_residues er WHERE er.operation_id=o.id AND er.resolved_at IS NULL) FROM operations o`
 	args := []interface{}{}
 	if !admin {
 		query += ` WHERE user_id=?`
 		args = append(args, userID)
 	}
-	query += ` ORDER BY created_at DESC LIMIT 100`
+	var total int
+	countQuery := `SELECT COUNT(1) FROM operations`
+	countArgs := []interface{}{}
+	if !admin {
+		countQuery += ` WHERE user_id=?`
+		countArgs = append(countArgs, userID)
+	}
+	if err := a.DB.QueryRowContext(ctx, countQuery, countArgs...).Scan(&total); err != nil {
+		return nil, PageInfo{}, err
+	}
+	query += ` ORDER BY created_at DESC LIMIT ? OFFSET ?`
+	args = append(args, pageSize, (page-1)*pageSize)
 	rows, err := a.DB.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, PageInfo{}, err
 	}
 	type operationRow struct {
 		id, owner, resourceType, resourceID, opType, status, phase, step, code, message, created, updated, compensationStatus string
@@ -1870,26 +2022,26 @@ func (a *App) Operations(ctx context.Context, userID string, admin bool) ([]map[
 		var item operationRow
 		if err := rows.Scan(&item.id, &item.owner, &item.resourceType, &item.resourceID, &item.opType, &item.status, &item.phase, &item.step, &item.code, &item.message, &item.created, &item.updated, &item.compensationStatus, &item.residueCount); err != nil {
 			_ = rows.Close()
-			return nil, err
+			return nil, PageInfo{}, err
 		}
 		rowsData = append(rowsData, item)
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
-		return nil, err
+		return nil, PageInfo{}, err
 	}
 	if err := rows.Close(); err != nil {
-		return nil, err
+		return nil, PageInfo{}, err
 	}
 	result := make([]map[string]interface{}, 0)
 	for _, item := range rowsData {
 		residues, err := a.externalResidues(ctx, item.id)
 		if err != nil {
-			return nil, err
+			return nil, PageInfo{}, err
 		}
 		result = append(result, map[string]interface{}{"id": item.id, "user_id": item.owner, "resource_type": item.resourceType, "resource_id": item.resourceID, "operation_type": item.opType, "status": item.status, "phase": item.phase, "step": item.step, "error_code": item.code, "error_message": item.message, "compensation_status": item.compensationStatus, "external_residue_count": item.residueCount, "external_residues": residues, "created_at": item.created, "updated_at": item.updated})
 	}
-	return result, nil
+	return result, PageInfo{Page: page, PageSize: pageSize, Total: total}, nil
 }
 
 func (a *App) externalResidues(ctx context.Context, operationID string) ([]map[string]interface{}, error) {
@@ -1999,7 +2151,21 @@ func (a *App) Audit(ctx context.Context, ac AuthContext, action, resourceType, r
 		}
 	}
 	encoded, _ := json.Marshal(metadata)
-	_, err := a.DB.ExecContext(ctx, `INSERT INTO audit_logs(id,actor_type,actor_id,server_session_id,session_generation,source_ip,user_agent,request_id,operation_id,action,resource_type,resource_id,result,metadata_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), ac.Role, ac.UserID, ac.SessionID, ac.Generation, "", "", uuid.NewString(), nullableString(operationID), action, nullableString(resourceType), nullableString(resourceID), result, string(encoded), nowString())
+	requestMetadata := auditMetadataFromContext(ctx)
+	sourceIP, userAgent, requestID := ac.SourceIP, ac.UserAgent, ac.RequestID
+	if requestMetadata.SourceIP != "" {
+		sourceIP = requestMetadata.SourceIP
+	}
+	if requestMetadata.UserAgent != "" {
+		userAgent = requestMetadata.UserAgent
+	}
+	if requestMetadata.RequestID != "" {
+		requestID = requestMetadata.RequestID
+	}
+	if requestID == "" {
+		requestID = id.New()
+	}
+	_, err := a.DB.ExecContext(ctx, `INSERT INTO audit_logs(id,actor_type,actor_id,server_session_id,session_generation,source_ip,user_agent,request_id,operation_id,action,resource_type,resource_id,result,metadata_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id.New(), ac.Role, ac.UserID, ac.SessionID, ac.Generation, sourceIP, safeError(userAgent), requestID, nullableString(operationID), action, nullableString(resourceType), nullableString(resourceID), result, string(encoded), nowString())
 	return err
 }
 
@@ -2137,6 +2303,19 @@ func boolInt(value bool) int {
 	}
 	return 0
 }
+
+func normalizePage(page, pageSize int) (int, int) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 50
+	}
+	if pageSize > 200 {
+		pageSize = 200
+	}
+	return page, pageSize
+}
 func shortID(value string) string {
 	value = strings.ReplaceAll(value, "-", "")
 	if len(value) > 12 {
@@ -2146,6 +2325,8 @@ func shortID(value string) string {
 }
 func safeError(value string) string {
 	value = strings.TrimSpace(value)
+	value = strings.ReplaceAll(value, "\r", " ")
+	value = strings.ReplaceAll(value, "\n", " ")
 	if len(value) > 240 {
 		return value[:240]
 	}

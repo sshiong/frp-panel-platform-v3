@@ -74,6 +74,12 @@ func AtomicWrite(path string, snapshot Snapshot) error {
 		return err
 	}
 	tmp := path + fmt.Sprintf(".tmp.%d", time.Now().UnixNano())
+	keepTemp := true
+	defer func() {
+		if keepTemp {
+			_ = os.Remove(tmp)
+		}
+	}()
 	file, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
@@ -90,9 +96,9 @@ func AtomicWrite(path string, snapshot Snapshot) error {
 		return err
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
 		return err
 	}
+	keepTemp = false
 	directory, err := os.Open(filepath.Dir(path))
 	if err != nil {
 		return err

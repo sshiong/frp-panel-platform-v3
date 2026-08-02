@@ -21,6 +21,8 @@ type Manager struct {
 	KeyID          string
 }
 
+var randomReader io.Reader = rand.Reader
+
 func Load(dataDir, masterPath, signingPath string) (*Manager, error) {
 	master, err := loadOrCreate(masterPath, 32)
 	if err != nil {
@@ -74,7 +76,7 @@ func encryptWithKey(key, plaintext []byte, aad string) (ciphertext, nonce []byte
 		return nil, nil, err
 	}
 	nonce = make([]byte, gcm.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+	if _, err := io.ReadFull(randomReader, nonce); err != nil {
 		return nil, nil, err
 	}
 	return gcm.Seal(nil, nonce, plaintext, []byte(aad)), nonce, nil
@@ -88,6 +90,9 @@ func decryptWithKey(key, ciphertext, nonce []byte, aad string) ([]byte, error) {
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
 		return nil, err
+	}
+	if len(nonce) != gcm.NonceSize() {
+		return nil, fmt.Errorf("invalid nonce length: got %d, want %d", len(nonce), gcm.NonceSize())
 	}
 	return gcm.Open(nil, nonce, ciphertext, []byte(aad))
 }
@@ -108,12 +113,12 @@ func loadOrCreate(path string, size int) ([]byte, error) {
 	}
 	content := make([]byte, size)
 	if size == ed25519.PrivateKeySize {
-		_, private, err := ed25519.GenerateKey(rand.Reader)
+		_, private, err := ed25519.GenerateKey(randomReader)
 		if err != nil {
 			return nil, err
 		}
 		copy(content, private)
-	} else if _, err := io.ReadFull(rand.Reader, content); err != nil {
+	} else if _, err := io.ReadFull(randomReader, content); err != nil {
 		return nil, err
 	}
 	if err := os.WriteFile(path, content, 0o600); err != nil {

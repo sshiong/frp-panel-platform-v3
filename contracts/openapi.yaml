@@ -92,6 +92,7 @@ paths:
               required: [current_password, new_password]
               properties:
                 current_password: { type: string, format: password }
+                new_username: { type: string, minLength: 3, maxLength: 40, description: Required when the initial administrator identity is being completed. }
                 new_password: { type: string, format: password, minLength: 12 }
       responses:
         '200': { description: Password changed }
@@ -153,6 +154,9 @@ paths:
     get:
       operationId: listMappings
       security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/PageSize' }
       responses:
         '200':
           description: User-scoped mappings
@@ -160,10 +164,13 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [items, config_version]
+                required: [items, config_version, page, page_size, total]
                 properties:
                   items: { type: array, items: { $ref: '#/components/schemas/Mapping' } }
                   config_version: { type: integer, format: int64 }
+                  page: { type: integer, minimum: 1 }
+                  page_size: { type: integer, minimum: 1, maximum: 200 }
+                  total: { type: integer, minimum: 0 }
     post:
       operationId: createMapping
       security: [{ bearerAuth: [] }]
@@ -247,6 +254,9 @@ paths:
     get:
       operationId: listDomains
       security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/PageSize' }
       responses:
         '200':
           description: User-scoped Domain Bindings
@@ -254,9 +264,12 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [items]
+                required: [items, page, page_size, total]
                 properties:
                   items: { type: array, items: { $ref: '#/components/schemas/Domain' } }
+                  page: { type: integer, minimum: 1 }
+                  page_size: { type: integer, minimum: 1, maximum: 200 }
+                  total: { type: integer, minimum: 0 }
     post:
       operationId: createDomain
       security: [{ bearerAuth: [] }]
@@ -308,6 +321,9 @@ paths:
     get:
       operationId: listOperations
       security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/PageSize' }
       responses:
         '200':
           description: User-scoped or administrator-scoped Operation records
@@ -315,9 +331,12 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [items]
+                required: [items, page, page_size, total]
                 properties:
                   items: { type: array, items: { $ref: '#/components/schemas/Operation' } }
+                  page: { type: integer, minimum: 1 }
+                  page_size: { type: integer, minimum: 1, maximum: 200 }
+                  total: { type: integer, minimum: 0 }
   /api/v1/operations/{id}/retry:
     post:
       operationId: retryOperation
@@ -428,6 +447,9 @@ paths:
     get:
       operationId: adminListUsers
       security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/PageSize' }
       responses:
         '200':
           description: User list
@@ -435,9 +457,12 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [items]
+                required: [items, page, page_size, total]
                 properties:
                   items: { type: array, items: { $ref: '#/components/schemas/UserRecord' } }
+                  page: { type: integer, minimum: 1 }
+                  page_size: { type: integer, minimum: 1, maximum: 200 }
+                  total: { type: integer, minimum: 0 }
     post:
       operationId: adminCreateUser
       security: [{ bearerAuth: [] }]
@@ -526,8 +551,22 @@ paths:
     get:
       operationId: adminOperations
       security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/PageSize' }
       responses:
-        '200': { description: All operation records, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        '200':
+          description: All operation records
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page, page_size, total]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Operation' } }
+                  page: { type: integer, minimum: 1 }
+                  page_size: { type: integer, minimum: 1, maximum: 200 }
+                  total: { type: integer, minimum: 0 }
   /api/v1/admin/stats:
     get:
       operationId: adminStats
@@ -552,6 +591,16 @@ paths:
         '201': { description: Encrypted backup created }
 components:
   parameters:
+    Page:
+      name: page
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: page_size
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -623,13 +672,14 @@ components:
         session_generation: { type: integer, format: int64 }
     UserSummary:
       type: object
-      required: [id, username, role, status, must_change_password]
+      required: [id, username, role, status, must_change_password, must_change_username]
       properties:
         id: { type: string, format: uuid }
         username: { type: string }
         role: { type: string, enum: [admin, user] }
         status: { type: string, enum: [active, disabled, deleting, deleted] }
         must_change_password: { type: boolean }
+        must_change_username: { type: boolean }
     FRPCredentialStatus:
       type: object
       required: [present, secret_version, status]

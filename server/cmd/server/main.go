@@ -25,26 +25,39 @@ import (
 
 func main() {
 	cfg := config.Load()
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(signals)
+	if err := run(cfg, signals); err != nil {
+		os.Exit(1)
+	}
+}
+
+func run(cfg config.Config, signals <-chan os.Signal) error {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	if err := cfg.ValidateTransportSecurity(); err != nil {
+		logger.Error("server_transport_security", "error", err)
+		return err
+	}
 	if err := cfg.EnsureDirs(); err != nil {
 		logger.Error("config", "error", err)
-		os.Exit(1)
+		return err
 	}
 	transportSecret, err := config.LoadOrCreateTransportSecret(cfg.FRPSTransportSecretFile)
 	if err != nil {
 		logger.Error("frps_transport_secret", "error", err)
-		os.Exit(1)
+		return err
 	}
 	cfg.FRPSTransportSecret = transportSecret
 	secrets, err := crypto.Load(cfg.DataDir, cfg.MasterKeyPath, cfg.ConfigSigningPath)
 	if err != nil {
 		logger.Error("secrets", "error", err)
-		os.Exit(1)
+		return err
 	}
 	database, err := db.Open(cfg.DBPath)
 	if err != nil {
 		logger.Error("database", "error", err)
-		os.Exit(1)
+		return err
 	}
 	defer database.Close()
 	app := service.New(database, cfg, secrets)
@@ -53,7 +66,7 @@ func main() {
 		frpsProcess, err = frps.Start(frps.Config{Binary: cfg.FRPSBinary, SHA256: cfg.FRPSBinarySHA256, Config: cfg.FRPSConfigPath})
 		if err != nil {
 			logger.Error("frps_start", "error", err)
-			os.Exit(1)
+			return err
 		}
 		defer func() { _ = frpsProcess.Stop() }()
 		logger.Info("frps_started", "pid", frpsProcess.PID())
@@ -69,7 +82,7 @@ func main() {
 	initialPassword, err := app.EnsureAdmin(context.Background())
 	if err != nil {
 		logger.Error("admin_initialization", "error", err)
-		os.Exit(1)
+		return err
 	}
 	if initialPassword != "" {
 		logger.Info("initial_admin_ready", "credential_file", cfg.DataDir+"/initial-admin.txt")
@@ -90,7 +103,7 @@ func main() {
 		runtime, runtimeErr := router.NewRuntime(secrets.RouterKey, cfg.RouterControlTarget, cfg.RouterBusinessTarget)
 		if runtimeErr != nil {
 			logger.Error("router_runtime", "error", runtimeErr)
-			os.Exit(1)
+			return runtimeErr
 		}
 		routerCtx, cancel := context.WithCancel(workerCtx)
 		cancelRouter = cancel
@@ -149,13 +162,16 @@ func main() {
 	server := &http.Server{Addr: cfg.ListenAddr, Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {
 		logger.Info("server_started", "addr", cfg.ListenAddr, "frps_public_host", cfg.FRPSPublicHost, "frps_public_port", cfg.FRPSPublicPort)
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("server_stopped", "error", err)
-			os.Exit(1)
+		var serveErr error
+		if cfg.TLSCertFile != "" {
+			serveErr = server.ListenAndServeTLS(cfg.TLSCertFile, cfg.TLSKeyFile)
+		} else {
+			serveErr = server.ListenAndServe()
+		}
+		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			logger.Error("server_stopped", "error", serveErr)
 		}
 	}()
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	<-signals
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -167,4 +183,5 @@ func main() {
 		_ = routerServer.Shutdown(ctx)
 	}
 	_ = server.Shutdown(ctx)
+	return nil
 }

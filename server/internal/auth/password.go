@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"strings"
 
 	"golang.org/x/crypto/argon2"
@@ -18,12 +19,14 @@ const (
 	saltLen      = 16
 )
 
+var passwordRandomReader io.Reader = rand.Reader
+
 func HashPassword(password string) (string, error) {
 	if len(password) < 12 {
 		return "", fmt.Errorf("password must be at least 12 characters")
 	}
 	salt := make([]byte, saltLen)
-	if _, err := rand.Read(salt); err != nil {
+	if _, err := io.ReadFull(passwordRandomReader, salt); err != nil {
 		return "", err
 	}
 	hash := argon2.IDKey([]byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLen)

@@ -12,3 +12,6 @@ jobs:
         with:
           go-version: '1.24.x'
       - run: make perf
+        env:
+          FRP_PERF: '1'
+          FRP_PERF_SCALE: '1'

@@ -24,7 +24,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "FRP_BACKUP_PASSWORD is required and must be supplied out of band")
 		os.Exit(2)
 	}
-	previous, err := backup.RestoreWithOptions(*input, password, *target, backup.Options{DataDir: *dataDir})
+	previous, err := restore(*input, password, *target, *dataDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "restore failed: %v\n", err)
 		os.Exit(1)
@@ -34,4 +34,14 @@ func main() {
 		return
 	}
 	fmt.Printf("restore completed; previous database preserved at %s\n", previous)
+}
+
+func restore(input, password, target, dataDir string) (string, error) {
+	if input == "" || target == "" {
+		return "", fmt.Errorf("input and target are required")
+	}
+	if password == "" {
+		return "", fmt.Errorf("FRP_BACKUP_PASSWORD is required")
+	}
+	return backup.RestoreWithOptions(input, password, target, backup.Options{DataDir: dataDir})
 }

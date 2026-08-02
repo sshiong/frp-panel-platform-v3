@@ -17,6 +17,18 @@ type route struct {
 }
 
 func main() {
+	routes, err := collectRoutes()
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(routes); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func collectRoutes() ([]route, error) {
 	var routes []route
 	err := chi.Walk(httpapi.RouteManifestRoutes(), func(method, path string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 		if len(path) >= len("/api/v1") && path[:len("/api/v1")] == "/api/v1" {
@@ -25,8 +37,7 @@ func main() {
 		return nil
 	})
 	if err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return nil, err
 	}
 	sort.Slice(routes, func(i, j int) bool {
 		if routes[i].Path == routes[j].Path {
@@ -34,8 +45,5 @@ func main() {
 		}
 		return routes[i].Path < routes[j].Path
 	})
-	if err := json.NewEncoder(os.Stdout).Encode(routes); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	return routes, nil
 }

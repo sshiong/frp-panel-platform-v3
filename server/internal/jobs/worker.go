@@ -9,8 +9,8 @@ import (
 	"math"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/ricardo/frp-panel-platform/server/internal/db"
+	"github.com/ricardo/frp-panel-platform/server/internal/id"
 )
 
 var ErrNoJob = errors.New("no due job")
@@ -55,7 +55,7 @@ type Store struct {
 
 func New(database *db.DB, owner string) *Store {
 	if owner == "" {
-		owner = uuid.NewString()
+		owner = id.New()
 	}
 	return &Store{DB: database, Owner: owner, Lease: 30 * time.Second, RetryBase: time.Second}
 }
@@ -71,14 +71,14 @@ func (s *Store) Enqueue(ctx context.Context, jobType, resourceType, resourceID, 
 	if err != nil {
 		return "", err
 	}
-	id := uuid.NewString()
+	jobID := id.New()
 	now := time.Now().UTC()
-	_, err = s.DB.ExecContext(ctx, `INSERT OR IGNORE INTO jobs(id,type,resource_type,resource_id,status,run_after,attempts,max_attempts,deduplication_key,token_version,payload_json,created_at,updated_at) VALUES(?,?,?,?, 'pending', ?,0,5,?,?,?, ?, ?)`, id, jobType, resourceType, nullable(resourceID), now.Format(time.RFC3339Nano), nullable(deduplicationKey), tokenVersion, string(encoded), now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+	_, err = s.DB.ExecContext(ctx, `INSERT OR IGNORE INTO jobs(id,type,resource_type,resource_id,status,run_after,attempts,max_attempts,deduplication_key,token_version,payload_json,created_at,updated_at) VALUES(?,?,?,?, 'pending', ?,0,5,?,?,?, ?, ?)`, jobID, jobType, resourceType, nullable(resourceID), now.Format(time.RFC3339Nano), nullable(deduplicationKey), tokenVersion, string(encoded), now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
 	if err != nil {
 		return "", err
 	}
 	if deduplicationKey == "" {
-		return id, nil
+		return jobID, nil
 	}
 	var existing string
 	if err := s.DB.QueryRowContext(ctx, `SELECT id FROM jobs WHERE type=? AND deduplication_key=? AND status IN ('pending','running','retry_wait') ORDER BY created_at ASC LIMIT 1`, jobType, deduplicationKey).Scan(&existing); err != nil {

@@ -1,0 +1,12 @@
+.git
+.github
+.playwright-cli
+.DS_Store
+build
+output
+server/data
+client/data
+web/admin/node_modules
+web/admin/dist
+web/client/node_modules
+web/client/dist

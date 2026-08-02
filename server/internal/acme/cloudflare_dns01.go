@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ricardo/frp-panel-platform/server/internal/clock"
 	"github.com/ricardo/frp-panel-platform/server/internal/crypto"
 	"github.com/ricardo/frp-panel-platform/server/internal/providers/cloudflare"
 	"golang.org/x/crypto/acme"
@@ -30,6 +31,8 @@ type CloudflareDNS01Config struct {
 	CloudflareURL  string
 	HTTPClient     *http.Client
 	Propagation    time.Duration
+	LookupTXT      func(context.Context, string) ([]string, error)
+	ClockTolerance time.Duration
 }
 
 type CloudflareDNS01Provider struct {
@@ -60,6 +63,10 @@ func NewCloudflareDNS01(config CloudflareDNS01Config, wrappingKey []byte) (*Clou
 	if config.Propagation <= 0 {
 		config.Propagation = 2 * time.Minute
 	}
+	if config.ClockTolerance <= 0 {
+		config.ClockTolerance = clock.DefaultTolerance
+	}
+	config.HTTPClient.Transport = clock.NewRoundTripper(config.HTTPClient.Transport, config.ClockTolerance)
 	return &CloudflareDNS01Provider{config: config, key: append([]byte(nil), wrappingKey...)}, nil
 }
 
@@ -117,7 +124,7 @@ func (p *CloudflareDNS01Provider) IssueDNS01(ctx context.Context, domain string)
 			return Certificate{}, errors.New("cloudflare returned an empty ACME TXT record id")
 		}
 		challengeRecords = append(challengeRecords, dnsChallengeRecord{provider: provider, zone: zone, id: record.ID})
-		if err := waitTXT(ctx, "_acme-challenge."+authorization.Identifier.Value, value, p.config.Propagation); err != nil {
+		if err := waitTXT(ctx, "_acme-challenge."+authorization.Identifier.Value, value, p.config.Propagation, p.config.LookupTXT); err != nil {
 			return Certificate{}, err
 		}
 		if _, err := client.Accept(ctx, challenge); err != nil {
@@ -251,11 +258,14 @@ func dnsChallenge(challenges []*acme.Challenge) (*acme.Challenge, error) {
 	return nil, errors.New("ACME authorization has no dns-01 challenge")
 }
 
-func waitTXT(ctx context.Context, name, expected string, timeout time.Duration) error {
+func waitTXT(ctx context.Context, name, expected string, timeout time.Duration, lookup func(context.Context, string) ([]string, error)) error {
 	deadline := time.Now().Add(timeout)
-	resolver := net.DefaultResolver
+	if lookup == nil {
+		resolver := net.DefaultResolver
+		lookup = resolver.LookupTXT
+	}
 	for {
-		values, err := resolver.LookupTXT(ctx, name)
+		values, err := lookup(ctx, name)
 		for _, value := range values {
 			if strings.TrimSpace(value) == expected {
 				return nil

@@ -3,7 +3,6 @@ package httpapi
 import (
 	"context"
 	"crypto/ed25519"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -22,6 +21,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
 	"github.com/ricardo/frp-panel-platform/server/internal/backup"
+	"github.com/ricardo/frp-panel-platform/server/internal/id"
 	"github.com/ricardo/frp-panel-platform/server/internal/service"
 )
 
@@ -180,10 +180,11 @@ func (a *API) concurrencyLimit(next http.Handler) http.Handler {
 func (a *API) requestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get("X-Request-ID")
-		if id == "" || len(id) > 80 {
+		if id == "" || len(id) > 80 || strings.ContainsAny(id, "\r\n") {
 			id = shortID()
 		}
 		ctx := context.WithValue(r.Context(), requestIDKey, id)
+		ctx = service.WithRequestMetadata(ctx, remoteIP(r), r.UserAgent(), id)
 		w.Header().Set("X-Request-ID", id)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -423,12 +424,13 @@ func (a *API) logout(w http.ResponseWriter, r *http.Request) {
 func (a *API) changePassword(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		CurrentPassword string `json:"current_password"`
+		NewUsername     string `json:"new_username,omitempty"`
 		NewPassword     string `json:"new_password"`
 	}
 	if !decodeJSON(w, r, &input) {
 		return
 	}
-	if err := a.App.ChangePassword(r.Context(), authFrom(r), input.CurrentPassword, input.NewPassword); err != nil {
+	if err := a.App.ChangeCredentials(r.Context(), authFrom(r), input.CurrentPassword, input.NewUsername, input.NewPassword); err != nil {
 		problem(w, r, 400, "PASSWORD_CHANGE_FAILED", "密码修改失败，请检查当前密码和新密码要求。", err)
 		return
 	}
@@ -486,14 +488,15 @@ func (a *API) dashboard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) listMappings(w http.ResponseWriter, r *http.Request) {
-	items, err := a.App.ListMappings(r.Context(), authFrom(r).UserID)
+	page, pageSize := pageParams(r)
+	items, pageInfo, err := a.App.ListMappingsPage(r.Context(), authFrom(r).UserID, page, pageSize)
 	if err != nil {
 		problem(w, r, 500, "MAPPINGS_READ_FAILED", "无法读取映射。", err)
 		return
 	}
 	var version int64
 	_ = a.App.DB.QueryRowContext(r.Context(), `SELECT desired_config_version FROM users WHERE id=?`, authFrom(r).UserID).Scan(&version)
-	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items, "config_version": version})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items, "config_version": version, "page": pageInfo.Page, "page_size": pageInfo.PageSize, "total": pageInfo.Total})
 }
 
 func (a *API) createMapping(w http.ResponseWriter, r *http.Request) {
@@ -566,12 +569,13 @@ func (a *API) toggleMapping(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) listDomains(w http.ResponseWriter, r *http.Request) {
-	items, err := a.App.ListDomains(r.Context(), authFrom(r).UserID)
+	page, pageSize := pageParams(r)
+	items, pageInfo, err := a.App.ListDomainsPage(r.Context(), authFrom(r).UserID, page, pageSize)
 	if err != nil {
 		problem(w, r, 500, "DOMAINS_READ_FAILED", "无法读取域名绑定。", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items, "page": pageInfo.Page, "page_size": pageInfo.PageSize, "total": pageInfo.Total})
 }
 
 func (a *API) createDomain(w http.ResponseWriter, r *http.Request) {
@@ -627,7 +631,7 @@ func (a *API) fullConfig(w http.ResponseWriter, r *http.Request) {
 		problem(w, r, 404, "FORBIDDEN", "资源不存在。", service.ErrForbidden)
 		return
 	}
-	if authFrom(r).MustChange {
+	if authFrom(r).MustChange || authFrom(r).MustChangeUsername {
 		problem(w, r, 403, "AUTH_PASSWORD_CHANGE_REQUIRED", "首次登录必须先修改密码。", service.ErrForbidden)
 		return
 	}
@@ -686,12 +690,13 @@ func (a *API) heartbeat(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) operations(w http.ResponseWriter, r *http.Request) {
-	items, err := a.App.Operations(r.Context(), authFrom(r).UserID, authFrom(r).Role == "admin")
+	page, pageSize := pageParams(r)
+	items, pageInfo, err := a.App.OperationsPage(r.Context(), authFrom(r).UserID, authFrom(r).Role == "admin", page, pageSize)
 	if err != nil {
 		problem(w, r, 500, "OPERATIONS_READ_FAILED", "无法读取操作记录。", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items, "page": pageInfo.Page, "page_size": pageInfo.PageSize, "total": pageInfo.Total})
 }
 
 func (a *API) retryOperation(w http.ResponseWriter, r *http.Request) {
@@ -763,12 +768,13 @@ func (a *API) clearCloudflare(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) adminUsers(w http.ResponseWriter, r *http.Request) {
-	users, err := a.App.AdminUsers(r.Context())
+	page, pageSize := pageParams(r)
+	users, pageInfo, err := a.App.AdminUsersPage(r.Context(), page, pageSize)
 	if err != nil {
 		problem(w, r, 500, "USERS_READ_FAILED", "无法读取用户。", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"items": users})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": users, "page": pageInfo.Page, "page_size": pageInfo.PageSize, "total": pageInfo.Total})
 }
 
 func (a *API) createUser(w http.ResponseWriter, r *http.Request) {
@@ -1330,7 +1336,7 @@ func (a *API) mappingProblem(w http.ResponseWriter, r *http.Request, err error) 
 }
 
 func mustChange(w http.ResponseWriter, r *http.Request, ac service.AuthContext) bool {
-	if ac.MustChange && r.URL.Path != "/api/v1/auth/change-password" {
+	if (ac.MustChange || ac.MustChangeUsername) && r.URL.Path != "/api/v1/auth/change-password" {
 		problem(w, r, http.StatusForbidden, "AUTH_PASSWORD_CHANGE_REQUIRED", "首次登录必须先修改密码。", service.ErrForbidden)
 		return true
 	}
@@ -1352,9 +1358,21 @@ func remoteIP(r *http.Request) string {
 	}
 	return r.RemoteAddr
 }
+func pageParams(r *http.Request) (int, int) {
+	page, pageSize := 1, 50
+	if value, err := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("page"))); err == nil && value > 0 {
+		page = value
+	}
+	if value, err := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("page_size"))); err == nil && value > 0 {
+		pageSize = value
+	}
+	if pageSize > 200 {
+		pageSize = 200
+	}
+	return page, pageSize
+}
 func shortID() string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%d", time.Now().UnixNano())))
-	return hex.EncodeToString(sum[:8])
+	return id.New()
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, target interface{}) bool {

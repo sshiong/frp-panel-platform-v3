@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/ricardo/frp-panel-platform/server/internal/acme"
 	"github.com/ricardo/frp-panel-platform/server/internal/crypto"
+	"github.com/ricardo/frp-panel-platform/server/internal/id"
 	"github.com/ricardo/frp-panel-platform/server/internal/jobs"
 	"github.com/ricardo/frp-panel-platform/server/internal/providers/cloudflare"
 )
@@ -308,7 +308,7 @@ func (a *App) domainResidueIdentifier(ctx context.Context, domainID string) stri
 }
 
 func (a *App) recordExternalResidue(ctx context.Context, userID, operationID, resourceType, resourceID, provider, identifier, reason string) error {
-	_, err := a.DB.ExecContext(ctx, `INSERT INTO external_residues(id,user_id,operation_id,resource_type,resource_id,provider,identifier,reason,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, uuid.NewString(), userID, operationID, resourceType, resourceID, provider, identifier, reason, nowString())
+	_, err := a.DB.ExecContext(ctx, `INSERT INTO external_residues(id,user_id,operation_id,resource_type,resource_id,provider,identifier,reason,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, id.New(), userID, operationID, resourceType, resourceID, provider, identifier, reason, nowString())
 	return err
 }
 
@@ -594,7 +594,7 @@ func (a *App) syncDomainDNS(ctx context.Context, job jobs.Job) error {
 	if httpsMode != "http_only" {
 		nextStatus = "pending_certificate"
 		phase, step = "certificate", "awaiting_acme"
-		if _, err := a.DB.ExecContext(ctx, `INSERT OR IGNORE INTO certificates(id,domain_binding_id,provider,status,updated_at) VALUES(?,?,?,?,?)`, uuid.NewString(), domainID, "acme", "pending", now); err != nil {
+		if _, err := a.DB.ExecContext(ctx, `INSERT OR IGNORE INTO certificates(id,domain_binding_id,provider,status,updated_at) VALUES(?,?,?,?,?)`, id.New(), domainID, "acme", "pending", now); err != nil {
 			return err
 		}
 	}
@@ -753,7 +753,7 @@ func (a *App) saveDNSRecord(ctx context.Context, userID, domainID string, zone c
 	if err != nil {
 		return err
 	}
-	_, err = a.DB.ExecContext(ctx, `INSERT INTO dns_records(id,user_id,domain_binding_id,type,name,normalized_name,content,ttl,proxied,zone_id,record_id,managed_by_panel,adopted,locked,sync_status,last_synced_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), userID, domainID, record.Type, record.Name, strings.ToLower(strings.TrimSuffix(record.Name, ".")), record.Content, record.TTL, boolInt(record.Proxied), zone.ID, record.ID, boolInt(managed), boolInt(adopted), 0, "synced", now)
+	_, err = a.DB.ExecContext(ctx, `INSERT INTO dns_records(id,user_id,domain_binding_id,type,name,normalized_name,content,ttl,proxied,zone_id,record_id,managed_by_panel,adopted,locked,sync_status,last_synced_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id.New(), userID, domainID, record.Type, record.Name, strings.ToLower(strings.TrimSuffix(record.Name, ".")), record.Content, record.TTL, boolInt(record.Proxied), zone.ID, record.ID, boolInt(managed), boolInt(adopted), 0, "synced", now)
 	return err
 }
 

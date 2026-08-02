@@ -28,7 +28,7 @@ ops = ["Login", "NewProxy", "CloseProxy", "Ping", "NewWorkConn", "NewUserConn"]
 固定版本要求：
 
 - Server 与 Client 默认目标为 FRP `v0.68.0`，发布清单必须同时记录 `frps`/`frpc` SHA-256。
-- `frpc` `v0.64.0+` 使用 `auth.tokenSource.type = "file"` 和 `auth.tokenSource.file.path`。
+- 平台最低支持 `frpc` `v0.68.0`，并使用 `auth.tokenSource.type = "file"` 和 `auth.tokenSource.file.path`。
 - 更早版本只保留开发兼容分支，会把 native token 放进 TOML；生产发布不得使用该分支。
 
 ## 可复现验证

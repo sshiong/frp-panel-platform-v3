@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5173",
     "build": "vue-tsc --noEmit && vite build",
+    "test:policy": "node --experimental-strip-types --experimental-test-coverage --test-coverage-include=src/policy.ts --test-coverage-lines=80 --test tests/policy.test.ts",
     "typecheck": "vue-tsc --noEmit",
     "preview": "vite preview --host 127.0.0.1 --port 5173"
   },
