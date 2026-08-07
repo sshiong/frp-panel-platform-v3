@@ -128,6 +128,7 @@
 | 2026-08-07 | Ubuntu 24.04 FRP 兼容性与目标规模工作流补齐 | 已实现并待托管复核；CI 新增官方 FRP v0.68.0 release digest 校验、`frps/frpc verify`、原生 TCP E2E 和真实 Plugin 网络 E2E；performance workflow 改为 Ubuntu 24.04 并上传目标规模 profile 日志；这增强 Linux 自动化证据，但仍不替代目标部署机、Cloudflare/ACME、故障注入和发布签字 |
 
 | 2026-08-07 | Linux FRP E2E 托管复核 | 通过；提交 [`98c9495`](https://github.com/sshiong/frp-panel-platform-v3/commit/98c9495) 修复 Makefile 的 macOS-only shell/cache 默认值；Ubuntu 24.04 `frp-linux-e2e` 的官方 release digest、`frps/frpc verify`、原生 TCP 和真实 Plugin E2E 全部通过；[`ci` run 31187605736](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31187605736) 与 [`CodeQL` run 31187605700](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31187605700) 全部成功；目标生产硬件、Cloudflare/ACME、故障注入和签字仍保持外部门禁 |
+| 2026-08-07 | 最终验收报告刷新 | 通过/按标准阻断；提交 [`49844b8`](https://github.com/sshiong/frp-panel-platform-v3/commit/49844b8335ab81c6c1beeae15832a1f85fe46141) 的 [`ci` run 31188168754](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31188168754) 与 [`CodeQL` run 31188169920](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31188169920) 全部成功；最终外部收集器绑定该提交，固定 FRP 原生 TCP、FRPC verify、真实 Plugin E2E 均通过，Provider/Cloudflare/ACME/目标硬件/故障注入/签名/三方签字仍按 fail-closed 规则返回 blocked（退出码 2） |
 
 ## 未决与发布阻断项
 
