@@ -142,13 +142,13 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 | API-005 | 本地通过 | Client 发送 `X-FRP-Client-Version`；过旧/非法版本返回 426、`Upgrade-Required` 和 `CLIENT_VERSION_UNSUPPORTED`，兼容版本可登录并显示可升级提示，回归测试通过；Server/Client 发行版本可由独立 `-ldflags` 注入并进入 compatibility API。 |
 | API-006 | 本地通过 | WebSocket 指数退避、抖动、lease heartbeat 测试通过。 |
 | API-007 | 本地通过 | 丢通知触发 full sync，配置 hash/version 收敛测试通过。 |
-| PERF-001 | 本地通过 | 本机 100 并发读 profile 通过；Linux 2 vCPU/2 GiB p95 基线待外部。 |
-| PERF-002 | 本地通过 | 本机 20 并发写/SQLite WAL profile 通过；目标机基线待外部。 |
-| PERF-003 | 待外部 | Router 目标规模测试已存在；1000/2000 目标硬件结果尚未签收。 |
+| PERF-001 | 本地通过 | 本机 profile 通过；Ubuntu 24.04 hosted run 31191465839 的 100 并发读 p95=102.321716ms、错误率 0；固定 Linux 2 vCPU/2 GiB release 基线仍待签收。 |
+| PERF-002 | 本地通过 | 本机 profile 通过；同一 hosted run 的 20 并发写 p95=45.921474ms、错误率 0；目标机基线仍待外部。 |
+| PERF-003 | 部分通过 | Ubuntu 24.04 hosted run 31191465839 的 1000 Mapping + 2000 Domain Router snapshot generate/apply=523.973835ms；固定目标硬件结果尚未签收。 |
 | PERF-004 | 本地通过 | snapshot reload 不主动中断 in-flight HTTP 流。 |
-| PERF-005 | 本地通过 | 本机 200 Mapping 签名/验签 profile 通过；目标机结果待外部。 |
-| PERF-006 | 本地通过 | 本机配置提交到 Client apply profile 通过；目标网络矩阵待外部。 |
-| PERF-007 | 本地通过 | 旧 HTTP/WS/FRP Plugin 会话替换失效 profile 通过；生产延迟基线待外部。 |
+| PERF-005 | 本地通过 | 本机 profile 通过；同一 hosted run 的 200 Mapping config generate/sign=4.54487ms；目标机结果待外部。 |
+| PERF-006 | 本地通过 | 本机 profile 通过；同一 hosted run 的配置提交到 Client apply=6.235335ms；目标网络矩阵待外部。 |
+| PERF-007 | 本地通过 | 本机 profile 通过；同一 hosted run 的 WebSocket=65.514317ms、旧 HTTP=0.376666ms、旧 FRP Login=0.325481ms；生产延迟基线待外部。 |
 | REL-001 | 本地通过 | Supervisor 临时配置/last-good/重启恢复测试通过。 |
 | REL-002 | 本地通过 | Port lease/Mapping 事务和 SQLite rollback race 测试通过。 |
 | REL-003 | 本地通过 | Worker lease、ambiguous Provider query 和 malformed payload recovery 测试通过。 |

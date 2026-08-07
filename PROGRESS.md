@@ -131,6 +131,7 @@
 | 2026-08-07 | 最终验收报告刷新 | 通过/按标准阻断；提交 [`49844b8`](https://github.com/sshiong/frp-panel-platform-v3/commit/49844b8335ab81c6c1beeae15832a1f85fe46141) 的 [`ci` run 31188168754](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31188168754) 与 [`CodeQL` run 31188169920](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31188169920) 全部成功；最终外部收集器绑定该提交，固定 FRP 原生 TCP、FRPC verify、真实 Plugin E2E 均通过，Provider/Cloudflare/ACME/目标硬件/故障注入/签名/三方签字仍按 fail-closed 规则返回 blocked（退出码 2） |
 | 2026-08-07 | Linux 故障注入托管复核 | 通过；提交 [`fad3038`](https://github.com/sshiong/frp-panel-platform-v3/commit/fad30389ab3a8e6d5c00e4636330ddc6e5c0bdfb) 的 [`ci` run 31189601927](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31189601927) 与 [`CodeQL` run 31189601869](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31189601869) 成功；Ubuntu 24.04 disposable 32MiB tmpfs 真实触发 `ENOSPC` 并验证 Router last-good 保护，Provider/ACME Date 偏差 fail-safe 通过；目标机备份恢复、系统时钟和正式发布签收仍是外部门禁 |
 | 2026-08-07 | Backup 恢复失败回滚加固 | 本地通过；Restore 在数据库安装后发生 Session 撤销或受保护文件恢复失败时，会删除新数据库并恢复 `.before-restore-*` 旧数据库；新增回归测试验证旧数据与前置备份命名均保留，磁盘满创建备份不会留下 partial archive |
+| 2026-08-07 | Ubuntu 24.04 目标规模性能复核 | 通过当前 hosted profile；[`performance run 31191465839`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31191465839) 的 PERF-001/002/003/005/006/007 全部通过并上传 `linux-target-scale-performance`，日志含 p95/耗时数值；该 runner 不是固定 2 vCPU/2GiB 生产硬件，正式容量基线仍待外部 |
 
 ## 未决与发布阻断项
 
