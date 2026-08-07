@@ -127,6 +127,8 @@
 
 | 2026-08-07 | Ubuntu 24.04 FRP 兼容性与目标规模工作流补齐 | 已实现并待托管复核；CI 新增官方 FRP v0.68.0 release digest 校验、`frps/frpc verify`、原生 TCP E2E 和真实 Plugin 网络 E2E；performance workflow 改为 Ubuntu 24.04 并上传目标规模 profile 日志；这增强 Linux 自动化证据，但仍不替代目标部署机、Cloudflare/ACME、故障注入和发布签字 |
 
+| 2026-08-07 | Linux FRP E2E 托管复核 | 通过；提交 [`98c9495`](https://github.com/sshiong/frp-panel-platform-v3/commit/98c9495) 修复 Makefile 的 macOS-only shell/cache 默认值；Ubuntu 24.04 `frp-linux-e2e` 的官方 release digest、`frps/frpc verify`、原生 TCP 和真实 Plugin E2E 全部通过；[`ci` run 31187605736](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31187605736) 与 [`CodeQL` run 31187605700](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31187605700) 全部成功；目标生产硬件、Cloudflare/ACME、故障注入和签字仍保持外部门禁 |
+
 ## 未决与发布阻断项
 
 以下不是“已实现”的替代品，必须在发布前完成：

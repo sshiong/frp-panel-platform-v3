@@ -71,6 +71,8 @@ This report records evidence available in the local development environment. It 
 
 - Linux acceptance automation: the CI workflow now has an Ubuntu 24.04 `frp-linux-e2e` job that verifies the official FRP v0.68.0 release digest, runs fixed `frps/frpc verify`, native TCP networking, and real FRPS/FRPC + loopback Plugin E2E. The manual performance workflow also runs the target-size profile on Ubuntu 24.04 and uploads its log. These are stronger hosted gates, but they do not claim target-production hardware, Cloudflare/ACME, fault-injection, signing, or owner sign-off.
 
+- Latest hosted Linux FRP acceptance: commit [`98c9495`](https://github.com/sshiong/frp-panel-platform-v3/commit/98c9495) made the Makefile shell and Go cache defaults portable across macOS/Linux. The matching [`ci` run 31187605736](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31187605736) passed the Ubuntu 24.04 fixed-FRP digest, verify, native TCP, and real Plugin E2E job, and [`CodeQL run 31187605700`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31187605700) passed for Go and TypeScript. This still does not sign off target production hardware, Cloudflare/ACME, fault injection, signing, or owner approvals.
+
 ## Not signed off yet
 
 Linux/production FRPS/FRPC Plugin compatibility matrix, Cloudflare Sandbox timeout compensation, ACME Staging against a real CA, Router TLS SNI certificate hot reload, a clean-host disaster restore drill, PERF-003~007 target-scale measurements, cosign signing, and a production HTTPS deployment remain release gates. Local tests and hosted CI never mark those external integrations active.
