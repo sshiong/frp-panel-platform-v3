@@ -47,6 +47,13 @@ The FRP configs must use a disposable Linux test host, a loopback-only Panel
 Plugin endpoint, a test transport-secret file, and a test mapping/session.
 Never copy a production token or database into the report directory.
 
+The release workflow applies an additional hard gate: the repository root must
+contain `release-evidence.json`, and that bundle must validate against the
+exact release revision. The release job also runs the fixed FRP v0.68.0 native
+TCP and Plugin network checks before cosign signing. Missing Cloudflare
+Sandbox, ACME Staging, target-environment, fault-injection, or three-owner
+sign-off evidence stops the release job; a local/mock result cannot bypass it.
+
 ## Provider and release evidence
 
 Cloudflare Sandbox, ACME Staging, real SNI/Full (strict), target-hardware

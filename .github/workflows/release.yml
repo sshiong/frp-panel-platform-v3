@@ -35,6 +35,7 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    environment: production-release
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -88,6 +89,8 @@ jobs:
       - run: npm ci
         working-directory: web/client
       - name: Download fixed FRP dependency
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           archive="frp_0.68.0_linux_amd64.tar.gz"
           url="https://github.com/fatedier/frp/releases/download/v0.68.0/${archive}"
@@ -101,6 +104,32 @@ jobs:
           cp /tmp/frp_0.68.0_linux_amd64/frps build/frps
           cp /tmp/frp_0.68.0_linux_amd64/frpc build/frpc
       - run: SERVER_VERSION="${{ steps.release-version.outputs.server_version }}" CLIENT_VERSION="${{ steps.release-version.outputs.client_version }}" MINIMUM_CLIENT_VERSION="${{ steps.release-version.outputs.minimum_client_version }}" LATEST_CLIENT_VERSION="${{ steps.release-version.outputs.client_version }}" MINIMUM_FRPC_VERSION="${{ steps.release-version.outputs.minimum_frpc_version }}" FRPS_BINARY=build/frps FRPC_BINARY=build/frpc FRPS_VERSION=0.68.0 FRPC_VERSION=0.68.0 make contract migration-check license build sbom checksums manifest
+      - name: Enforce external acceptance before release
+        env:
+          EXTERNAL_ACCEPTANCE_EVIDENCE: release-evidence.json
+          EXTERNAL_ACCEPTANCE_LOCAL: '1'
+          FRP_E2E_FRPS_BINARY: ${{ github.workspace }}/build/frps
+          FRP_E2E_FRPS_CONFIG: ${{ github.workspace }}/tests/fixtures/frp/network/frps.toml
+          FRP_E2E_FRPC_BINARY: ${{ github.workspace }}/build/frpc
+          FRP_E2E_FRPC_CONFIG: ${{ github.workspace }}/tests/fixtures/frp/network/frpc.toml
+          FRP_E2E_URL: http://127.0.0.1:17080/
+          FRP_E2E_FRPS_READY_HOST: 127.0.0.1
+          FRP_E2E_FRPS_READY_PORT: '17000'
+          FRP_E2E_WAIT_SECONDS: '30'
+          FRPC_VERIFY_BINARY: ${{ github.workspace }}/build/frpc
+          FRPC_VERIFY_VERSION: 0.68.0
+        run: |
+          set -euo pipefail
+          export FRP_E2E_FRPS_SHA256="$(sha256sum "$FRP_E2E_FRPS_BINARY" | awk '{print $1}')"
+          export FRP_E2E_FRPC_SHA256="$(sha256sum "$FRP_E2E_FRPC_BINARY" | awk '{print $1}')"
+          python3 -m http.server 17081 --directory tests/fixtures/frp/network >/tmp/frp-panel-release-fixture.log 2>&1 &
+          fixture_pid=$!
+          cleanup() {
+            kill "$fixture_pid" 2>/dev/null || true
+            wait "$fixture_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          make external-acceptance
       - uses: sigstore/cosign-installer@v3
       - name: Sign release metadata and binaries
         run: |
