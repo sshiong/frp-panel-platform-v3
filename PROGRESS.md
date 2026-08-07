@@ -119,6 +119,7 @@
 | 2026-08-03 | 独立版本发行链路最终托管复核 | 通过；提交 [`a1cb4ae`](https://github.com/sshiong/frp-panel-platform-v3/commit/a1cb4ae) 的 [`ci` run 30766492825](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30766492825) 与 [`CodeQL` run 30766492828](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30766492828) 全部成功；PR #2 仍待仓库要求的人工审核，外部真实集成与正式签名继续按标准保持 blocked |
 | 2026-08-03 | 验收证据提交绑定与标准矩阵同步门禁 | 通过；外部证据包现在必须绑定公开仓库和当前 40 位 commit，拒绝其他 revision 的旧证据；新增标准 141 项与矩阵 142 行的同步策略并接入 `make contract`，当前真实 Provider/目标环境缺失仍按标准返回 blocked |
 | 2026-08-07 | 验收增强最终托管复核 | 通过；提交 [`97f5d9e`](https://github.com/sshiong/frp-panel-platform-v3/commit/97f5d9e) 的 [`ci` run 31180964158](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31180964158) 与 [`CodeQL` run 31180966657](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31180966657) 全部成功；PR #2 仍需人工审核，真实 Cloudflare/ACME/Linux/签名证据继续按标准保持 blocked |
+| 2026-08-07 | 当前验收证据文档托管复核 | 通过；提交 [`2a058fe`](https://github.com/sshiong/frp-panel-platform-v3/commit/2a058fe3b07ab9505ebeae3d4fb77e3b5abd4a55) 的 [`ci` run 31181350965](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31181350965) 与 [`CodeQL` run 31181352584](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31181352584) 全部成功；PR #2 仍需人工审核，真实 Cloudflare/ACME/Linux/签名证据继续按标准保持 blocked |
 
 ## 未决与发布阻断项
 
