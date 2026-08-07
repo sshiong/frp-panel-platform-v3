@@ -1,4 +1,4 @@
-SHELL := /bin/zsh
+SHELL := /bin/bash
 
 GO_CACHE ?= /private/tmp/frp-cf-gocache
 GO_MODULE_CACHE ?= /private/tmp/frp-cf-gomodcache
