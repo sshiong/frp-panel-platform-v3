@@ -123,6 +123,7 @@
 | 2026-08-07 | Go 1.25.4 与固定 FRP 外部收集器复验 | 本地通过；使用 Go 1.25.4 新模块缓存重新通过 `make contract/test/lint/build/perf/migration-check/security/license`、双面板 WCAG、SBOM/校验和/发行清单、Server runtime smoke、固定 FRP v0.68.0 `verify`、原生 TCP E2E 和真实 FRPS/FRPC Plugin 网络 E2E；`make external-acceptance` 9 个步骤中 8 个 passed，仅因 Cloudflare/ACME/目标硬件/故障注入/签字证据缺失返回 blocked（退出码 2） |
 | 2026-08-07 | 固定 FRP 验收证据托管复核 | 通过；提交 [`9fe4b92`](https://github.com/sshiong/frp-panel-platform-v3/commit/9fe4b92) 的 [`ci` run 31183385079](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31183385079) 与 [`CodeQL` run 31183385781](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31183385781) 全部成功，包含双 Go race/staticcheck、双面板 WCAG、容器扫描和 release metadata；真实 Provider/目标环境/签字仍按标准保持 blocked |
 | 2026-08-07 | 发布前外部验收硬门禁 | 已实现；release workflow 现在必须验证仓库根目录、当前 revision 绑定的 `release-evidence.json`，并在 cosign 前运行固定 FRP v0.68.0 原生 TCP/Plugin E2E；缺少真实 Provider、ACME、目标环境、故障注入或三方签字会 fail-closed，不能生成正式 Release |
+| 2026-08-07 | Fuzz 安全边界修复与最新托管复核 | 通过；修复 Client `NormalizeServerURL` 接受 `https://%` 非法主机名的问题并加入回归测试；本地与远端 fuzz 全部通过，提交 [`935a1f7`](https://github.com/sshiong/frp-panel-platform-v3/commit/935a1f7) 的 [`ci` run 31185032520](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31185032520) 与 [`CodeQL` run 31185032236](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31185032236) 全部成功；PR #2 仍需人工审核，真实外部验收/签名按标准保持 blocked |
 
 ## 未决与发布阻断项
 
