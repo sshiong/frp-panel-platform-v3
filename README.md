@@ -33,6 +33,8 @@ binary does not require an external web directory.
 
 发布前的本地门禁与外部证据统一由 `make external-acceptance` 收集；固定 FRP 二进制、Cloudflare Sandbox、ACME Staging、目标硬件和 cosign 证据的配置见 [docs/external-acceptance.md](docs/external-acceptance.md)。缺少外部依赖时报告为 `blocked`，不会被算作通过。
 
+Linux 故障边界可在 Ubuntu 24.04 disposable runner 上运行 `make fault-injection`；它验证真实 tmpfs `ENOSPC` 下 Router last-good 保护和 Provider/ACME clock-skew fail-safe，但不替代正式发布环境签收。
+
 Client 默认只监听回环地址。局域网部署必须显式设置 `CLIENT_ALLOW_LAN=true`，绑定具体 LAN IP，配置 `CLIENT_ALLOWED_CIDRS`/`CLIENT_ALLOWED_HOST`，并提供 `CLIENT_TLS_CERT_FILE` 与 `CLIENT_TLS_KEY_FILE`；不完整的非回环配置会被 Client 拒绝启动。
 
 ## 合规边界

@@ -14,7 +14,7 @@ MINIMUM_FRPC_VERSION ?= 0.68.0
 SERVER_LDFLAGS ?= -X github.com/ricardo/frp-panel-platform/server/internal/version.ServerVersion=$(SERVER_VERSION) -X github.com/ricardo/frp-panel-platform/server/internal/version.MinimumClientVersion=$(MINIMUM_CLIENT_VERSION) -X github.com/ricardo/frp-panel-platform/server/internal/version.LatestClientVersion=$(LATEST_CLIENT_VERSION) -X github.com/ricardo/frp-panel-platform/server/internal/version.MinimumFRPCVersion=$(MINIMUM_FRPC_VERSION)
 CLIENT_LDFLAGS ?= -X github.com/ricardo/frp-panel-platform/client/internal/version.ClientVersion=$(CLIENT_VERSION)
 
-.PHONY: install-web build test lint accessibility contract migration-check license security fuzz perf frpc-verify network-e2e plugin-e2e external-acceptance sbom checksums manifest release-version-check sign release checkpoint key-rotate dev-server dev-client clean
+.PHONY: install-web build test lint accessibility contract migration-check license security fuzz perf fault-injection frpc-verify network-e2e plugin-e2e external-acceptance sbom checksums manifest release-version-check sign release checkpoint key-rotate dev-server dev-client clean
 
 install-web:
 	npm ci
@@ -80,6 +80,9 @@ fuzz:
 perf:
 	cd server && $(GO_ENV) FRP_PERF=1 FRP_PERF_SCALE=1 go test -run '^TestPerformance(Baseline|Scale|SessionReplacement)$$' -count=1 ./internal/httpapi
 	cd client && $(GO_ENV) FRP_PERF_SCALE=1 go test -run '^TestPerformanceConfigSubmitToClientApply$$' -count=1 ./internal/app
+
+fault-injection:
+	./scripts/linux-fault-injection.sh
 
 frpc-verify:
 	@test -n "$(FRPC_VERIFY_BINARY)" || (echo "FRPC_VERIFY_BINARY is required" >&2; exit 1)

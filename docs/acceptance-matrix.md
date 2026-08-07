@@ -155,8 +155,8 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 | REL-004 | 本地通过 | Router bad snapshot 保留 last-good 测试通过。 |
 | REL-005 | 部分通过 | WAL bytes 指标和 checkpoint 命令存在；长时间/磁盘压力演练待外部。 |
 | REL-006 | 本地通过 | WebSocket 断线后全量同步/心跳恢复测试通过。 |
-| REL-007 | 待外部 | 原子写入和错误路径单测通过；真实 disk-full 注入待外部。 |
-| REL-008 | 待外部 | Provider Date/clock skew 检测已有单测；系统时钟偏差/ACME 实验待外部。 |
+| REL-007 | 部分通过 | Ubuntu 24.04 CI 的 disposable 32MiB tmpfs 会真实填满文件系统，验证 Router 原子写失败不覆盖 last-good；备份/恢复和目标部署磁盘演练仍待外部。 |
+| REL-008 | 部分通过 | Linux fault-injection 入口验证 Cloudflare/ACME Provider Date 偏差的 fail-safe 路径；真实系统时钟偏差、Session/ACME 长时行为仍待外部。 |
 | SEC-001 | 本地/CI 通过 | 本地 gosec/govulncheck 和 secret scan 清零；最终提交 [`2f73156`](https://github.com/sshiong/frp-panel-platform-v3/commit/2f731567da6933d4fc2ae1db333ad9d61fc2ca19) 的 [`ci` security job](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30745496136) 与 CodeQL 均成功，双 gosec SARIF 已独立上传。 |
 | SEC-002 | 本地通过 | Auth/domain/port/file path 权限测试和 race 测试通过。 |
 | SEC-003 | 本地通过 | CSRF、CORS、Origin、Host、WebSocket 和 XSS 边界测试通过。 |

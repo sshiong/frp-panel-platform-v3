@@ -47,6 +47,19 @@ The FRP configs must use a disposable Linux test host, a loopback-only Panel
 Plugin endpoint, a test transport-secret file, and a test mapping/session.
 Never copy a production token or database into the report directory.
 
+For repeatable Linux fault-boundary checks, run this on an Ubuntu 24.04 runner:
+
+```bash
+make fault-injection
+```
+
+The command mounts a disposable 32MiB tmpfs, fills it until the kernel returns
+`ENOSPC`, and verifies that a failed Router snapshot write leaves the previous
+`last-good` file unchanged. It also runs the Provider/ACME HTTP `Date` skew
+checks. This is recorded as implementation evidence only; it does not replace
+the release environment's full backup/restore, system-clock, or target-disk
+exercise.
+
 The release workflow applies an additional hard gate: the repository root must
 contain `release-evidence.json`, and that bundle must validate against the
 exact release revision. The release job also runs the fixed FRP v0.68.0 native

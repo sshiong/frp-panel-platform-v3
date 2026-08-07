@@ -150,9 +150,22 @@ jobs:
           FRP_E2E_FRPC_BINARY: ${{ github.workspace }}/build/frpc
         run: make plugin-e2e
 
+  fault-injection:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache-dependency-path: server/go.sum
+      - name: Run disposable Linux fault injection
+        run: make fault-injection
+
   release-metadata:
     runs-on: ubuntu-latest
-    needs: [go, web, frp-linux-e2e]
+    needs: [go, web, frp-linux-e2e, fault-injection]
     steps:
       - uses: actions/checkout@v4
       - uses: ruby/setup-ruby@v1
