@@ -148,6 +148,67 @@ func TestCheckpointWAL(t *testing.T) {
 	}
 }
 
+func TestCheckpointUnderWALPressure(t *testing.T) {
+	root := os.Getenv("FRP_WAL_PRESSURE_DIR")
+	if root == "" {
+		t.Skip("set FRP_WAL_PRESSURE_DIR to a disposable filesystem")
+	}
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "wal-pressure.db")
+	database, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`PRAGMA wal_autocheckpoint=1000000; CREATE TABLE wal_pressure(id INTEGER PRIMARY KEY, payload TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := database.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := strings.Repeat("w", 2048)
+	for index := 0; index < 2000; index++ {
+		if _, err := tx.Exec(`INSERT INTO wal_pressure(payload) VALUES(?)`, payload); err != nil {
+			_ = tx.Rollback()
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	walPath := path + "-wal"
+	walInfo, err := os.Stat(walPath)
+	if err != nil {
+		t.Fatalf("WAL pressure did not produce a WAL file: err=%v", err)
+	}
+	if walInfo.Size() == 0 {
+		t.Fatalf("WAL pressure produced an empty WAL file")
+	}
+	if err := database.Checkpoint(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if walInfo, err := os.Stat(walPath); err == nil && walInfo.Size() != 0 {
+		t.Fatalf("checkpoint did not truncate WAL: size=%d", walInfo.Size())
+	}
+	var count int
+	if err := database.QueryRow(`SELECT COUNT(1) FROM wal_pressure`).Scan(&count); err != nil || count != 2000 {
+		t.Fatalf("checkpoint changed durable rows: count=%d err=%v", count, err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if err := reopened.QueryRow(`SELECT COUNT(1) FROM wal_pressure`).Scan(&count); err != nil || count != 2000 {
+		t.Fatalf("restart lost WAL rows: count=%d err=%v", count, err)
+	}
+}
+
 func TestOpenRejectsUnavailableDatabaseParent(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "not-a-directory")
 	if err := os.WriteFile(root, []byte("blocker"), 0o600); err != nil {

@@ -153,7 +153,7 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 | REL-002 | 本地通过 | Port lease/Mapping 事务和 SQLite rollback race 测试通过。 |
 | REL-003 | 本地通过 | Worker lease、ambiguous Provider query 和 malformed payload recovery 测试通过。 |
 | REL-004 | 本地通过 | Router bad snapshot 保留 last-good 测试通过。 |
-| REL-005 | 部分通过 | WAL bytes 指标和 checkpoint 命令存在；长时间/磁盘压力演练待外部。 |
+| REL-005 | 部分通过 | WAL bytes 指标、checkpoint 命令和 `TestCheckpointUnderWALPressure` 已通过；Ubuntu 24.04 `make fault-injection` 会在 disposable tmpfs 中验证 WAL 压力、checkpoint 和重启恢复，长时间/生产磁盘演练仍待外部。 |
 | REL-006 | 本地通过 | WebSocket 断线后全量同步/心跳恢复测试通过。 |
 | REL-007 | 部分通过 | Ubuntu 24.04 [`ci` run 31189601927](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31189601927) 的 disposable 32MiB tmpfs 真实填满文件系统，验证 Router 原子写失败不覆盖 last-good；本地 backup archive 无 partial output、restore post-install 失败回滚测试通过；目标部署磁盘演练仍待外部。 |
 | REL-008 | 部分通过 | 同一 Ubuntu 24.04 fault-injection job 验证 Cloudflare/ACME Provider Date 偏差的 fail-safe 路径；真实系统时钟偏差、Session/ACME 长时行为仍待外部。 |

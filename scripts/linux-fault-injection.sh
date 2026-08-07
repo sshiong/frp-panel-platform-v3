@@ -25,5 +25,8 @@ echo "== disk-full: atomic last-good protection =="
 echo "== disk-full: backup archive has no partial output =="
 (cd server && FRP_DISK_FULL_DIR="${mount_point}" go test ./internal/backup -run '^TestCreateDiskFullLeavesNoPartialArchive$' -count=1 -v)
 
+echo "== WAL pressure: checkpoint and restart recovery =="
+(cd server && FRP_WAL_PRESSURE_DIR="${mount_point}" go test ./internal/db -run '^TestCheckpointUnderWALPressure$' -count=1 -v)
+
 echo "== clock-skew: provider/ACME fail-safe checks =="
 (cd server && go test ./internal/clock ./internal/acme ./internal/providers/cloudflare -count=1)

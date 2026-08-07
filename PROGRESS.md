@@ -132,6 +132,7 @@
 | 2026-08-07 | Linux 故障注入托管复核 | 通过；提交 [`fad3038`](https://github.com/sshiong/frp-panel-platform-v3/commit/fad30389ab3a8e6d5c00e4636330ddc6e5c0bdfb) 的 [`ci` run 31189601927](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31189601927) 与 [`CodeQL` run 31189601869](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31189601869) 成功；Ubuntu 24.04 disposable 32MiB tmpfs 真实触发 `ENOSPC` 并验证 Router last-good 保护，Provider/ACME Date 偏差 fail-safe 通过；目标机备份恢复、系统时钟和正式发布签收仍是外部门禁 |
 | 2026-08-07 | Backup 恢复失败回滚加固 | 本地通过；Restore 在数据库安装后发生 Session 撤销或受保护文件恢复失败时，会删除新数据库并恢复 `.before-restore-*` 旧数据库；新增回归测试验证旧数据与前置备份命名均保留，磁盘满创建备份不会留下 partial archive |
 | 2026-08-07 | Ubuntu 24.04 目标规模性能复核 | 通过当前 hosted profile；[`performance run 31191465839`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31191465839) 的 PERF-001/002/003/005/006/007 全部通过并上传 `linux-target-scale-performance`，日志含 p95/耗时数值；该 runner 不是固定 2 vCPU/2GiB 生产硬件，正式容量基线仍待外部 |
+| 2026-08-07 | WAL 压力与重启恢复故障注入补齐 | 已实现并待托管复核；`TestCheckpointUnderWALPressure` 验证 2000 条 WAL 写入、checkpoint 截断、行数完整性和关闭后重启恢复；`make fault-injection` 已接入 Ubuntu 24.04 disposable tmpfs 流程，生产长时磁盘演练仍待外部 |
 
 ## 未决与发布阻断项
 
@@ -140,7 +141,7 @@
 1. 在 Linux release matrix/目标部署环境重复真实固定版本 FRPS/FRPC + loopback Plugin metadata E2E，并验证正式 FRPS 配置和权限边界。
 2. Cloudflare Sandbox Token 权限、DNS 三种冲突语义、超时补偿和真实外部残留验证。
 3. 使用真实 Cloudflare Sandbox + ACME Staging 完成 DNS-01 传播、TXT 清理、证书原子替换与 Router TLS SNI/Host 热切换；本地 Provider 已实现但未伪造外部成功。
-4. 加密归档备份恢复的 clean-host 灾备演练、WAL checkpoint 受控执行和磁盘满/时钟偏差故障注入。
+4. 加密归档备份恢复的 clean-host 灾备演练、生产环境 WAL checkpoint 长时观察和目标磁盘满/时钟偏差故障注入；实现级 disposable Linux 自动化已补齐但不替代目标部署演练。
 5. 1000 Mapping/2000 Domain、200 Mapping、配置同步和会话替换等 PERF-003~007 的目标环境基线；本地开发 profile 已通过，但尚未替代 Linux/生产目标机的容量基线。
 6. 生成正式 cosign 签名并完成发布负责人、安全负责人和测试负责人签字；GitHub Actions/CodeQL、SAST/SCA、Secret scan 和 container scan 已在提交 [`2f73156`](https://github.com/sshiong/frp-panel-platform-v3/commit/2f731567da6933d4fc2ae1db333ad9d61fc2ca19) 全绿。
 7. 完成上述 P0/P1 外部验收前，仓库只能作为开发预览，不得声明生产就绪。
