@@ -10,6 +10,7 @@ REPORT_PATH = File.expand_path(ENV.fetch("EXTERNAL_ACCEPTANCE_REPORT", "output/e
 TAIL_LIMIT = 12_000
 
 class AcceptanceCollector
+  REPOSITORY = "sshiong/frp-panel-platform-v3".freeze
   PROVIDER_GATES = %w[
     FRPS-009 DNS-012 DNS-013 CF-007 TLS-009 TLS-010 TLS-012 KEY-004
     PERF-003 REL-005 REL-007 REL-008 SEC-008 DOD-001
@@ -154,6 +155,12 @@ class AcceptanceCollector
     errors = []
     errors << "schema_version 必须为 v1" unless document["schema_version"] == "v1"
     errors << "bundle status 必须为 passed" unless document["status"] == "passed"
+    errors << "repository 必须为 #{REPOSITORY}" unless document["repository"] == REPOSITORY
+    current_commit = git_revision
+    evidence_commit = document["commit"].to_s
+    unless evidence_commit.match?(/\A[0-9a-f]{40}\z/) && evidence_commit == current_commit
+      errors << "commit 必须为当前仓库 HEAD（#{current_commit}）"
+    end
     gates = document["gates"]
     unless gates.is_a?(Hash)
       errors << "gates 必须是对象"

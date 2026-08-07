@@ -117,6 +117,7 @@
 | 2026-08-03 | 仓库治理与 PR 验收模板收口 | 已核对公开仓库、`main` 分支保护、线性历史、禁止强推/删除、CODEOWNERS、两次审批和必需 CI/CodeQL 检查；新增 PR 验收/风险模板；第二位安全/数据库/加密指定评审者和外部发布签字仍待配置 |
 | 2026-08-03 | Server/Client 独立版本发行链路 | 通过；Server/Client 版本改为构建时独立 `-ldflags` 注入，compatibility API 与 release manifest 同步独立版本/最低兼容版本；新增 SemVer/最低版本策略校验、手动 release 输入和注入版本的 Go 测试；分离 `1.2.3`/`2.4.5` 构建验证、`make contract`、`make test`、完整 lint 均通过 |
 | 2026-08-03 | 独立版本发行链路最终托管复核 | 通过；提交 [`a1cb4ae`](https://github.com/sshiong/frp-panel-platform-v3/commit/a1cb4ae) 的 [`ci` run 30766492825](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30766492825) 与 [`CodeQL` run 30766492828](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30766492828) 全部成功；PR #2 仍待仓库要求的人工审核，外部真实集成与正式签名继续按标准保持 blocked |
+| 2026-08-03 | 验收证据提交绑定与标准矩阵同步门禁 | 通过；外部证据包现在必须绑定公开仓库和当前 40 位 commit，拒绝其他 revision 的旧证据；新增标准 141 项与矩阵 142 行的同步策略并接入 `make contract`，当前真实 Provider/目标环境缺失仍按标准返回 blocked |
 
 ## 未决与发布阻断项
 

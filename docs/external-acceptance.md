@@ -58,6 +58,8 @@ provide a redacted machine-readable evidence bundle:
 {
   "schema_version": "v1",
   "status": "passed",
+  "repository": "sshiong/frp-panel-platform-v3",
+  "commit": "<current-40-character-release-commit>",
   "gates": {
     "FRPS-009": {"status": "passed", "environment": {"os": "Ubuntu 24.04", "host": "isolated-release-runner"}, "steps": ["Run the fixed FRPS/FRPC Linux matrix"], "expected": "Supported FRP combinations pass", "actual": "All matrix cases pass", "artifacts": {"logs": ["secure/FRPS-009.log"], "screenshots": [], "request_ids": []}, "operator": "release-operator", "executed_at": "2026-08-03T00:00:00Z"},
     "DNS-012": {"status": "passed", "environment": {"provider": "Cloudflare Sandbox", "zone": "disposable-test-zone"}, "steps": ["Create the timeout ambiguity fixture", "Query provider state"], "expected": "Query-after-timeout resolves without duplicate mutation", "actual": "Provider state matched the idempotent outcome", "artifacts": {"logs": ["secure/DNS-012.log"], "screenshots": [], "request_ids": ["sandbox-request-id"]}, "operator": "release-operator", "executed_at": "2026-08-03T00:00:00Z"},
@@ -77,7 +79,9 @@ provide a redacted machine-readable evidence bundle:
 }
 ```
 
-Each gate must include a test environment, non-empty steps, expected and actual
+The evidence bundle must identify this exact repository and the current
+40-character release commit; evidence from another revision is rejected. Each
+gate must include a test environment, non-empty steps, expected and actual
 results, an artifacts object with at least one log, screenshot, or request ID,
 the operator, and an ISO-8601 execution time. The example uses placeholders for
 redacted artifact paths and request IDs; replace them with reviewed evidence
