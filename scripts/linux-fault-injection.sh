@@ -22,5 +22,8 @@ sudo mount -t tmpfs -o size=32m,mode=0777 tmpfs "${mount_point}"
 echo "== disk-full: atomic last-good protection =="
 (cd server && FRP_DISK_FULL_DIR="${mount_point}" go test ./internal/router -run '^TestAtomicWriteDiskFull$' -count=1 -v)
 
+echo "== disk-full: backup archive has no partial output =="
+(cd server && FRP_DISK_FULL_DIR="${mount_point}" go test ./internal/backup -run '^TestCreateDiskFullLeavesNoPartialArchive$' -count=1 -v)
+
 echo "== clock-skew: provider/ACME fail-safe checks =="
 (cd server && go test ./internal/clock ./internal/acme ./internal/providers/cloudflare -count=1)
