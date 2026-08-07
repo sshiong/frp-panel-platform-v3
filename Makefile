@@ -1,8 +1,8 @@
 SHELL := /bin/bash
 
-GO_CACHE ?= /private/tmp/frp-cf-gocache
-GO_MODULE_CACHE ?= /private/tmp/frp-cf-gomodcache
-GO_ENV = GOCACHE=$(GO_CACHE) GOMODCACHE=$(GO_MODULE_CACHE)
+GO_CACHE ?= $(shell go env GOCACHE)
+GO_MODULE_CACHE ?= $(shell go env GOMODCACHE)
+GO_ENV = GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MODULE_CACHE)"
 STATICCHECK ?= staticcheck
 FRPC_VERIFY_VERSION ?= 0.68.0
 SERVER_VERSION ?= 0.1.0
