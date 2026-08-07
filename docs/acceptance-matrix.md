@@ -65,7 +65,7 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 | FRPS-006 | 本地通过 | 停用用户不能创建新连接。 |
 | FRPS-007 | 本地通过 | Plugin 超时/未知状态 fail-closed 测试通过。 |
 | FRPS-008 | 本地通过 | FRP 凭证重置使旧 Secret、Session、generation 失效。 |
-| FRPS-009 | 部分通过 | transport secret 与 Plugin 分权/loopback 测试通过；需 Linux 正式 FRPS 矩阵。 |
+| FRPS-009 | 部分通过 | 固定 FRPS/FRPC v0.68.0 的真实 Plugin 网络 E2E、transport secret 与 Plugin 分权/loopback 测试通过；仍需 Linux 正式 FRPS 矩阵。 |
 | MAP-001 | 本地通过 | TCP/UDP 端口数字使用 DB 唯一租约约束。 |
 | MAP-002 | 本地通过 | offline/disabled/config_error 不释放租约。 |
 | MAP-003 | 本地通过 | 并发自动端口分配无重复 lease。 |

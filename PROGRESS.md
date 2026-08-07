@@ -120,6 +120,7 @@
 | 2026-08-03 | 验收证据提交绑定与标准矩阵同步门禁 | 通过；外部证据包现在必须绑定公开仓库和当前 40 位 commit，拒绝其他 revision 的旧证据；新增标准 141 项与矩阵 142 行的同步策略并接入 `make contract`，当前真实 Provider/目标环境缺失仍按标准返回 blocked |
 | 2026-08-07 | 验收增强最终托管复核 | 通过；提交 [`97f5d9e`](https://github.com/sshiong/frp-panel-platform-v3/commit/97f5d9e) 的 [`ci` run 31180964158](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31180964158) 与 [`CodeQL` run 31180966657](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31180966657) 全部成功；PR #2 仍需人工审核，真实 Cloudflare/ACME/Linux/签名证据继续按标准保持 blocked |
 | 2026-08-07 | 当前验收证据文档托管复核 | 通过；提交 [`2a058fe`](https://github.com/sshiong/frp-panel-platform-v3/commit/2a058fe3b07ab9505ebeae3d4fb77e3b5abd4a55) 的 [`ci` run 31181350965](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31181350965) 与 [`CodeQL` run 31181352584](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31181352584) 全部成功；PR #2 仍需人工审核，真实 Cloudflare/ACME/Linux/签名证据继续按标准保持 blocked |
+| 2026-08-07 | Go 1.25.4 与固定 FRP 外部收集器复验 | 本地通过；使用 Go 1.25.4 新模块缓存重新通过 `make contract/test/lint/build/perf/migration-check/security/license`、双面板 WCAG、SBOM/校验和/发行清单、Server runtime smoke、固定 FRP v0.68.0 `verify`、原生 TCP E2E 和真实 FRPS/FRPC Plugin 网络 E2E；`make external-acceptance` 9 个步骤中 8 个 passed，仅因 Cloudflare/ACME/目标硬件/故障注入/签字证据缺失返回 blocked（退出码 2） |
 
 ## 未决与发布阻断项
 
