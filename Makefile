@@ -14,7 +14,7 @@ MINIMUM_FRPC_VERSION ?= 0.68.0
 SERVER_LDFLAGS ?= -X github.com/ricardo/frp-panel-platform/server/internal/version.ServerVersion=$(SERVER_VERSION) -X github.com/ricardo/frp-panel-platform/server/internal/version.MinimumClientVersion=$(MINIMUM_CLIENT_VERSION) -X github.com/ricardo/frp-panel-platform/server/internal/version.LatestClientVersion=$(LATEST_CLIENT_VERSION) -X github.com/ricardo/frp-panel-platform/server/internal/version.MinimumFRPCVersion=$(MINIMUM_FRPC_VERSION)
 CLIENT_LDFLAGS ?= -X github.com/ricardo/frp-panel-platform/client/internal/version.ClientVersion=$(CLIENT_VERSION)
 
-.PHONY: install-web build test lint accessibility contract migration-check license security fuzz perf fault-injection frpc-verify network-e2e plugin-e2e cloudflare-e2e external-acceptance sbom checksums manifest release-version-check sign release checkpoint key-rotate dev-server dev-client clean
+.PHONY: install-web build test lint accessibility contract migration-check license security fuzz perf fault-injection frpc-verify network-e2e plugin-e2e cloudflare-e2e acme-e2e external-acceptance sbom checksums manifest release-version-check sign release checkpoint key-rotate dev-server dev-client clean
 
 install-web:
 	npm ci
@@ -63,6 +63,7 @@ contract:
 	ruby scripts/release-version-policy.rb
 	ruby scripts/release-workflow-policy.rb
 	ruby -c scripts/cloudflare-sandbox-e2e.rb
+	cd server && $(GO_ENV) go test ./cmd/acme-e2e
 	cd server && $(GO_ENV) go test ./internal/httpapi -run '^TestHTTPContract' -count=1
 
 migration-check:
@@ -100,6 +101,9 @@ plugin-e2e:
 
 cloudflare-e2e:
 	ruby scripts/cloudflare-sandbox-e2e.rb
+
+acme-e2e:
+	cd server && $(GO_ENV) go run ./cmd/acme-e2e
 
 external-acceptance:
 	ruby scripts/external-acceptance.rb

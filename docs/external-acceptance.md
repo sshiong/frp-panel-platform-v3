@@ -144,6 +144,26 @@ it never prints the token. Its output is provider smoke evidence, not a
 release sign-off by itself: DNS timeout ambiguity, ACME Staging, Full(strict),
 target hardware and owner approvals still require the reviewed evidence bundle.
 
+For the real ACME DNS-01 path, use the same disposable Cloudflare zone and a
+DNS name delegated to it. The runner rejects production CA URLs, requires an
+explicit confirmation, stores the temporary ACME account key only under a
+temporary directory, and relies on the provider's `ensure` cleanup for the
+challenge TXT records:
+
+```bash
+CLOUDFLARE_E2E_API_TOKEN="$CLOUDFLARE_SANDBOX_TOKEN" \
+FRP_ACME_E2E_DIRECTORY_URL="https://acme-staging-v02.api.letsencrypt.org/directory" \
+FRP_ACME_E2E_EMAIL="release-operator@example.com" \
+FRP_ACME_E2E_DOMAIN="frp-e2e-$(date +%s).example.com" \
+FRP_ACME_E2E_CONFIRM=acme-staging \
+make acme-e2e
+```
+
+The command prints only certificate metadata and never prints the Cloudflare
+token, private key, or account key. A successful command is still operator
+evidence for TLS-010 only; TLS-009/TLS-012, target deployment and three-owner
+release sign-off remain separate gates.
+
 The tracked status remains in [`acceptance-matrix.md`](acceptance-matrix.md)
 and [`PROGRESS.md`](../PROGRESS.md). Until the reviewed bundle exists, the
 matrix must continue to show the corresponding entries as `部分通过` or
