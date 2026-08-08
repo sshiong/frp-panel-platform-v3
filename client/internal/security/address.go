@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 func NormalizeServerURL(raw string, development bool) (string, error) {
@@ -27,6 +28,11 @@ func NormalizeServerURL(raw string, development bool) (string, error) {
 		return "", fmt.Errorf("server address host is required")
 	}
 	host := strings.ToLower(u.Hostname())
+	if strings.ContainsAny(host, "%/\\?#@") || strings.IndexFunc(host, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsControl(r)
+	}) >= 0 {
+		return "", fmt.Errorf("server address host is invalid")
+	}
 	if strings.Contains(host, ":") {
 		ip := net.ParseIP(host)
 		if ip == nil {

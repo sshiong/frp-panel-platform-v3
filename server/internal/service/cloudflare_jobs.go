@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/ricardo/frp-panel-platform/server/internal/acme"
-	"github.com/ricardo/frp-panel-platform/server/internal/crypto"
 	"github.com/ricardo/frp-panel-platform/server/internal/id"
 	"github.com/ricardo/frp-panel-platform/server/internal/jobs"
 	"github.com/ricardo/frp-panel-platform/server/internal/providers/cloudflare"
@@ -330,13 +329,14 @@ func (a *App) deleteDomainExternal(ctx context.Context, job jobs.Job) error {
 		return a.finalizeDeletedDomain(ctx, domainID)
 	}
 	var ciphertext, nonce []byte
-	if err := a.DB.QueryRowContext(ctx, `SELECT c.ciphertext,c.nonce FROM cloudflare_credentials c JOIN users u ON u.active_cloudflare_token_version=c.token_version AND u.id=c.user_id WHERE c.user_id=? AND c.status='valid'`, userID).Scan(&ciphertext, &nonce); err != nil {
+	var keyVersion int64
+	if err := a.DB.QueryRowContext(ctx, `SELECT c.ciphertext,c.nonce,c.key_version FROM cloudflare_credentials c JOIN users u ON u.active_cloudflare_token_version=c.token_version AND u.id=c.user_id WHERE c.user_id=? AND c.status='valid'`, userID).Scan(&ciphertext, &nonce, &keyVersion); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return a.markDomainDeleteFailure(ctx, domainID, "CLOUDFLARE_TOKEN_MISSING", "Cloudflare Token is required to remove the managed DNS record.")
 		}
 		return err
 	}
-	token, err := a.Crypto.Decrypt(ciphertext, nonce, "user:"+userID+":cloudflare_token:v1")
+	token, err := a.Crypto.DecryptVersioned(keyVersion, ciphertext, nonce, "user:"+userID+":cloudflare_token:v1")
 	if err != nil {
 		return err
 	}
@@ -436,13 +436,14 @@ func (a *App) verifyCloudflareToken(ctx context.Context, job jobs.Job) error {
 	}
 	var credentialID string
 	var ciphertext, nonce []byte
-	if err := a.DB.QueryRowContext(ctx, `SELECT id,ciphertext,nonce FROM cloudflare_credentials WHERE user_id=? AND token_version=? AND status='pending'`, userID, version).Scan(&credentialID, &ciphertext, &nonce); err != nil {
+	var keyVersion int64
+	if err := a.DB.QueryRowContext(ctx, `SELECT id,ciphertext,nonce,key_version FROM cloudflare_credentials WHERE user_id=? AND token_version=? AND status='pending'`, userID, version).Scan(&credentialID, &ciphertext, &nonce, &keyVersion); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		return err
 	}
-	token, err := a.Crypto.Decrypt(ciphertext, nonce, "user:"+userID+":cloudflare_token:v1")
+	token, err := a.Crypto.DecryptVersioned(keyVersion, ciphertext, nonce, "user:"+userID+":cloudflare_token:v1")
 	if err != nil {
 		return err
 	}
@@ -497,16 +498,16 @@ func (a *App) syncDomainDNS(ctx context.Context, job jobs.Job) error {
 	if action == "cancel" {
 		return a.markDomainDNSCanceled(ctx, domainID)
 	}
-	var version int64
+	var version, keyVersion int64
 	var ciphertext, nonce []byte
-	err := a.DB.QueryRowContext(ctx, `SELECT c.token_version,c.ciphertext,c.nonce FROM cloudflare_credentials c JOIN users u ON u.active_cloudflare_token_version=c.token_version AND u.id=c.user_id WHERE c.user_id=? AND c.status='valid'`, userID).Scan(&version, &ciphertext, &nonce)
+	err := a.DB.QueryRowContext(ctx, `SELECT c.token_version,c.ciphertext,c.nonce,c.key_version FROM cloudflare_credentials c JOIN users u ON u.active_cloudflare_token_version=c.token_version AND u.id=c.user_id WHERE c.user_id=? AND c.status='valid'`, userID).Scan(&version, &ciphertext, &nonce, &keyVersion)
 	if errors.Is(err, sql.ErrNoRows) {
 		return a.markDomainDNSFailure(ctx, domainID, "CLOUDFLARE_TOKEN_MISSING", "No verified Cloudflare Token is active.")
 	}
 	if err != nil {
 		return err
 	}
-	token, err := a.Crypto.Decrypt(ciphertext, nonce, "user:"+userID+":cloudflare_token:v1")
+	token, err := a.Crypto.DecryptVersioned(keyVersion, ciphertext, nonce, "user:"+userID+":cloudflare_token:v1")
 	if err != nil {
 		return err
 	}
@@ -631,13 +632,14 @@ func (a *App) issueCertificate(ctx context.Context, job jobs.Job) error {
 		return &jobs.BlockedError{Err: acme.ErrUnavailable}
 	}
 	var ciphertext, nonce []byte
-	if err := a.DB.QueryRowContext(ctx, `SELECT c.ciphertext,c.nonce FROM cloudflare_credentials c JOIN users u ON u.active_cloudflare_token_version=c.token_version AND u.id=c.user_id WHERE c.user_id=? AND c.status='valid'`, userID).Scan(&ciphertext, &nonce); err != nil {
+	var keyVersion int64
+	if err := a.DB.QueryRowContext(ctx, `SELECT c.ciphertext,c.nonce,c.key_version FROM cloudflare_credentials c JOIN users u ON u.active_cloudflare_token_version=c.token_version AND u.id=c.user_id WHERE c.user_id=? AND c.status='valid'`, userID).Scan(&ciphertext, &nonce, &keyVersion); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return &jobs.BlockedError{Err: errors.New("ACME is waiting for a verified Cloudflare Token")}
 		}
 		return err
 	}
-	token, err := a.Crypto.Decrypt(ciphertext, nonce, "user:"+userID+":cloudflare_token:v1")
+	token, err := a.Crypto.DecryptVersioned(keyVersion, ciphertext, nonce, "user:"+userID+":cloudflare_token:v1")
 	if err != nil {
 		return err
 	}
@@ -663,7 +665,7 @@ func (a *App) issueCertificate(ctx context.Context, job jobs.Job) error {
 			return err
 		}
 	}
-	privateCiphertext, privateNonce, err := crypto.EncryptWithKey(a.Crypto.CertificateKey, certificate.PrivateKey, "domain:"+domainID+":certificate_private_key:v1")
+	privateCiphertext, privateNonce, err := a.Crypto.EncryptCertificate(certificate.PrivateKey, "domain:"+domainID+":certificate_private_key:v1")
 	if err != nil {
 		return err
 	}
@@ -672,7 +674,7 @@ func (a *App) issueCertificate(ctx context.Context, job jobs.Job) error {
 	if !certificate.NotAfter.IsZero() {
 		renewAfter = certificate.NotAfter.Add(-30 * 24 * time.Hour)
 	}
-	result, err := a.DB.ExecContext(ctx, `UPDATE certificates SET status='valid',not_before=?,not_after=?,renew_after=?,cert_path=?,private_key_ciphertext=?,private_key_nonce=?,wrapping_key_version=1,cert_hash=?,last_error_code=NULL,last_error_message=NULL,updated_at=? WHERE domain_binding_id=? AND provider='acme'`, nullableTime(certificate.NotBefore), nullableTime(certificate.NotAfter), nullableTime(renewAfter), certPath, privateCiphertext, privateNonce, sha256Hex(string(fullChain)), now, domainID)
+	result, err := a.DB.ExecContext(ctx, `UPDATE certificates SET status='valid',not_before=?,not_after=?,renew_after=?,cert_path=?,private_key_ciphertext=?,private_key_nonce=?,wrapping_key_version=?,cert_hash=?,last_error_code=NULL,last_error_message=NULL,updated_at=? WHERE domain_binding_id=? AND provider='acme'`, nullableTime(certificate.NotBefore), nullableTime(certificate.NotAfter), nullableTime(renewAfter), certPath, privateCiphertext, privateNonce, a.Crypto.CurrentCertificateKeyVersion(), sha256Hex(string(fullChain)), now, domainID)
 	if err != nil {
 		return err
 	}

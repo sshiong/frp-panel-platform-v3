@@ -21,7 +21,6 @@ export FRP_ROUTER_TLS_ENABLED=true
 export FRP_ACME_ENABLED=false
 export FRP_SERVER_DATA_DIR=/var/lib/frp-panel-server
 export FRP_PANEL_ENV=production
-export FRP_ADMIN_WEB_DIR=/opt/frp-panel/web/admin/dist
 ./build/frp-panel-server
 ```
 
@@ -46,11 +45,15 @@ export CLIENT_TLS_CERT_FILE=/etc/frp-panel-client/tls.crt
 export CLIENT_TLS_KEY_FILE=/etc/frp-panel-client/tls.key
 export FRP_CLIENT_DATA_DIR=/var/lib/frp-panel-client
 export FRP_PANEL_ENV=production
-export FRP_CLIENT_WEB_DIR=/opt/frp-panel/web/client/dist
 export FRPC_BINARY=/opt/frp/frpc
 export FRPC_BINARY_SHA256='sha256-from-release-manifest'
 export FRPC_VERSION=0.68.0
 ./build/frp-panel-client
 ```
+
+The release build embeds the matching Admin or Client Panel assets into the
+Go binary. `FRP_ADMIN_WEB_DIR` and `FRP_CLIENT_WEB_DIR` are optional overrides
+for development or a controlled static-asset rollout; production does not
+need an external web directory.
 
 For LAN access, bind a specific LAN address (never `0.0.0.0`/`::`), set `CLIENT_ALLOW_LAN=true`, configure `CLIENT_ALLOWED_CIDRS` and `CLIENT_ALLOWED_HOST`, and provide `CLIENT_TLS_CERT_FILE`/`CLIENT_TLS_KEY_FILE`. The Client process refuses to start when those conditions are incomplete. Never expose the development HTTP listener to the public internet.

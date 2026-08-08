@@ -1,6 +1,6 @@
 # FRP Cloudflare Platform v3 进度跟踪
 
-> 最后更新：2026-08-02
+> 最后更新：2026-08-03
 >
 > 本文是实现进度的单一记录入口。每次完成一个可验证的垂直切片，更新状态、证据和未决项；未通过验收的能力不得标记为完成。
 
@@ -16,11 +16,12 @@
 | 阶段 3：TCP/UDP Mapping | 本地实现完成，平台矩阵待执行 | Mapping/Revision/Port Lease/幂等 API、真实 FRP Plugin envelope 与固定 v0.68.0 FRPS/FRPC + loopback Plugin metadata 网络 E2E 已通过 |
 | 阶段 4：域名和 Cloudflare | 本地实现完成，外部 Sandbox 待执行 | Domain/DNS/Token 加密模型、权限分流、冲突语义、补偿 Job 和重定向隔离已实现；真实测试 Zone/Token 尚未配置 |
 | 阶段 5：Router 和证书 | 本地实现完成，ACME/TLS 待执行 | Router Snapshot control/business 分离、HMAC/last-good、DB-free Host runtime 与 ACME DNS-01 Provider 已实现；真实 ACME Staging、TLS/SNI 热切换仍需外部部署验收 |
-| 阶段 6：任务、删除、备份和发布 | 本地与 CI 门禁完成，发布签署待执行 | Job/Audit、pending 配额、删除补偿、全数据加密备份 Decode/Restore、OpenAPI 34/39 路由与响应契约、上一稳定版 migration 演练、ESLint、许可证策略、SPDX SBOM、SHA-256 清单已通过；GitHub Actions `ci` 与 CodeQL 已在最终修复提交上全绿，仍需正式签名、外部环境和发布签字 |
+| 阶段 6：任务、删除、备份和发布 | 本地与 CI 门禁完成，发布签署待执行 | Job/Audit、pending 配额、删除补偿、全数据加密备份 Decode/Restore、OpenAPI 34/39 路由与显式成功响应 schema、上一稳定版 migration 演练、ESLint、许可证策略、SPDX SBOM、SHA-256 清单和 `make external-acceptance` 证据收集器已通过；GitHub Actions `ci` 与 CodeQL 已在最终修复提交上全绿，仍需正式签名、外部环境和发布签字 |
 
 ## 已实现
 
 - [x] 单仓库、多模块：`server/`、`client/`、`contracts/`、`web/admin/`、`web/client/`。
+- [x] 发行边界：`make build` 和 Docker 构建分别把 Admin/Client 静态资源嵌入对应 Go 二进制；外部 web 目录仅保留为显式开发/测试覆盖。
 - [x] Server SQLite WAL、外键、busy timeout、synchronous FULL、顺序 migration。
 - [x] 管理员初始化、Argon2id 密码哈希、首次改密限制。
 - [x] 不透明服务端 Session；普通用户 Client Panel 全局单活动 Session；Session generation 替换旧会话。
@@ -59,6 +60,13 @@
 - [x] 正式 FPPB1 包包含数据库、受保护数据目录密钥/证书/ACME 文件，逐文件校验并安全恢复；Server 启动会重新排队 Router 快照。
 - [x] OpenAPI 3.1 路径/operationId/WebSocket 元数据校验脚本、双模块 CI contract job、`make sbom`、`make checksums`、固定 FRP 版本下载归档校验和发布清单已加入；正式发布仍需签名和第三方扫描。
 - [x] 开发标准门禁已补齐：两个 Vue 应用的 ESLint/strict typecheck/build、OpenAPI 响应契约测试、上一稳定版 migration upgrade rehearsal、npm SPDX 许可证 allowlist、Router Header/Body/上游超时边界和独立 Server/Client 版本元数据。
+- [x] Client/Server 版本兼容边界已补齐：Client 发送 `X-FRP-Client-Version`，Server 对缺失/非法/过旧版本返回 426 与 `Upgrade-Required`，兼容但非 latest 版本显示升级建议；Server/Client 回归与 OpenAPI 契约测试通过。
+- [x] OpenAPI 类型化契约已补齐：`openapi-typescript` 生成 Server 与 Client Local API 的 `contracts/generated/*-api.d.ts`，两个面板请求层与页面模型引用对应生成类型，CI 检查生成文件漂移；root tooling 依赖纳入 SPDX SBOM 与许可证门禁。
+- [x] 密钥迁移期轮换已补齐：master/certificate wrapping key-ring 保留旧版本，`make key-rotate` 重包裹 FRP、Cloudflare 和证书私钥；重启兼容、旧密文解密、服务层行数/登录回归测试通过，真实生产轮换演练仍待外部环境。
+- [x] WCAG 2.1 AA 自动化已补齐：构建后的 Admin/Client 登录页、全部认证导航面板以及 Admin 创建用户、Client Mapping/Domain 对话框均通过 axe、标签、键盘/reduced-motion 与 390px 横向溢出检查；脚本使用无秘密的确定性 API fixture，并已接入既有 `web (admin)` CI job。
+- [x] 前端性能与颜色 token 收口已补齐：两个独立面板改为按需注册 Element Plus Dialog/Message/MessageBox，移除全量 Element Plus CSS；Admin/Client 生产 bundle 分别降至约 225.44/235.93 kB JS 与 66.13/69.74 kB CSS，Vite chunk 警告消失；重复面板、输入、侧栏、导航、对话框和边框颜色已集中到各自 `tokens.css`。
+- [x] API 成功响应契约已收紧：Server OpenAPI 为所有成功 JSON 响应声明 schema，统一 `request_id` 元数据，补齐 `/me` 实际会话字段、分页 envelope、异步 Operation、备份、Token、Router 和用户管理响应；`responseMetadata` 现在也覆盖 API GET 响应，契约回归验证通过。
+- [x] 外部验收证据收集器已补齐：`make external-acceptance` 运行本地契约/迁移/安全/许可证/构建门禁，在显式提供固定 FRP 二进制时运行真实网络 E2E，并对 Cloudflare Sandbox、ACME Staging、目标硬件、故障注入和签名证据缺失返回 `blocked`/退出码 2；流程见 [`external-acceptance.md`](docs/external-acceptance.md)。
 
 ## 验证记录
 
@@ -91,6 +99,42 @@
 | 2026-08-02 | Development-standard gate completion | 本地通过；`make lint`、`make test`、`make build`、`make contract`、`make migration-check`、`make license` 通过；响应契约、迁移升级、Router 请求边界、独立版本字段和逐项 [`acceptance-matrix.md`](docs/acceptance-matrix.md) 已入库 |
 | 2026-08-02 | Final GitHub CI and CodeQL gates | 通过；提交 [`2f73156`](https://github.com/sshiong/frp-panel-platform-v3/commit/2f731567da6933d4fc2ae1db333ad9d61fc2ca19) 的 [`ci` run 30745496136](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30745496136) 九个 job 全部成功，包含 security、双前端、双 Go 模块、fuzz、contract、container-scan、release-metadata；[`CodeQL run 30745496145`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30745496145) 成功，双 gosec SARIF 使用独立 category 上传 |
 
+| 2026-08-02 | 版本兼容、密钥轮换与 WCAG 托管门禁 | 通过；Server/Client 版本升级提示与 426 回归、版本化密钥环/`make key-rotate` 重包裹与重启兼容回归、两个已构建前端的 axe WCAG 2.1 AA/标签/键盘/移动端检查均通过；PR #2 的 [`ci` run 30757304002](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30757304002) 与 [`CodeQL run 30757303990`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30757303990) 全部成功，真实生产轮换仍待外部环境 |
+
+| 2026-08-03 | 发行边界与生成契约补齐 | 通过；`make build` 将两个独立 Vue dist 分别嵌入 Server/Client Go 二进制，`go test ./internal/httpapi` 覆盖 fallback embed；Server/Client `go test -race ./...`、`make lint`、`make contract`、OpenAPI 生成文件漂移检查、npm 许可证门禁和 SPDX SBOM 均通过。新增 Client Local API OpenAPI 与独立 route manifest；Vite 仍只有非阻断的大 chunk 警告，真实 Cloudflare/ACME/Linux FRP 矩阵和签名仍待外部环境 |
+
+| 2026-08-03 | Docker 构建修复与托管门禁 | 通过；提交 [`4e0cbc1`](https://github.com/sshiong/frp-panel-platform-v3/commit/4e0cbc1) 为镜像 UI 构建阶段复制生成契约类型，PR #2 的 [`ci` run 30760001938](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30760001938)（含 container-scan/release-metadata）与 [`CodeQL run 30760001941`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30760001941) 全部通过；正式签名和外部集成验收仍待发布环境 |
+
+| 2026-08-03 | 响应契约与外部证据门禁 | 通过；`make contract`、Server/Client `go test -race ./...`、`make lint`、`make build`、`npm run test:accessibility`、`make sbom`、校验和/发布清单和 secret/license/migration 门禁均通过；新增 `request_id`/`/me` 实际字段契约与 `scripts/external-acceptance.rb`，本机无外部 Provider/签名证据时按设计生成 `blocked`，不伪造 Release Candidate |
+| 2026-08-03 | 最终托管门禁记录 | 通过；提交 [`0f0b353`](https://github.com/sshiong/frp-panel-platform-v3/commit/0f0b3538ba678ec685deb72e283dce9d4df9b038) 的 [`ci` run 30761382419](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30761382419) 与 [`CodeQL run 30761382415`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30761382415) 全部成功；PR #2 检查全绿但仍需人工 review，外部真实环境证据仍按标准保持 blocked |
+| 2026-08-03 | 固定 FRP 外部验收收集器 | 通过/按标准阻断；隔离 fixture 下 `frp-network-e2e.sh`、固定 FRPC `verify`、真实 FRPS/FRPC Plugin 网络 E2E 及本地契约/迁移/安全/许可证/构建均通过；`scripts/external-acceptance.rb` 仅因缺少 Cloudflare/ACME/目标硬件/故障注入/签名证据返回 blocked（退出码 2），未伪造 P0/P1 外部通过 |
+| 2026-08-03 | 固定 FRP 证据提交托管复核 | 通过；提交 [`49a21b0`](https://github.com/sshiong/frp-panel-platform-v3/commit/49a21b00f0e75afbf1c30772ab210e8b9d3dc98c) 的 [`ci` run 30762128928](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30762128928) 与 [`CodeQL` run 30762128925](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30762128925) 全部成功，包含容器扫描、发布元数据、双面板可访问性和安全门禁；PR #2 仍需人工 review |
+| 2026-08-03 | 认证面板可访问性与对比度收口 | 通过；`npm run test:accessibility` 扫描两个独立面板的全部导航 surface 与创建对话框，发现并修复导航类别标签、Mapping/Domain 元数据的 WCAG AA 对比度问题；登录页、认证页、对话框的 axe/标签/键盘/reduced-motion/390px 检查均通过 |
+| 2026-08-03 | 最终本地门禁与外部证据收集 | 本地通过；`make contract`（含证据 schema 回归）、`make test`、`make lint`、`make build`、`make perf`、`make security`、`make license`、`make migration-check`、`make sbom`、`make checksums` 和浏览器可访问性均通过；`make manifest` 因未提供固定 FRPS/FRPC 只拒绝生成正式清单，`make external-acceptance` 因同一固定版本依赖及 Cloudflare/ACME、目标硬件、故障注入和签名证据缺失按标准返回 blocked（退出码 2），未伪造发布通过 |
+| 2026-08-03 | 认证面板修复提交的最终托管复核 | 通过；提交 [`92cf1a3`](https://github.com/sshiong/frp-panel-platform-v3/commit/92cf1a379aab096dc2800a92eaa3d43e41a5e77c) 的 [`ci` run 30763715852](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30763715852) 与 [`CodeQL` run 30763715867](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30763715867) 全部成功，新增 evidence schema regression、双面板认证可访问性、fuzz、container scan 和 release metadata 均通过 |
+| 2026-08-03 | 前端性能与设计 token 收口 | 本地通过；两个面板按需加载 Element Plus 组件与样式，Admin/Client 生产 JS/CSS 分别为 225.44/66.13 kB 与 235.93/69.74 kB，Vite 大 chunk 警告消失；独立 token 层收敛重复颜色；两个面板 typecheck、lint、policy、build 与完整 WCAG/390px 认证面板扫描均通过 |
+| 2026-08-03 | 前端性能与设计 token 收口托管复核 | 通过；提交 [`b91412f`](https://github.com/sshiong/frp-panel-platform-v3/commit/b91412f00d73d70f54bbdae8eade65339f98f4be) 的 [`ci` run 30764876448](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30764876448) 与 [`CodeQL` run 30764876452](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30764876452) 全部成功，CSS token policy、双面板构建/可访问性、安全、fuzz、容器扫描和发布元数据均通过 |
+| 2026-08-03 | 仓库治理与 PR 验收模板收口 | 已核对公开仓库、`main` 分支保护、线性历史、禁止强推/删除、CODEOWNERS、两次审批和必需 CI/CodeQL 检查；新增 PR 验收/风险模板；第二位安全/数据库/加密指定评审者和外部发布签字仍待配置 |
+| 2026-08-03 | Server/Client 独立版本发行链路 | 通过；Server/Client 版本改为构建时独立 `-ldflags` 注入，compatibility API 与 release manifest 同步独立版本/最低兼容版本；新增 SemVer/最低版本策略校验、手动 release 输入和注入版本的 Go 测试；分离 `1.2.3`/`2.4.5` 构建验证、`make contract`、`make test`、完整 lint 均通过 |
+| 2026-08-03 | 独立版本发行链路最终托管复核 | 通过；提交 [`a1cb4ae`](https://github.com/sshiong/frp-panel-platform-v3/commit/a1cb4ae) 的 [`ci` run 30766492825](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30766492825) 与 [`CodeQL` run 30766492828](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30766492828) 全部成功；PR #2 仍待仓库要求的人工审核，外部真实集成与正式签名继续按标准保持 blocked |
+| 2026-08-03 | 验收证据提交绑定与标准矩阵同步门禁 | 通过；外部证据包现在必须绑定公开仓库和当前 40 位 commit，拒绝其他 revision 的旧证据；新增标准 141 项与矩阵 142 行的同步策略并接入 `make contract`，当前真实 Provider/目标环境缺失仍按标准返回 blocked |
+| 2026-08-07 | 验收增强最终托管复核 | 通过；提交 [`97f5d9e`](https://github.com/sshiong/frp-panel-platform-v3/commit/97f5d9e) 的 [`ci` run 31180964158](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31180964158) 与 [`CodeQL` run 31180966657](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31180966657) 全部成功；PR #2 仍需人工审核，真实 Cloudflare/ACME/Linux/签名证据继续按标准保持 blocked |
+| 2026-08-07 | 当前验收证据文档托管复核 | 通过；提交 [`2a058fe`](https://github.com/sshiong/frp-panel-platform-v3/commit/2a058fe3b07ab9505ebeae3d4fb77e3b5abd4a55) 的 [`ci` run 31181350965](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31181350965) 与 [`CodeQL` run 31181352584](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31181352584) 全部成功；PR #2 仍需人工审核，真实 Cloudflare/ACME/Linux/签名证据继续按标准保持 blocked |
+| 2026-08-07 | Go 1.25.4 与固定 FRP 外部收集器复验 | 本地通过；使用 Go 1.25.4 新模块缓存重新通过 `make contract/test/lint/build/perf/migration-check/security/license`、双面板 WCAG、SBOM/校验和/发行清单、Server runtime smoke、固定 FRP v0.68.0 `verify`、原生 TCP E2E 和真实 FRPS/FRPC Plugin 网络 E2E；`make external-acceptance` 9 个步骤中 8 个 passed，仅因 Cloudflare/ACME/目标硬件/故障注入/签字证据缺失返回 blocked（退出码 2） |
+| 2026-08-07 | 固定 FRP 验收证据托管复核 | 通过；提交 [`9fe4b92`](https://github.com/sshiong/frp-panel-platform-v3/commit/9fe4b92) 的 [`ci` run 31183385079](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31183385079) 与 [`CodeQL` run 31183385781](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31183385781) 全部成功，包含双 Go race/staticcheck、双面板 WCAG、容器扫描和 release metadata；真实 Provider/目标环境/签字仍按标准保持 blocked |
+| 2026-08-07 | 发布前外部验收硬门禁 | 已实现；release workflow 现在必须验证仓库根目录、当前 revision 绑定的 `release-evidence.json`，并在 cosign 前运行固定 FRP v0.68.0 原生 TCP/Plugin E2E；缺少真实 Provider、ACME、目标环境、故障注入或三方签字会 fail-closed，不能生成正式 Release |
+| 2026-08-07 | Fuzz 安全边界修复与最新托管复核 | 通过；修复 Client `NormalizeServerURL` 接受 `https://%` 非法主机名的问题并加入回归测试；本地与远端 fuzz 全部通过，提交 [`935a1f7`](https://github.com/sshiong/frp-panel-platform-v3/commit/935a1f7) 的 [`ci` run 31185032520](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31185032520) 与 [`CodeQL` run 31185032236](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31185032236) 全部成功；PR #2 仍需人工审核，真实外部验收/签名按标准保持 blocked |
+
+| 2026-08-07 | Ubuntu 24.04 FRP 兼容性与目标规模工作流补齐 | 已实现并待托管复核；CI 新增官方 FRP v0.68.0 release digest 校验、`frps/frpc verify`、原生 TCP E2E 和真实 Plugin 网络 E2E；performance workflow 改为 Ubuntu 24.04 并上传目标规模 profile 日志；这增强 Linux 自动化证据，但仍不替代目标部署机、Cloudflare/ACME、故障注入和发布签字 |
+
+| 2026-08-07 | Linux FRP E2E 托管复核 | 通过；提交 [`98c9495`](https://github.com/sshiong/frp-panel-platform-v3/commit/98c9495) 修复 Makefile 的 macOS-only shell/cache 默认值；Ubuntu 24.04 `frp-linux-e2e` 的官方 release digest、`frps/frpc verify`、原生 TCP 和真实 Plugin E2E 全部通过；[`ci` run 31187605736](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31187605736) 与 [`CodeQL` run 31187605700](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31187605700) 全部成功；目标生产硬件、Cloudflare/ACME、故障注入和签字仍保持外部门禁 |
+| 2026-08-07 | 最终验收报告刷新 | 通过/按标准阻断；提交 [`49844b8`](https://github.com/sshiong/frp-panel-platform-v3/commit/49844b8335ab81c6c1beeae15832a1f85fe46141) 的 [`ci` run 31188168754](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31188168754) 与 [`CodeQL` run 31188169920](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31188169920) 全部成功；最终外部收集器绑定该提交，固定 FRP 原生 TCP、FRPC verify、真实 Plugin E2E 均通过，Provider/Cloudflare/ACME/目标硬件/故障注入/签名/三方签字仍按 fail-closed 规则返回 blocked（退出码 2） |
+| 2026-08-07 | Linux 故障注入托管复核 | 通过；提交 [`fad3038`](https://github.com/sshiong/frp-panel-platform-v3/commit/fad30389ab3a8e6d5c00e4636330ddc6e5c0bdfb) 的 [`ci` run 31189601927](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31189601927) 与 [`CodeQL` run 31189601869](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31189601869) 成功；Ubuntu 24.04 disposable 32MiB tmpfs 真实触发 `ENOSPC` 并验证 Router last-good 保护，Provider/ACME Date 偏差 fail-safe 通过；目标机备份恢复、系统时钟和正式发布签收仍是外部门禁 |
+| 2026-08-07 | Backup 恢复失败回滚加固 | 本地通过；Restore 在数据库安装后发生 Session 撤销或受保护文件恢复失败时，会删除新数据库并恢复 `.before-restore-*` 旧数据库；新增回归测试验证旧数据与前置备份命名均保留，磁盘满创建备份不会留下 partial archive |
+| 2026-08-07 | Ubuntu 24.04 目标规模性能复核 | 通过当前 hosted profile；[`performance run 31191465839`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31191465839) 的 PERF-001/002/003/005/006/007 全部通过并上传 `linux-target-scale-performance`，日志含 p95/耗时数值；该 runner 不是固定 2 vCPU/2GiB 生产硬件，正式容量基线仍待外部 |
+| 2026-08-07 | WAL 压力与重启恢复故障注入补齐 | 通过；提交 [`92efff8`](https://github.com/sshiong/frp-panel-platform-v3/commit/92efff808529ba3a8a0462daf5b6c93bcd46428b) 的 [`ci run 31192487455`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31192487455) 与 [`CodeQL run 31192488274`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31192488274) 全部成功；Ubuntu 24.04 `fault-injection` 真实执行 WAL 压力/checkpoint/重启恢复、Router ENOSPC、backup partial-output 和 Date skew 检查，生产长时磁盘演练仍待外部 |
+| 2026-08-09 | 发布签名后身份验证加固 | 已实现并待托管复核；release workflow 对每个二进制、SBOM、校验和与 manifest 生成 keyless cosign 签名后，使用 GitHub Actions OIDC issuer 和当前 workflow/ref 验证签名；新增 `scripts/release-workflow-policy.rb` 防止证据门禁、签名、验证和发布顺序回退 |
+
 ## 未决与发布阻断项
 
 以下不是“已实现”的替代品，必须在发布前完成：
@@ -98,7 +142,7 @@
 1. 在 Linux release matrix/目标部署环境重复真实固定版本 FRPS/FRPC + loopback Plugin metadata E2E，并验证正式 FRPS 配置和权限边界。
 2. Cloudflare Sandbox Token 权限、DNS 三种冲突语义、超时补偿和真实外部残留验证。
 3. 使用真实 Cloudflare Sandbox + ACME Staging 完成 DNS-01 传播、TXT 清理、证书原子替换与 Router TLS SNI/Host 热切换；本地 Provider 已实现但未伪造外部成功。
-4. 加密归档备份恢复的 clean-host 灾备演练、WAL checkpoint 受控执行和磁盘满/时钟偏差故障注入。
+4. 加密归档备份恢复的 clean-host 灾备演练、生产环境 WAL checkpoint 长时观察和目标磁盘满/时钟偏差故障注入；实现级 disposable Linux 自动化已补齐但不替代目标部署演练。
 5. 1000 Mapping/2000 Domain、200 Mapping、配置同步和会话替换等 PERF-003~007 的目标环境基线；本地开发 profile 已通过，但尚未替代 Linux/生产目标机的容量基线。
 6. 生成正式 cosign 签名并完成发布负责人、安全负责人和测试负责人签字；GitHub Actions/CodeQL、SAST/SCA、Secret scan 和 container scan 已在提交 [`2f73156`](https://github.com/sshiong/frp-panel-platform-v3/commit/2f731567da6933d4fc2ae1db333ad9d61fc2ca19) 全绿。
 7. 完成上述 P0/P1 外部验收前，仓库只能作为开发预览，不得声明生产就绪。

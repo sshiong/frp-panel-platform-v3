@@ -41,12 +41,19 @@ func TestClientHTTPAPICoverageFlow(t *testing.T) {
 		case "/api/v1/auth/client-login":
 			var input map[string]string
 			_ = json.NewDecoder(r.Body).Decode(&input)
+			if input["username"] == "legacy" {
+				w.WriteHeader(http.StatusUpgradeRequired)
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{"code": "CLIENT_VERSION_UNSUPPORTED", "detail": "legacy Client", "upgrade_required": true, "client_version": "0.0.9", "minimum_client_version": "0.1.0", "latest_client_version": "0.2.0"})
+				return
+			}
 			if input["password"] == "bad" {
 				w.WriteHeader(http.StatusUnauthorized)
 				_ = json.NewEncoder(w).Encode(map[string]string{"code": "AUTH_INVALID_CREDENTIALS", "detail": "invalid"})
 				return
 			}
 			_, _ = io.WriteString(w, `{"token":"remote-session","session_expires_at":"2030-01-01T00:00:00Z","runtime_credential":"runtime","frp_username":"client-api-user","frp_secret":"secret","frps_transport_secret":"transport","user":{"id":"client-api-user","username":"client-api-user","role":"user","status":"active","must_change_password":false,"must_change_username":false}}`)
+		case "/api/v1/compatibility":
+			_ = json.NewEncoder(w).Encode(map[string]string{"server_version": "0.1.0", "minimum_client_version": "0.1.0", "latest_client_version": "0.2.0", "minimum_frpc_version": "0.68.0", "protocol_version": "v1", "config_schema_version": "v1"})
 		case "/api/v1/config/full":
 			_ = json.NewEncoder(w).Encode(snapshot)
 		case "/api/v1/config/signing-key":
@@ -148,8 +155,17 @@ func TestClientHTTPAPICoverageFlow(t *testing.T) {
 	must(status, http.StatusNoContent, body)
 	status, body = request(http.MethodPost, "/api/v1/login", `{"server_panel_url":"`+remote.URL+`","username":"client-api-user","password":"bad"}`, nil)
 	must(status, http.StatusUnauthorized, body)
+	status, body = request(http.MethodPost, "/api/v1/login", `{"server_panel_url":"`+remote.URL+`","username":"legacy","password":"Client-Password-2026!"}`, nil)
+	must(status, http.StatusUpgradeRequired, body)
+	if !strings.Contains(string(body), "upgrade_required") || !strings.Contains(string(body), "minimum_client_version") || !strings.Contains(string(body), "CLIENT_VERSION_UNSUPPORTED") {
+		t.Fatalf("forced Client upgrade metadata was not forwarded: %s", body)
+	}
 	status, body = request(http.MethodPost, "/api/v1/login", `{"server_panel_url":"`+remote.URL+`","username":"client-api-user","password":"Client-Password-2026!"}`, nil)
 	must(status, http.StatusOK, body)
+	var suggestedSession map[string]interface{}
+	if err := json.Unmarshal(body, &suggestedSession); err != nil || suggestedSession["upgrade_suggested"] != true || suggestedSession["latest_client_version"] != "0.2.0" {
+		t.Fatalf("suggested Client upgrade metadata was not returned: %s", body)
+	}
 	csrf := client.Session().CSRFToken
 	if csrf == "" || client.SessionCookie() == "" {
 		t.Fatal("client login did not establish local session")

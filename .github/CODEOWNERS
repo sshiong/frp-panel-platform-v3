@@ -1,9 +1,9 @@
-# Default owner for repository changes. Add a second security/database reviewer
-# before enabling the two-reviewer rule required by the v3 acceptance standard.
+# Default owner for repository changes. Branch protection currently requires two
+# approvals; a designated second reviewer is still required for formal release.
 * @sshiong
 
 # These paths require an additional security/database/crypto owner at release
-# time; the repository owner remains the fallback until that reviewer is added.
+# time. Add that owner here before the corresponding release PR is opened.
 /server/internal/auth/ @sshiong
 /server/internal/crypto/ @sshiong
 /server/internal/db/ @sshiong

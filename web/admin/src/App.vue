@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown, Bell, CircleCheckFilled, Clock, Connection, DataAnalysis, Files, Key, Lock, Operation, Plus, Refresh, Setting, User, UserFilled, WarningFilled } from '@element-plus/icons-vue'
-import { api } from './api'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import { ArrowDown, Bell, CircleCheckFilled, Clock, Connection, DataAnalysis, Files, Key, Lock, Operation as OperationIcon, Plus, Refresh, Setting, User, UserFilled, WarningFilled } from '@element-plus/icons-vue'
+import { api, type AdminStats, type CloudflareStatus, type Operation, type UserRecord } from './api'
 import { requiresCredentialSetup } from './policy'
 import { useSessionStore } from './stores/session'
 
-type UserRow = { id: string; username: string; role: string; status: string; must_change_password: boolean; must_change_username: boolean; created_at: string; desired_config_version: number; applied_config_version: number; frp_credential: { present: boolean; secret_version: number; rotated_at?: string; status: string } }
-type Stats = { active_users: number; mappings: number; pending: number; errors: number; server_uptime_seconds: number; frps_public_host: string; frps_public_port: number }
-type ExternalResidue = { resource_type: string; resource_id: string; provider: string; identifier: string; reason: string; created_at: string; resolved_at?: string }
-type OperationRow = { id: string; operation_type: string; status: string; phase: string; step: string; error_code?: string; error_message?: string; compensation_status?: string; external_residue_count?: number; external_residues?: ExternalResidue[]; created_at: string }
+type UserRow = UserRecord
+type Stats = AdminStats
+type OperationRow = Operation
 
 const session = useSessionStore()
 const view = ref('overview')
@@ -22,13 +22,13 @@ const loginForm = ref({ username: 'admin', password: '' })
 const showCreateUser = ref(false)
 const newUsername = ref('')
 const initialPassword = ref('')
-const cfStatus = ref<{ configured: boolean; status: string; token_version?: number; verified_at?: string; capabilities?: { missing?: string[] } }>({ configured: false, status: 'missing' })
+const cfStatus = ref<CloudflareStatus>({ configured: false, status: 'missing' })
 const cfToken = ref('')
 const clearCountdown = ref(0)
 const nav = [
   { id: 'overview', label: '运行总览', kicker: 'CONTROL ROOM', icon: DataAnalysis },
   { id: 'users', label: '用户与会话', kicker: 'IDENTITY', icon: UserFilled },
-  { id: 'operations', label: '操作队列', kicker: 'OPERATIONS', icon: Operation },
+  { id: 'operations', label: '操作队列', kicker: 'OPERATIONS', icon: OperationIcon },
   { id: 'cloudflare', label: 'Cloudflare', kicker: 'EDGE PROVIDER', icon: Connection },
   { id: 'system', label: '系统边界', kicker: 'SYSTEM', icon: Setting }
 ]

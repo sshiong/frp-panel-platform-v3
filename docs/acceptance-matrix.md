@@ -17,7 +17,7 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 
 | ID | 状态 | 实际结果与证据 |
 |---|---|---|
-| ARCH-001 | 本地通过 | `make build` 只产出 `build/frp-panel-server` 和 `build/frp-panel-client`。 |
+| ARCH-001 | 本地通过 | `make build` 只产出 `build/frp-panel-server` 和 `build/frp-panel-client`，并将匹配的 Admin/Client 静态资源分别嵌入对应 Go 二进制。 |
 | ARCH-002 | 本地通过 | `server/`、`client/` 为独立 Go module；Client 无管理员 API、SQLite、Router、Plugin 依赖。 |
 | ARCH-003 | 本地通过 | Server/Client 数据目录由各自配置管理；架构说明与代码边界见 [`architecture.md`](architecture.md)。 |
 | ARCH-004 | 本地通过 | 代码与 Secret scan 未发现设备注册、`device_token`、永久 `client_id` 业务流程。 |
@@ -65,7 +65,7 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 | FRPS-006 | 本地通过 | 停用用户不能创建新连接。 |
 | FRPS-007 | 本地通过 | Plugin 超时/未知状态 fail-closed 测试通过。 |
 | FRPS-008 | 本地通过 | FRP 凭证重置使旧 Secret、Session、generation 失效。 |
-| FRPS-009 | 部分通过 | transport secret 与 Plugin 分权/loopback 测试通过；需 Linux 正式 FRPS 矩阵。 |
+| FRPS-009 | 部分通过 | 固定 FRPS/FRPC v0.68.0 的真实 Plugin 网络 E2E、transport secret 与 Plugin 分权/loopback 测试通过；Ubuntu 24.04 CI 已加入官方 release digest、`verify`、原生 TCP 和 Plugin E2E；仍需目标部署环境的正式 FRPS 权限/兼容矩阵签收。 |
 | MAP-001 | 本地通过 | TCP/UDP 端口数字使用 DB 唯一租约约束。 |
 | MAP-002 | 本地通过 | offline/disabled/config_error 不释放租约。 |
 | MAP-003 | 本地通过 | 并发自动端口分配无重复 lease。 |
@@ -124,7 +124,7 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 | KEY-001 | 本地通过 | master、config signing、router、certificate wrapping、backup key 用途分离。 |
 | KEY-002 | 本地通过 | 主密钥文件重启稳定，旧密文可解密。 |
 | KEY-003 | 本地通过 | 主密钥不写普通 DB、不进日志。 |
-| KEY-004 | 部分通过 | key_version 与迁移读取边界已实现；完整轮换演练待发布环境。 |
+| KEY-004 | 部分通过 | 版本化 master/certificate key-ring、旧版本解密、`make key-rotate` 和 FRP/Cloudflare/证书私钥重包裹回归测试已通过；完整生产轮换窗口与回滚演练仍待外部环境。 |
 | BKP-001 | 本地通过 | FPPB1 全包 AES-GCM 加密、manifest SHA-256 校验。 |
 | BKP-002 | 本地通过 | SQLite WAL 下 VACUUM INTO/恢复和 integrity_check 测试通过。 |
 | BKP-003 | 本地通过 | 无密码无法解包读取秘密。 |
@@ -135,28 +135,28 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 
 | ID | 状态 | 实际结果与证据 |
 |---|---|---|
-| API-001 | 本地通过 | OpenAPI 3.1 34 paths/39 operations 与 chi route manifest 对齐；响应契约测试已纳入 CI。 |
+| API-001 | 本地通过 | Server OpenAPI 3.1 34 paths/39 operations 与 chi route manifest 对齐；Client Local API 20 paths/23 operations 也与独立 route manifest 对齐；成功 JSON 响应均声明 schema（含统一 `request_id` 元数据），`/me` 的实际会话字段已纳入契约；`contracts/generated/server-api.d.ts`、`contracts/generated/client-api.d.ts`、响应契约测试和生成文件漂移检查已纳入 CI。 |
 | API-002 | 本地通过 | Problem Details、稳定 code、request_id 和错误测试通过。 |
 | API-003 | 本地通过 | 权限中间件分离，越权拒绝不暴露资源存在性。 |
 | API-004 | 本地通过 | 不支持 HTTP/WS protocol 返回 426。 |
-| API-005 | 部分通过 | compatibility 包含 panel/version/schema 元数据；完整旧 Client 升级 UI 矩阵待外部。 |
+| API-005 | 本地通过 | Client 发送 `X-FRP-Client-Version`；过旧/非法版本返回 426、`Upgrade-Required` 和 `CLIENT_VERSION_UNSUPPORTED`，兼容版本可登录并显示可升级提示，回归测试通过；Server/Client 发行版本可由独立 `-ldflags` 注入并进入 compatibility API。 |
 | API-006 | 本地通过 | WebSocket 指数退避、抖动、lease heartbeat 测试通过。 |
 | API-007 | 本地通过 | 丢通知触发 full sync，配置 hash/version 收敛测试通过。 |
-| PERF-001 | 本地通过 | 本机 100 并发读 profile 通过；Linux 2 vCPU/2 GiB p95 基线待外部。 |
-| PERF-002 | 本地通过 | 本机 20 并发写/SQLite WAL profile 通过；目标机基线待外部。 |
-| PERF-003 | 待外部 | Router 目标规模测试已存在；1000/2000 目标硬件结果尚未签收。 |
+| PERF-001 | 本地通过 | 本机 profile 通过；Ubuntu 24.04 hosted run 31191465839 的 100 并发读 p95=102.321716ms、错误率 0；固定 Linux 2 vCPU/2 GiB release 基线仍待签收。 |
+| PERF-002 | 本地通过 | 本机 profile 通过；同一 hosted run 的 20 并发写 p95=45.921474ms、错误率 0；目标机基线仍待外部。 |
+| PERF-003 | 部分通过 | Ubuntu 24.04 hosted run 31191465839 的 1000 Mapping + 2000 Domain Router snapshot generate/apply=523.973835ms；固定目标硬件结果尚未签收。 |
 | PERF-004 | 本地通过 | snapshot reload 不主动中断 in-flight HTTP 流。 |
-| PERF-005 | 本地通过 | 本机 200 Mapping 签名/验签 profile 通过；目标机结果待外部。 |
-| PERF-006 | 本地通过 | 本机配置提交到 Client apply profile 通过；目标网络矩阵待外部。 |
-| PERF-007 | 本地通过 | 旧 HTTP/WS/FRP Plugin 会话替换失效 profile 通过；生产延迟基线待外部。 |
+| PERF-005 | 本地通过 | 本机 profile 通过；同一 hosted run 的 200 Mapping config generate/sign=4.54487ms；目标机结果待外部。 |
+| PERF-006 | 本地通过 | 本机 profile 通过；同一 hosted run 的配置提交到 Client apply=6.235335ms；目标网络矩阵待外部。 |
+| PERF-007 | 本地通过 | 本机 profile 通过；同一 hosted run 的 WebSocket=65.514317ms、旧 HTTP=0.376666ms、旧 FRP Login=0.325481ms；生产延迟基线待外部。 |
 | REL-001 | 本地通过 | Supervisor 临时配置/last-good/重启恢复测试通过。 |
 | REL-002 | 本地通过 | Port lease/Mapping 事务和 SQLite rollback race 测试通过。 |
 | REL-003 | 本地通过 | Worker lease、ambiguous Provider query 和 malformed payload recovery 测试通过。 |
 | REL-004 | 本地通过 | Router bad snapshot 保留 last-good 测试通过。 |
-| REL-005 | 部分通过 | WAL bytes 指标和 checkpoint 命令存在；长时间/磁盘压力演练待外部。 |
+| REL-005 | 部分通过 | WAL bytes 指标、checkpoint 命令和 `TestCheckpointUnderWALPressure` 已通过；Ubuntu 24.04 `make fault-injection` 会在 disposable tmpfs 中验证 WAL 压力、checkpoint 和重启恢复，长时间/生产磁盘演练仍待外部。 |
 | REL-006 | 本地通过 | WebSocket 断线后全量同步/心跳恢复测试通过。 |
-| REL-007 | 待外部 | 原子写入和错误路径单测通过；真实 disk-full 注入待外部。 |
-| REL-008 | 待外部 | Provider Date/clock skew 检测已有单测；系统时钟偏差/ACME 实验待外部。 |
+| REL-007 | 部分通过 | Ubuntu 24.04 [`ci` run 31189601927](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31189601927) 的 disposable 32MiB tmpfs 真实填满文件系统，验证 Router 原子写失败不覆盖 last-good；本地 backup archive 无 partial output、restore post-install 失败回滚测试通过；目标部署磁盘演练仍待外部。 |
+| REL-008 | 部分通过 | 同一 Ubuntu 24.04 fault-injection job 验证 Cloudflare/ACME Provider Date 偏差的 fail-safe 路径；真实系统时钟偏差、Session/ACME 长时行为仍待外部。 |
 | SEC-001 | 本地/CI 通过 | 本地 gosec/govulncheck 和 secret scan 清零；最终提交 [`2f73156`](https://github.com/sshiong/frp-panel-platform-v3/commit/2f731567da6933d4fc2ae1db333ad9d61fc2ca19) 的 [`ci` security job](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30745496136) 与 CodeQL 均成功，双 gosec SARIF 已独立上传。 |
 | SEC-002 | 本地通过 | Auth/domain/port/file path 权限测试和 race 测试通过。 |
 | SEC-003 | 本地通过 | CSRF、CORS、Origin、Host、WebSocket 和 XSS 边界测试通过。 |
@@ -164,7 +164,7 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 | SEC-005 | 本地通过 | Secret scan 与日志脱敏测试未发现密码、Token、Cookie、私钥。 |
 | SEC-006 | 本地通过 | Plugin provider unavailable/timeout fail-closed 测试通过。 |
 | SEC-007 | 本地通过 | Domain、URL、IDNA、Snapshot、JSON fuzz seed/短时 fuzz 已纳入 CI。 |
-| SEC-008 | 部分通过 | SPDX SBOM、SHA-256、manifest 和 release cosign workflow 存在；正式签名结果待 tag 发布。 |
+| SEC-008 | 部分通过 | SPDX SBOM、SHA-256、manifest 和 release cosign workflow 存在；签名后会校验 GitHub Actions OIDC issuer 与当前 workflow/ref，正式 tag 签名结果仍待发布环境。 |
 
 ## UI、DoD 和发布结论
 
@@ -176,15 +176,14 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 | UI-004 | 本地通过 | Cloudflare capability missing 列表在 Admin UI 展示。 |
 | UI-005 | 本地通过 | DNS adopt/overwrite/cancel 与 managed/adopted 文案一致。 |
 | UI-006 | 本地通过 | Token 页面只显示 configured/status/version/verified_at。 |
-| UI-007 | 部分通过 | 关键标签、触控尺寸、对比度和 reduced-motion 已检查；完整 WCAG 2.1 AA 自动化待 CI。 |
+| UI-007 | 本地/CI 通过 | Admin/Client 构建后运行 axe WCAG 2.1 AA、表单标签、键盘 Tab/reduced-motion、390px 无横向溢出检查均通过；PR #2 的 `web (admin)` 与 `web (client)` 门禁通过。 |
 | UI-008 | 本地通过 | Operations 展示阶段、步骤、失败原因、residue 和 retry。 |
 | DOD-001 | 待外部 | 所有 P0/P1 尚未完成真实 Cloudflare、ACME、Linux/FRP、灾备和签字，因此当前版本不是 Release Candidate。 |
 
 ## 发布前剩余动作
 
 1. 已完成最终提交的 `ci`、CodeQL、container scan 和 release metadata 全绿，并把 run URL/commit 写入 [`PROGRESS.md`](../PROGRESS.md)。
-2. 配置公开仓库 `main` 分支保护、PR 至少一名评审和 CODEOWNERS；安全/数据库/
-   加密变更需要两名评审。
+2. 已完成仓库治理：仓库保持公开，`main` 启用保护、线性历史、禁止强推/删除、CODEOWNERS、两次审批和必需 CI/CodeQL 检查；正式安全/数据库/加密变更仍需在 CODEOWNERS 中补入指定的第二位专业评审者。
 3. 在 Linux 目标机完成 FRPS/FRPC Plugin、PERF、disk-full/clock、clean-host
    restore；在 Cloudflare Sandbox 与 ACME Staging 完成 DNS/证书链路。
 4. 以 tag 发布双发行物，验证签名、SBOM、SHA-256、migration、升级/回滚文档，

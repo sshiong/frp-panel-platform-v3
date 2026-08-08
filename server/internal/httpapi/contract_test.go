@@ -72,10 +72,42 @@ func TestHTTPContractSmokeCoversProblemDetailsAuthAndPagination(t *testing.T) {
 	if err := json.Unmarshal(compatibilityResponse.Body.Bytes(), &compatibility); err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"server_version", "minimum_client_version", "latest_client_version", "minimum_frpc_version", "protocol_version", "config_schema_version"} {
+	for _, field := range []string{"request_id", "server_version", "minimum_client_version", "latest_client_version", "minimum_frpc_version", "protocol_version", "config_schema_version"} {
 		if compatibility[field] == nil || compatibility[field] == "" {
 			t.Fatalf("compatibility missing %q: %#v", field, compatibility)
 		}
+	}
+
+	meRequest := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+	meRequest.RemoteAddr = "127.0.0.1:12000"
+	meRequest.Header.Set("Authorization", "Bearer "+login.Token)
+	meResponse := httptest.NewRecorder()
+	handler.ServeHTTP(meResponse, meRequest)
+	if meResponse.Code != http.StatusOK {
+		t.Fatalf("authenticated session status=%d body=%s", meResponse.Code, meResponse.Body.String())
+	}
+	var session map[string]interface{}
+	if err := json.Unmarshal(meResponse.Body.Bytes(), &session); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"request_id", "session_id", "user_id", "username", "role", "status", "generation", "channel", "must_change_password", "must_change_username", "expires_at"} {
+		if session[field] == nil || session[field] == "" {
+			t.Fatalf("authenticated session missing %q: %#v", field, session)
+		}
+	}
+	for _, forbidden := range []string{"csrf_token_hash", "source_ip", "user_agent", "token", "runtime_credential", "frp_secret"} {
+		if _, exists := session[forbidden]; exists {
+			t.Fatalf("authenticated session leaked internal or secret field %q: %#v", forbidden, session)
+		}
+	}
+
+	legacyClientLogin := httptest.NewRequest(http.MethodPost, "/api/v1/auth/client-login", strings.NewReader(`{"username":"admin","password":"Admin-Password-2026!"}`))
+	legacyClientLogin.RemoteAddr = "127.0.0.1:12000"
+	legacyClientLogin.Header.Set("X-FRP-Client-Version", "0.0.9")
+	legacyClientLoginResponse := httptest.NewRecorder()
+	handler.ServeHTTP(legacyClientLoginResponse, legacyClientLogin)
+	if legacyClientLoginResponse.Code != http.StatusUpgradeRequired || legacyClientLoginResponse.Header().Get("Upgrade-Required") != "client/0.1.0" || !strings.Contains(legacyClientLoginResponse.Body.String(), "CLIENT_VERSION_UNSUPPORTED") || !strings.Contains(legacyClientLoginResponse.Body.String(), "upgrade_required") {
+		t.Fatalf("legacy Client version was not rejected with upgrade metadata: status=%d headers=%v body=%s", legacyClientLoginResponse.Code, legacyClientLoginResponse.Header(), legacyClientLoginResponse.Body.String())
 	}
 
 	reauthRequest := httptest.NewRequest(http.MethodPost, "/api/v1/auth/reauth", strings.NewReader(`{"current_password":"Admin-Password-2026!"}`))
@@ -126,7 +158,7 @@ func TestHTTPContractSmokeCoversProblemDetailsAuthAndPagination(t *testing.T) {
 	if err := json.Unmarshal(mappingsResponse.Body.Bytes(), &page); err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"items", "config_version", "page", "page_size", "total"} {
+	for _, field := range []string{"request_id", "items", "config_version", "page", "page_size", "total"} {
 		if page[field] == nil {
 			t.Fatalf("paginated mappings missing %q: %#v", field, page)
 		}

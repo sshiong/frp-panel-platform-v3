@@ -2,7 +2,7 @@
 
 The canonical contract is [`contracts/openapi.yaml`](../contracts/openapi.yaml). All Server routes use `/api/v1`; writes require an `Idempotency-Key` and a configuration version where the operation changes desired state. Mapping updates additionally carry `expected_revision`; stale writes return `409 RESOURCE_REVISION_CONFLICT`. Errors use RFC 9457 Problem Details with a stable `code` and `request_id`.
 
-The Client Panel exposes a separate local API to its own browser. It proxies only the allowed resources to Server using its in-memory opaque session. It never exposes arbitrary command execution or arbitrary configuration paths.
+All successful JSON responses include the generated `request_id` correlation field; response schemas in the OpenAPI contract include it explicitly. The Client Panel exposes a separate local API to its own browser. It proxies only the allowed resources to Server using its in-memory opaque session. It never exposes arbitrary command execution or arbitrary configuration paths.
 
 Important boundaries:
 

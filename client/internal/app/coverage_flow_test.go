@@ -18,6 +18,7 @@ import (
 
 	"github.com/ricardo/frp-panel-platform/client/internal/config"
 	"github.com/ricardo/frp-panel-platform/client/internal/supervisor"
+	"github.com/ricardo/frp-panel-platform/client/internal/version"
 )
 
 func TestAppCoverageLifecycleAndProxy(t *testing.T) {
@@ -49,8 +50,12 @@ func TestAppCoverageLifecycleAndProxy(t *testing.T) {
 	snapshot.Signature = base64.RawURLEncoding.EncodeToString(ed25519.Sign(privateKey, encoded))
 	var applyCount atomic.Int32
 	var logoutCount atomic.Int32
+	var clientVersionHeader atomic.Value
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/compatibility" || r.URL.Path == "/api/v1/auth/client-login" {
+			clientVersionHeader.Store(r.Header.Get("X-FRP-Client-Version"))
+		}
 		switch r.URL.Path {
 		case "/api/v1/auth/client-login":
 			_, _ = io.WriteString(w, `{"token":"server-token","session_expires_at":"2030-01-01T00:00:00Z","runtime_credential":"runtime-token","frp_username":"coverage-user","frp_secret":"user-secret","frps_transport_secret":"transport-secret","user":{"id":"coverage-user","username":"coverage-user","role":"user","status":"active","must_change_password":false,"must_change_username":false}}`)
@@ -99,6 +104,9 @@ func TestAppCoverageLifecycleAndProxy(t *testing.T) {
 	})
 	if applyCount.Load() != 1 || client.SupervisorStatus().AppliedVersion != snapshot.ConfigVersion {
 		t.Fatalf("initial configuration was not applied: count=%d status=%#v", applyCount.Load(), client.SupervisorStatus())
+	}
+	if got := clientVersionHeader.Load(); got != version.ClientVersion {
+		t.Fatalf("Client Panel version header=%v, want %q", got, version.ClientVersion)
 	}
 	if !client.ValidateLocal(client.SessionCookie()) || client.SessionCookie() == "" || !client.CSRFValid(client.Session().CSRFToken) {
 		t.Fatal("local client session helpers rejected the active session")

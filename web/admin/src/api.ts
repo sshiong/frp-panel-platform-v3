@@ -1,4 +1,14 @@
-export type Problem = { code?: string; detail?: string; status?: number }
+import createClient from 'openapi-fetch'
+import type { components, paths } from '../../../contracts/generated/server-api'
+
+export type Problem = Partial<components['schemas']['Problem']>
+export type UserSummary = components['schemas']['UserSummary']
+export type UserRecord = components['schemas']['UserRecord']
+export type Operation = components['schemas']['Operation']
+export type AdminStats = components['schemas']['AdminStats']
+export type CloudflareStatus = components['schemas']['CloudflareStatus']
+
+export const serverAPI = createClient<paths>({ baseUrl: '' })
 
 function requestID(): string {
   const bytes = new Uint8Array(16)
@@ -13,14 +23,30 @@ function requestID(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
+serverAPI.use({
+  onRequest({ request }) {
+    const csrf = document.cookie.split(';').map(item => item.trim()).find(item => item.startsWith('frp_server_csrf='))?.slice('frp_server_csrf='.length) ?? ''
+    const headers = new Headers(request.headers)
+    headers.set('X-FRP-Protocol-Version', 'v1')
+    if (csrf) headers.set('X-CSRF-Token', decodeURIComponent(csrf))
+    if (['POST', 'PUT', 'DELETE'].includes(request.method) && !headers.has('Idempotency-Key')) headers.set('Idempotency-Key', requestID())
+    return new Request(request, { headers })
+  },
+})
+
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const csrf = document.cookie.split(';').map(item => item.trim()).find(item => item.startsWith('frp_server_csrf='))?.slice('frp_server_csrf='.length) ?? ''
-  const headers = new Headers({ 'Content-Type': 'application/json', 'X-FRP-Protocol-Version': 'v1', ...(csrf ? { 'X-CSRF-Token': decodeURIComponent(csrf) } : {}), ...(init.headers ?? {}) })
-  if (['POST', 'PUT', 'DELETE'].includes((init.method ?? 'GET').toUpperCase()) && !headers.has('Idempotency-Key')) headers.set('Idempotency-Key', requestID())
-  const response = await fetch(path, { credentials: 'include', ...init, headers })
-  if (!response.ok) {
-    const problem = await response.json().catch(() => ({})) as Problem
-    throw new Error(problem.detail || problem.code || `HTTP ${response.status}`)
+  const method = (init.method ?? 'GET').toLowerCase()
+  const body = typeof init.body === 'string' ? JSON.parse(init.body) : init.body
+  const headers = new Headers(init.headers)
+  const result = await serverAPI.request(method as never, path as never, {
+    ...init,
+    body,
+    headers,
+    credentials: 'include',
+  } as never)
+  if (!result.response.ok) {
+    const problem = result.error as Problem | undefined
+    throw new Error(problem?.detail || problem?.code || `HTTP ${result.response.status}`)
   }
-  return response.json() as Promise<T>
+  return result.data as T
 }

@@ -22,6 +22,7 @@ Server API 错误使用 RFC 9457 Problem Details，响应包含 `type`、`title`
 | `INVALID_JSON` | 400 | JSON、字段或请求体格式错误 | 按契约修正字段；不发送未知字段 |
 | `REQUEST_BODY_TOO_LARGE` | 413 | 请求体超过 1 MiB 限制 | 缩小请求体后重试 |
 | `UPGRADE_REQUIRED` | 426 | 协议版本不支持 | 升级 Client/FRPC 到兼容版本 |
+| `CLIENT_VERSION_UNSUPPORTED` | 426 | Client Panel 版本缺失、格式非法或低于 Server 最低版本；响应带 `Upgrade-Required` 和版本元数据 | 安装不低于 `minimum_client_version` 的 Client；若仅有 `upgrade_suggested` 则可在维护窗口升级 |
 | `SERVER_TLS_VALIDATION_FAILED` | 400/502 | Server Panel TLS 未通过系统信任或已固定指纹校验 | 检查证书；未发送密码前完成 CA/SPKI 信任 |
 | `SERVER_CERTIFICATE_INSPECTION_FAILED` | 400 | 无法在发送密码前读取 Server Panel 证书 | 检查地址、端口和 TLS 服务 |
 | `FRPC_VERIFY_FAILED` | 400/502 | 固定 FRPC 未接受新配置 | 保留 last-good，检查二进制/本地服务 |

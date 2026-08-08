@@ -1,18 +1,18 @@
 # Frontend technical audit
 
-> Audit date: 2026-08-02
-> Scope: `web/admin` and `web/client` login and authenticated panel surfaces
+> Audit date: 2026-08-03
+> Scope: `web/admin` and `web/client` login, authenticated panel, and modal surfaces
 
 ## Health score
 
 | Dimension | Score | Evidence / finding |
 |---|---:|---|
-| Accessibility | 3/4 | Form fields are label-wrapped, icon-only controls have accessible labels, focus-visible outlines are present, and semantic `main`/`nav`/`header` landmarks are used. A full automated WCAG contrast and keyboard audit still belongs in CI. |
-| Performance | 2/4 | No image-heavy surface or layout-thrashing loop was found, but each production JavaScript bundle is about 1.0 MB minified and Vite reports the chunk-size warning. |
-| Theming | 2/4 | Both panels share a deliberate graphite/ivory/steel-blue/state-color token base, but legacy selectors still contain repeated literal colors instead of a complete token layer. |
+| Accessibility | 4/4 | The built Admin and Client entry surfaces plus deterministic authenticated navigation and create-user/Mapping/Domain dialogs pass axe WCAG 2.1 AA, unlabeled-control checks, keyboard Tab/reduced-motion checks, and the 390px overflow smoke test. |
+| Performance | 3/4 | Element Plus is now imported by component instead of registering the full library. Production bundles are 225.44 kB JS / 66.13 kB CSS for Admin and 235.93 kB JS / 69.74 kB CSS for Client; Vite emits no chunk-size warning. Real-device LCP/INP measurement remains a release follow-up. |
+| Theming | 3/4 | Both panels now have explicit graphite/ivory/steel-blue/state-color aliases in independent `tokens.css` files, with repeated surfaces, inputs, navigation, dialogs and borders consuming semantic variables. Intentional one-off state shades remain local. |
 | Responsive design | 4/4 | Admin and Client were checked at 390×844 with Playwright; `document.documentElement.scrollWidth` equals `window.innerWidth` (390px), mobile layouts stack, tables scroll within their panels, and key controls receive 44px touch targets. |
 | Anti-patterns | 4/4 | The UI uses an industrial control-room visual language: no pale-purple palette, glassmorphism, gradient text, generic dashboard hero cards, or decorative AI-style effects. |
-| **Total** | **15/20** | **Good; address bundle size and consolidate remaining color literals before release.** |
+| **Total** | **18/20** | **Excellent; retain the industrial control-room system and collect real-device performance evidence before release.** |
 
 ## Anti-pattern verdict
 
@@ -20,30 +20,42 @@
 
 ## Findings by severity
 
-### P2 — Production bundles exceed the default chunk budget
+### Resolved — Production bundle size
 
 - **Location:** `web/admin` and `web/client` Vite build output.
 - **Category:** Performance.
-- **Impact:** Initial JavaScript transfer and parse time can be costly on a constrained operator laptop or remote management connection.
-- **Evidence:** `npm run build` reports approximately 1,022 kB and 1,031 kB minified entry chunks and the Vite 500 kB warning.
-- **Recommendation:** Split low-frequency admin views and Element Plus-heavy paths with route-level `import()`; retain the current functional UI while measuring LCP/INP on the supported operator browsers.
-- **Suggested command:** `/optimize`
+- **Impact before fix:** Initial JavaScript and CSS transfer were unnecessarily costly on a constrained operator laptop or remote management connection.
+- **Fix:** Replaced full Element Plus registration and the full stylesheet with direct Dialog, Message and MessageBox imports plus component styles.
+- **Evidence after fix:** Admin is 225.44 kB JS / 66.13 kB CSS and Client is 235.93 kB JS / 69.74 kB CSS; both production builds complete without the Vite 500 kB warning. The authenticated browser fixture and policy gates still pass.
 
-### P2 — Color literals are not fully centralized
+### Resolved — Repeated surface and border tokens
 
 - **Location:** `web/admin/src/style.css`, `web/client/src/style.css`.
 - **Category:** Theming.
-- **Impact:** Future state-color or contrast changes can drift between the independent panels.
-- **Recommendation:** Move remaining repeated surface/text/border colors into shared documented tokens, then add a CSS token policy check for new literals. Keep panel-specific tokens only where the product surfaces intentionally differ.
-- **Suggested command:** `/normalize`
+- **Impact before fix:** Repeated surface and border literals could drift between the independent panels during future contrast changes.
+- **Fix:** Added independent `tokens.css` layers and moved repeated rail, panel, input, sidebar, dialog, navigation, pill, avatar, dashed-border and subtle-line values to semantic variables. One-off status and content tones remain deliberate local accents.
 
-### P3 — Full WCAG automation is not yet part of the local gate
+### P3 — Real-device performance evidence remains external
 
-- **Location:** frontend CI and browser QA workflow.
+- **Location:** Release evidence, not a current UI defect.
+- **Category:** Performance.
+- **Impact:** A fast desktop build does not prove LCP/INP on the supported low-resource operator hardware or remote network.
+- **Recommendation:** Capture LCP/INP and slow-network results on the documented Linux/operator target during the external PERF/release matrix.
+- **Suggested command:** `/optimize`
+
+### Resolved — Authenticated-route browser coverage
+
+- **Location:** `scripts/ui-accessibility.mjs` and authenticated panel routes.
+- **Category:** Accessibility hardening.
+- **Evidence:** The script now intercepts a deterministic, non-secret fixture API and scans every Admin/Client navigation surface plus the Admin create-user, Client Mapping, and Client Domain dialogs.
+- **Result:** `npm run test:accessibility` passes axe WCAG 2.1 AA, labels, keyboard focus/reduced motion, and 390px overflow checks for both entry and authenticated surfaces. The fixture uses `mode: simulated` and is not external runtime evidence.
+
+### P1 fixed during this audit — Low-contrast secondary text
+
+- **Location:** Admin/Client navigation category labels and Client Mapping/Domain metadata.
 - **Category:** Accessibility.
-- **Impact:** Source-level labels and focus states are covered, but automated contrast, tab order, and live-page landmark checks are not yet recorded for every authenticated route.
-- **Recommendation:** Add an authenticated Playwright accessibility/contrast pass in CI once a deterministic seed session is available; keep the current manual mobile check as a smoke test.
-- **Suggested command:** `/harden`
+- **Finding:** The authenticated fixture scan detected secondary text below the WCAG AA contrast target on graphite surfaces.
+- **Fix:** Replaced the affected hard-coded gray values with the existing `--muted` token in both independent panels; the full authenticated scan passes after the change.
 
 ## Positive findings
 
@@ -55,7 +67,5 @@
 
 ## Recommended order
 
-1. **[P2] `/optimize`** — split low-frequency panel views and measure operator-route loading.
-2. **[P2] `/normalize`** — centralize remaining repeated color literals across the two panels.
-3. **[P3] `/harden`** — add authenticated automated accessibility checks to CI.
-4. **[P3] `/polish`** — perform the final visual pass after performance and token changes.
+1. **[P3] `/optimize`** — capture real-device LCP/INP and slow-network evidence in the external release matrix.
+2. **[P3] `/polish`** — perform the final visual pass after external performance evidence is attached.
