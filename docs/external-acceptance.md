@@ -164,6 +164,15 @@ token, private key, or account key. A successful command is still operator
 evidence for TLS-010 only; TLS-009/TLS-012, target deployment and three-owner
 release sign-off remain separate gates.
 
+After configuring the `external-acceptance` GitHub environment with the
+disposable-zone secrets `CLOUDFLARE_E2E_API_TOKEN` and `FRP_ACME_E2E_EMAIL`, the
+same two runners can be executed from the manual-only
+`.github/workflows/external-acceptance.yml` workflow. It requires the zone and
+fresh DNS names as inputs, uploads only the redacted runner JSON for 14 days,
+and refuses to run automatically on push or pull request. The workflow is a
+preparation aid; the reviewed evidence bundle and separate TLS/target/sign-off
+gates are still required for release.
+
 The tracked status remains in [`acceptance-matrix.md`](acceptance-matrix.md)
 and [`PROGRESS.md`](../PROGRESS.md). Until the reviewed bundle exists, the
 matrix must continue to show the corresponding entries as `部分通过` or

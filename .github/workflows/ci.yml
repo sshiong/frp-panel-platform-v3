@@ -50,6 +50,7 @@ jobs:
       - run: ruby -c scripts/external-acceptance.rb
       - run: ruby scripts/test-external-acceptance.rb
       - run: ruby scripts/release-workflow-policy.rb
+      - run: ruby scripts/external-workflow-policy.rb
       - run: ruby -c scripts/cloudflare-sandbox-e2e.rb
       - run: go test ./cmd/acme-e2e
         working-directory: server

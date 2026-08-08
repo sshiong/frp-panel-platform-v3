@@ -1,0 +1,21 @@
+#!/usr/bin/env ruby
+
+workflow = File.read(File.expand_path("../.github/workflows/external-acceptance.yml", __dir__))
+required = {
+  "manual-only trigger" => "workflow_dispatch:",
+  "protected environment" => "name: external-acceptance",
+  "Cloudflare secret" => "CLOUDFLARE_E2E_API_TOKEN: ${{ secrets.CLOUDFLARE_E2E_API_TOKEN }}",
+  "ACME email secret" => "FRP_ACME_E2E_EMAIL: ${{ secrets.FRP_ACME_E2E_EMAIL }}",
+  "Cloudflare write confirmation" => "CLOUDFLARE_E2E_CONFIRM: disposable-zone",
+  "ACME staging confirmation" => "FRP_ACME_E2E_CONFIRM: acme-staging",
+  "redacted artifact upload" => "actions/upload-artifact@v4",
+  "both-runner final gate" => "Require both external smoke runners to pass"
+}
+missing = required.each_with_object([]) do |(label, fragment), errors|
+  errors << "#{label}: #{fragment}" unless workflow.include?(fragment)
+end
+abort("external acceptance workflow policy invalid: #{missing.join('; ')}") unless missing.empty?
+if workflow.match?(/^\s*(push|pull_request):\s*$/)
+  abort("external acceptance workflow must not run automatically on push or pull_request")
+end
+puts "external acceptance workflow policy valid: manual trigger, protected environment, secret boundaries, and final gate"
