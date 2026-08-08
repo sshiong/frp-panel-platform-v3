@@ -254,7 +254,7 @@ network_required = %w[
 ]
 missing_network = network_required.reject { |name| !ENV.fetch(name, "").empty? }
 if missing_network.empty?
-  network_env = ENV.slice(*network_required, "FRP_E2E_FRPS_READY_PORT", "FRP_E2E_FRPS_READY_HOST", "FRP_E2E_READY_WAIT_SECONDS", "FRP_E2E_WAIT_SECONDS", "FRP_E2E_FRPS_SHA256", "FRP_E2E_FRPC_SHA256")
+  network_env = ENV.slice(*network_required, "FRP_E2E_FRPS_READY_PORT", "FRP_E2E_FRPS_READY_HOST", "FRP_E2E_READY_WAIT_SECONDS", "FRP_E2E_WAIT_SECONDS", "FRP_E2E_FRPS_SHA256", "FRP_E2E_FRPC_SHA256", "FRP_E2E_FIXTURE_DIR", "FRP_E2E_FIXTURE_HOST", "FRP_E2E_FIXTURE_PORT", "FRP_E2E_FIXTURE_WAIT_SECONDS")
   collector.run("frp-network-e2e", "固定 FRPS/FRPC 真实网络代理 E2E", ["./scripts/frp-network-e2e.sh"], env: network_env)
 else
   collector.blocked("frp-network-e2e", "固定 FRPS/FRPC 真实网络代理 E2E", missing_network, "需要固定版本二进制、配置和隔离代理 URL；缺少项不会被模拟。")

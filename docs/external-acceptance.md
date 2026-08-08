@@ -38,13 +38,19 @@ export FRP_E2E_URL=http://127.0.0.1:18080/
 export FRP_E2E_FRPS_READY_PORT=7000
 export FRP_E2E_FRPS_SHA256='<release-manifest-sha256>'
 export FRP_E2E_FRPC_SHA256='<release-manifest-sha256>'
+export FRP_E2E_FIXTURE_DIR="$PWD/tests/fixtures/frp/network"
+export FRP_E2E_FIXTURE_HOST=127.0.0.1
+export FRP_E2E_FIXTURE_PORT=17081
 export FRPC_VERIFY_BINARY=/opt/frp/frpc
 export FRPC_VERIFY_VERSION=0.68.0
 make external-acceptance
 ```
 
 The FRP configs must use a disposable Linux test host, a loopback-only Panel
-Plugin endpoint, a test transport-secret file, and a test mapping/session.
+Plugin endpoint, a test transport-secret file, and a test mapping/session. When
+`FRP_E2E_FIXTURE_DIR` is set, the network runner starts and cleans up the
+isolated `python3` HTTP fixture for the configured port, so the upstream service
+cannot be accidentally omitted from the real proxy test.
 Never copy a production token or database into the report directory.
 
 For repeatable Linux fault-boundary checks, run this on an Ubuntu 24.04 runner:

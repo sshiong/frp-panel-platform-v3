@@ -130,13 +130,6 @@ jobs:
       - name: Run native FRPS/FRPC TCP E2E
         run: |
           set -euo pipefail
-          python3 -m http.server 17081 --directory tests/fixtures/frp/network >/tmp/frp-panel-ci-fixture.log 2>&1 &
-          fixture_pid=$!
-          cleanup() {
-            kill "$fixture_pid" 2>/dev/null || true
-            wait "$fixture_pid" 2>/dev/null || true
-          }
-          trap cleanup EXIT
           FRP_E2E_FRPS_BINARY="$GITHUB_WORKSPACE/build/frps" \
           FRP_E2E_FRPS_CONFIG="$GITHUB_WORKSPACE/tests/fixtures/frp/network/frps.toml" \
           FRP_E2E_FRPC_BINARY="$GITHUB_WORKSPACE/build/frpc" \
@@ -144,6 +137,9 @@ jobs:
           FRP_E2E_URL=http://127.0.0.1:17080/ \
           FRP_E2E_FRPS_READY_HOST=127.0.0.1 \
           FRP_E2E_FRPS_READY_PORT=17000 \
+          FRP_E2E_FIXTURE_DIR="$GITHUB_WORKSPACE/tests/fixtures/frp/network" \
+          FRP_E2E_FIXTURE_HOST=127.0.0.1 \
+          FRP_E2E_FIXTURE_PORT=17081 \
           make network-e2e
       - name: Run real FRPS Plugin network E2E
         env:

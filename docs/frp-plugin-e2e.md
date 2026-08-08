@@ -83,6 +83,9 @@ FRP_E2E_URL=http://127.0.0.1:18080/ \
 FRP_E2E_FRPS_READY_PORT=7000 \
 FRP_E2E_FRPS_SHA256='<release-manifest-sha256>' \
 FRP_E2E_FRPC_SHA256='<release-manifest-sha256>' \
+FRP_E2E_FIXTURE_DIR="$PWD/tests/fixtures/frp/network" \
+FRP_E2E_FIXTURE_HOST=127.0.0.1 \
+FRP_E2E_FIXTURE_PORT=17081 \
 make network-e2e
 ```
 
