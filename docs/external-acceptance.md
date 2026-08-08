@@ -126,6 +126,24 @@ The collector requires every gate listed above and requires the bundle-level
 `status` to be `passed`. It records the source path and gate IDs, but does not
 copy the evidence contents or any credential into the repository report.
 
+For the real Cloudflare DNS smoke path, use a disposable Sandbox zone and a
+fresh record name. The command refuses to write unless the explicit
+confirmation is present, refuses to touch an existing record, verifies the
+create/update/readback lifecycle, and removes the record in an `ensure` path:
+
+```bash
+CLOUDFLARE_E2E_API_TOKEN="$CLOUDFLARE_SANDBOX_TOKEN" \
+CLOUDFLARE_E2E_ZONE_ID="<disposable-zone-id>" \
+CLOUDFLARE_E2E_RECORD_NAME="frp-e2e-$(date +%s).example.test" \
+CLOUDFLARE_E2E_CONFIRM=disposable-zone \
+make cloudflare-e2e
+```
+
+The runner prints redacted JSON with step results and Cloudflare request IDs;
+it never prints the token. Its output is provider smoke evidence, not a
+release sign-off by itself: DNS timeout ambiguity, ACME Staging, Full(strict),
+target hardware and owner approvals still require the reviewed evidence bundle.
+
 The tracked status remains in [`acceptance-matrix.md`](acceptance-matrix.md)
 and [`PROGRESS.md`](../PROGRESS.md). Until the reviewed bundle exists, the
 matrix must continue to show the corresponding entries as `部分通过` or
