@@ -61,6 +61,7 @@ contract:
 	ruby scripts/validate-openapi.rb
 	ruby scripts/test-external-acceptance.rb
 	ruby scripts/release-version-policy.rb
+	ruby scripts/release-workflow-policy.rb
 	cd server && $(GO_ENV) go test ./internal/httpapi -run '^TestHTTPContract' -count=1
 
 migration-check:

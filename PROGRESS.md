@@ -133,6 +133,7 @@
 | 2026-08-07 | Backup 恢复失败回滚加固 | 本地通过；Restore 在数据库安装后发生 Session 撤销或受保护文件恢复失败时，会删除新数据库并恢复 `.before-restore-*` 旧数据库；新增回归测试验证旧数据与前置备份命名均保留，磁盘满创建备份不会留下 partial archive |
 | 2026-08-07 | Ubuntu 24.04 目标规模性能复核 | 通过当前 hosted profile；[`performance run 31191465839`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31191465839) 的 PERF-001/002/003/005/006/007 全部通过并上传 `linux-target-scale-performance`，日志含 p95/耗时数值；该 runner 不是固定 2 vCPU/2GiB 生产硬件，正式容量基线仍待外部 |
 | 2026-08-07 | WAL 压力与重启恢复故障注入补齐 | 通过；提交 [`92efff8`](https://github.com/sshiong/frp-panel-platform-v3/commit/92efff808529ba3a8a0462daf5b6c93bcd46428b) 的 [`ci run 31192487455`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31192487455) 与 [`CodeQL run 31192488274`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31192488274) 全部成功；Ubuntu 24.04 `fault-injection` 真实执行 WAL 压力/checkpoint/重启恢复、Router ENOSPC、backup partial-output 和 Date skew 检查，生产长时磁盘演练仍待外部 |
+| 2026-08-09 | 发布签名后身份验证加固 | 已实现并待托管复核；release workflow 对每个二进制、SBOM、校验和与 manifest 生成 keyless cosign 签名后，使用 GitHub Actions OIDC issuer 和当前 workflow/ref 验证签名；新增 `scripts/release-workflow-policy.rb` 防止证据门禁、签名、验证和发布顺序回退 |
 
 ## 未决与发布阻断项
 

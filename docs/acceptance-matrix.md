@@ -164,7 +164,7 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 | SEC-005 | 本地通过 | Secret scan 与日志脱敏测试未发现密码、Token、Cookie、私钥。 |
 | SEC-006 | 本地通过 | Plugin provider unavailable/timeout fail-closed 测试通过。 |
 | SEC-007 | 本地通过 | Domain、URL、IDNA、Snapshot、JSON fuzz seed/短时 fuzz 已纳入 CI。 |
-| SEC-008 | 部分通过 | SPDX SBOM、SHA-256、manifest 和 release cosign workflow 存在；正式签名结果待 tag 发布。 |
+| SEC-008 | 部分通过 | SPDX SBOM、SHA-256、manifest 和 release cosign workflow 存在；签名后会校验 GitHub Actions OIDC issuer 与当前 workflow/ref，正式 tag 签名结果仍待发布环境。 |
 
 ## UI、DoD 和发布结论
 

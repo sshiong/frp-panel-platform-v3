@@ -133,8 +133,24 @@ jobs:
       - uses: sigstore/cosign-installer@v3
       - name: Sign release metadata and binaries
         run: |
+          set -euo pipefail
           for artifact in build/frp-panel-server build/frp-panel-client build/frps build/frpc build/SHA256SUMS build/sbom.spdx.json build/release-manifest.json; do
             cosign sign-blob --yes --output-signature "${artifact}.sig" --output-certificate "${artifact}.pem" "${artifact}"
+          done
+      - name: Verify keyless signatures and workflow identity
+        run: |
+          set -euo pipefail
+          identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@${GITHUB_REF}"
+          issuer="https://token.actions.githubusercontent.com"
+          for artifact in build/frp-panel-server build/frp-panel-client build/frps build/frpc build/SHA256SUMS build/sbom.spdx.json build/release-manifest.json; do
+            test -s "${artifact}.sig"
+            test -s "${artifact}.pem"
+            cosign verify-blob \
+              --signature "${artifact}.sig" \
+              --certificate "${artifact}.pem" \
+              --certificate-identity "${identity}" \
+              --certificate-oidc-issuer "${issuer}" \
+              "${artifact}"
           done
       - uses: softprops/action-gh-release@v2
         with:
