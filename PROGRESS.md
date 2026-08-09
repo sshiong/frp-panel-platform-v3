@@ -152,6 +152,7 @@
 | 2026-08-10 | 覆盖率门禁与证书密钥错误边界 | 已实现并通过本地验证；修复无可用证书密钥时 `DecryptCertificate` 返回 nil error 的 fail-open 边界，补充版本回退/轮换/sidecar 错误测试；新增 `make coverage`，当前 Server/Client `internal/...` 覆盖率为 77.10%/76.62%，认证/用途加密/Router 为 90.48%/92.64%/92.45%，并接入 GitHub `coverage` job。 |
 | 2026-08-10 | 覆盖率与密钥边界托管复核 | 通过；提交 [`527c7ea`](https://github.com/sshiong/frp-panel-platform-v3/commit/527c7ea4cf252625365aac4d00bf2e66d2e8bc16) 的 [`ci run 31332973081`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31332973081) 与 [`CodeQL run 31332973030`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31332973030) 全部成功，新增 coverage 必需门禁、证书密钥 fail-closed 回归和全量现有检查均通过；真实 Provider/目标硬件/正式签名/负责人签字仍保持 blocked。 |
 | 2026-08-10 | ACME 与发布来源边界加固 | 已实现并通过本地回归；ACME Staging runner 仅允许官方 Let's Encrypt Staging directory，拒绝生产/不可信 host、userinfo、端口、query 和 fragment；生产配置拒绝明文 Cloudflare/ACME service URL；release workflow 要求手动发布来自 protected `main`、tag 发布绑定 pushed tag ref。 |
+| 2026-08-10 | ACME 与发布来源边界托管复核 | 通过；提交 [`763c559`](https://github.com/sshiong/frp-panel-platform-v3/commit/763c559a86efb3de01585f432c274bbc5365d988) 的 [`ci run 31333890995`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31333890995) 与 [`CodeQL run 31333891002`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31333891002) 全部成功；ACME URL、生产服务 URL 和发布 ref policy 回归通过，外部 Provider/目标硬件/正式签名/负责人签字仍保持 blocked。 |
 
 ## 未决与发布阻断项
 
