@@ -158,6 +158,7 @@
 | 2026-08-10 | Router 证书完整性托管复核 | 通过；提交 [`4a94c41`](https://github.com/sshiong/frp-panel-platform-v3/commit/4a94c4107fd46ffa439a9aba1018e252a2f000eb) 的 [`ci run 31334721807`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31334721807) 与 [`CodeQL run 31334721817`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31334721817) 全部成功；证书哈希匹配/不匹配回归、coverage、双面板 WCAG、Linux FRP E2E、故障注入、安全、容器扫描和发布元数据均通过，真实 SNI/Provider/目标硬件/正式签名/负责人签字仍保持 blocked。 |
 | 2026-08-10 | Cloudflare 外部 runner 端点边界 | 已实现并通过本地回归；Sandbox runner 现在只接受官方 `https://api.cloudflare.com/client/v4`，拒绝不可信 host、userinfo、非默认端口、错误 path、query 和 fragment，并接入 contract/CI，避免误配时向非官方端点发送 Token。 |
 | 2026-08-10 | Cloudflare 外部 runner 端点托管复核 | 通过；提交 [`e7b7325`](https://github.com/sshiong/frp-panel-platform-v3/commit/e7b7325a34d82d9d177eb6804b644784e62c17bc) 的 [`ci run 31335409986`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31335409986) 与 [`CodeQL run 31335409940`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31335409940) 全部成功；官方 Cloudflare endpoint policy、拒绝 host/userinfo/端口/path/query/fragment 回归、双面板 WCAG、FRP E2E、故障注入、安全、容器扫描和 release metadata 均通过，真实 Sandbox/ACME/目标环境/签字仍保持 blocked。 |
+| 2026-08-10 | 当前提交最终本地回归复验 | 通过/按标准阻断；在提交 [`db5c64b`](https://github.com/sshiong/frp-panel-platform-v3/commit/db5c64bdd262a06074a6be055a424439cef3ea54) 上重新通过 `make test`、`make perf`、`npm run test:accessibility`、Secret scan；固定 FRP v0.68.0 外部收集器为 8 passed、0 failed、1 blocked，退出码 2 仅表示缺少真实 Provider/ACME/目标环境/签字证据。 |
 
 ## 未决与发布阻断项
 
