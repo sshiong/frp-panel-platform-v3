@@ -14,7 +14,7 @@ MINIMUM_FRPC_VERSION ?= 0.68.0
 SERVER_LDFLAGS ?= -X github.com/ricardo/frp-panel-platform/server/internal/version.ServerVersion=$(SERVER_VERSION) -X github.com/ricardo/frp-panel-platform/server/internal/version.MinimumClientVersion=$(MINIMUM_CLIENT_VERSION) -X github.com/ricardo/frp-panel-platform/server/internal/version.LatestClientVersion=$(LATEST_CLIENT_VERSION) -X github.com/ricardo/frp-panel-platform/server/internal/version.MinimumFRPCVersion=$(MINIMUM_FRPC_VERSION)
 CLIENT_LDFLAGS ?= -X github.com/ricardo/frp-panel-platform/client/internal/version.ClientVersion=$(CLIENT_VERSION)
 
-.PHONY: install-web build test lint accessibility contract migration-check license security fuzz perf fault-injection frpc-verify network-e2e plugin-e2e cloudflare-e2e acme-e2e external-acceptance sbom checksums manifest release-version-check sign release checkpoint key-rotate dev-server dev-client clean
+.PHONY: install-web build test coverage lint accessibility contract migration-check license security fuzz perf fault-injection frpc-verify network-e2e plugin-e2e cloudflare-e2e acme-e2e external-acceptance sbom checksums manifest release-version-check sign release checkpoint key-rotate dev-server dev-client clean
 
 install-web:
 	npm ci
@@ -39,6 +39,9 @@ accessibility:
 test:
 	cd server && $(GO_ENV) go test -race ./...
 	cd client && $(GO_ENV) go test -race ./...
+
+coverage:
+	ruby scripts/coverage-policy.rb
 
 lint:
 	./scripts/check-format.sh

@@ -170,6 +170,9 @@ func (m *Manager) DecryptCertificate(keyVersion int64, ciphertext, nonce []byte,
 		}
 		lastErr = err
 	}
+	if lastErr == nil {
+		return nil, errors.New("certificate wrapping key is unavailable")
+	}
 	return nil, lastErr
 }
 

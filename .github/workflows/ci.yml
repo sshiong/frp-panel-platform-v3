@@ -27,6 +27,23 @@ jobs:
       - run: ./scripts/check-format.sh
         if: matrix.module == 'server'
 
+  coverage:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache-dependency-path: |
+            server/go.sum
+            client/go.sum
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - run: make coverage
+
   contract:
     runs-on: ubuntu-latest
     steps:
@@ -55,6 +72,7 @@ jobs:
       - run: ruby scripts/release-workflow-policy.rb
       - run: ruby scripts/external-workflow-policy.rb
       - run: ruby -c scripts/cloudflare-sandbox-e2e.rb
+      - run: ruby -c scripts/coverage-policy.rb
       - run: go test ./cmd/acme-e2e
         working-directory: server
       - run: go test ./internal/httpapi -run '^TestHTTPContract' -count=1
