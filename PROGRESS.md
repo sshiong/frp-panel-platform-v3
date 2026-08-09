@@ -148,6 +148,7 @@
 | 2026-08-10 | 外部验收报告脱敏边界加固 | 已实现并通过回归；`scripts/external-acceptance.rb` 现在把 Cloudflare E2E Token 和 ACME E2E 标识纳入已知秘密值脱敏清单，新增 schema/脱敏测试，避免外部 runner 输出意外暴露凭据。 |
 | 2026-08-10 | main 分支保护门禁加强 | 已完成公开仓库治理加固；在既有两次审批、Code Owner、线性历史、禁止强推/删除和常规 CI 之外，新增 `frp-linux-e2e`、`fault-injection`、`CodeQL` 为必需检查；第二名安全/数据库/加密评审者仍需由仓库所有者指定。 |
 | 2026-08-10 | OpenAPI 元数据与 CI 门禁收口 | 已实现并通过本地 contract；新增 `scripts/openapi-metadata-policy.rb`，对 62 个 Server/Client operation 校验公开/认证边界、写幂等键、路径参数和 Problem Details 错误响应；同时将 OpenAPI 客户端策略、元数据策略和验收矩阵策略接入 GitHub `contract` job，防止仅本地门禁有效。 |
+| 2026-08-10 | OpenAPI 门禁托管复核 | 通过；提交 [`9654983`](https://github.com/sshiong/frp-panel-platform-v3/commit/9654983b7d2fabe6c67ded3a3914b11dabf9484f) 的 [`ci run 31331663432`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31331663432) 与 [`CodeQL run 31331663449`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31331663449) 全部成功，包含 contract、双 Go、双面板、固定 Linux FRP E2E、fault-injection、fuzz、security、container scan 与 release metadata；真实 Provider/目标硬件/正式签名/负责人签字仍按标准保持 blocked。 |
 
 ## 未决与发布阻断项
 
