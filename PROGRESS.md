@@ -157,6 +157,7 @@
 | 2026-08-10 | Router 证书完整性边界 | 已实现并通过服务层回归；Router 加载证书时校验数据库 `cert_hash` 与证书文件 SHA-256，哈希不匹配时拒绝热加载并允许调用方保留 last-good 内存证书集；旧数据的空哈希保持向后兼容，真实 SNI 部署仍待外部。 |
 | 2026-08-10 | Router 证书完整性托管复核 | 通过；提交 [`4a94c41`](https://github.com/sshiong/frp-panel-platform-v3/commit/4a94c4107fd46ffa439a9aba1018e252a2f000eb) 的 [`ci run 31334721807`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31334721807) 与 [`CodeQL run 31334721817`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31334721817) 全部成功；证书哈希匹配/不匹配回归、coverage、双面板 WCAG、Linux FRP E2E、故障注入、安全、容器扫描和发布元数据均通过，真实 SNI/Provider/目标硬件/正式签名/负责人签字仍保持 blocked。 |
 | 2026-08-10 | Cloudflare 外部 runner 端点边界 | 已实现并通过本地回归；Sandbox runner 现在只接受官方 `https://api.cloudflare.com/client/v4`，拒绝不可信 host、userinfo、非默认端口、错误 path、query 和 fragment，并接入 contract/CI，避免误配时向非官方端点发送 Token。 |
+| 2026-08-10 | Cloudflare 外部 runner 端点托管复核 | 通过；提交 [`e7b7325`](https://github.com/sshiong/frp-panel-platform-v3/commit/e7b7325a34d82d9d177eb6804b644784e62c17bc) 的 [`ci run 31335409986`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31335409986) 与 [`CodeQL run 31335409940`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31335409940) 全部成功；官方 Cloudflare endpoint policy、拒绝 host/userinfo/端口/path/query/fragment 回归、双面板 WCAG、FRP E2E、故障注入、安全、容器扫描和 release metadata 均通过，真实 Sandbox/ACME/目标环境/签字仍保持 blocked。 |
 
 ## 未决与发布阻断项
 
