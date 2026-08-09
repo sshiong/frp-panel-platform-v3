@@ -25,6 +25,9 @@ forbidden_literals = {
 violations = []
 sources.each do |path|
   text = File.read(path)
+  if text.match?(/@import\s+url\(\s*['"]https?:\/\//i) || text.match?(/url\(\s*['"]https?:\/\//i)
+    violations << "#{path.delete_prefix("#{root}/")}: production CSS must not load external assets"
+  end
   # The base palette is declared in the first :root rule. Repeated component
   # surfaces below it must use semantic aliases from the app's tokens.css.
   body = text.include?(":root") ? text.sub(/\A.*?\}/m, "") : text

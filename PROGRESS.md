@@ -1,6 +1,6 @@
 # FRP Cloudflare Platform v3 进度跟踪
 
-> 最后更新：2026-08-03
+> 最后更新：2026-08-10
 >
 > 本文是实现进度的单一记录入口。每次完成一个可验证的垂直切片，更新状态、证据和未决项；未通过验收的能力不得标记为完成。
 
@@ -65,6 +65,7 @@
 - [x] 密钥迁移期轮换已补齐：master/certificate wrapping key-ring 保留旧版本，`make key-rotate` 重包裹 FRP、Cloudflare 和证书私钥；重启兼容、旧密文解密、服务层行数/登录回归测试通过，真实生产轮换演练仍待外部环境。
 - [x] WCAG 2.1 AA 自动化已补齐：构建后的 Admin/Client 登录页、全部认证导航面板以及 Admin 创建用户、Client Mapping/Domain 对话框均通过 axe、标签、键盘/reduced-motion 与 390px 横向溢出检查；脚本使用无秘密的确定性 API fixture，并已接入既有 `web (admin)` CI job。
 - [x] 前端性能与颜色 token 收口已补齐：两个独立面板改为按需注册 Element Plus Dialog/Message/MessageBox，移除全量 Element Plus CSS；Admin/Client 生产 bundle 分别降至约 225.44/235.93 kB JS 与 66.13/69.74 kB CSS，Vite chunk 警告消失；重复面板、输入、侧栏、导航、对话框和边框颜色已集中到各自 `tokens.css`。
+- [x] 前端发行资源自包含边界已补齐：移除两套面板对 Google Fonts 的外部 `@import`，保留无网络字体回退栈；CSS token policy 现在拒绝任何生产 CSS 外部资源，构建产物扫描确认不含外部字体导入，符合嵌入式 Go 二进制的同源 CSP。
 - [x] API 成功响应契约已收紧：Server OpenAPI 为所有成功 JSON 响应声明 schema，统一 `request_id` 元数据，补齐 `/me` 实际会话字段、分页 envelope、异步 Operation、备份、Token、Router 和用户管理响应；`responseMetadata` 现在也覆盖 API GET 响应，契约回归验证通过。
 - [x] 外部验收证据收集器已补齐：`make external-acceptance` 运行本地契约/迁移/安全/许可证/构建门禁，在显式提供固定 FRP 二进制时运行真实网络 E2E，并对 Cloudflare Sandbox、ACME Staging、目标硬件、故障注入和签名证据缺失返回 `blocked`/退出码 2；流程见 [`external-acceptance.md`](docs/external-acceptance.md)。
 
@@ -148,6 +149,7 @@
 | 2026-08-10 | 外部验收报告脱敏边界加固 | 已实现并通过回归；`scripts/external-acceptance.rb` 现在把 Cloudflare E2E Token 和 ACME E2E 标识纳入已知秘密值脱敏清单，新增 schema/脱敏测试，避免外部 runner 输出意外暴露凭据。 |
 | 2026-08-10 | main 分支保护门禁加强 | 已完成公开仓库治理加固；在既有两次审批、Code Owner、线性历史、禁止强推/删除和常规 CI 之外，新增 `frp-linux-e2e`、`fault-injection`、`CodeQL` 为必需检查；第二名安全/数据库/加密评审者仍需由仓库所有者指定。 |
 | 2026-08-10 | OpenAPI 元数据与 CI 门禁收口 | 已实现并通过本地 contract；新增 `scripts/openapi-metadata-policy.rb`，对 62 个 Server/Client operation 校验公开/认证边界、写幂等键、路径参数和 Problem Details 错误响应；同时将 OpenAPI 客户端策略、元数据策略和验收矩阵策略接入 GitHub `contract` job，防止仅本地门禁有效。 |
+| 2026-08-10 | 前端静态资源自包含修复 | 通过本地回归；移除 Admin/Client 的 Google Fonts 外部加载，新增 CSS 外部资源拒绝门禁；`make contract`、`make lint`、`make test`、`make build`、`make accessibility` 全部通过，构建产物不含外部字体导入。 |
 | 2026-08-10 | OpenAPI 门禁托管复核 | 通过；提交 [`9654983`](https://github.com/sshiong/frp-panel-platform-v3/commit/9654983b7d2fabe6c67ded3a3914b11dabf9484f) 的 [`ci run 31331663432`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31331663432) 与 [`CodeQL run 31331663449`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31331663449) 全部成功，包含 contract、双 Go、双面板、固定 Linux FRP E2E、fault-injection、fuzz、security、container scan 与 release metadata；真实 Provider/目标硬件/正式签名/负责人签字仍按标准保持 blocked。 |
 | 2026-08-10 | 覆盖率门禁与证书密钥错误边界 | 已实现并通过本地验证；修复无可用证书密钥时 `DecryptCertificate` 返回 nil error 的 fail-open 边界，补充版本回退/轮换/sidecar 错误测试；新增 `make coverage`，当前 Server/Client `internal/...` 覆盖率为 77.10%/76.62%，认证/用途加密/Router 为 90.48%/92.64%/92.45%，并接入 GitHub `coverage` job。 |
 | 2026-08-10 | 覆盖率与密钥边界托管复核 | 通过；提交 [`527c7ea`](https://github.com/sshiong/frp-panel-platform-v3/commit/527c7ea4cf252625365aac4d00bf2e66d2e8bc16) 的 [`ci run 31332973081`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31332973081) 与 [`CodeQL run 31332973030`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31332973030) 全部成功，新增 coverage 必需门禁、证书密钥 fail-closed 回归和全量现有检查均通过；真实 Provider/目标硬件/正式签名/负责人签字仍保持 blocked。 |
