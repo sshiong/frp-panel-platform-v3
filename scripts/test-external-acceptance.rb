@@ -43,4 +43,20 @@ unless collector.send(:validate_evidence_bundle, wrong_repository_bundle).any? {
   abort("evidence from another repository was accepted")
 end
 
+original_token = ENV["CLOUDFLARE_E2E_API_TOKEN"]
+begin
+  ENV["CLOUDFLARE_E2E_API_TOKEN"] = "fixture-cloudflare-secret"
+  redacting_collector = AcceptanceCollector.new
+  redacted = redacting_collector.send(:redact, "Bearer fixture-cloudflare-secret")
+  unless !redacted.include?("fixture-cloudflare-secret") && redacted.include?("[REDACTED]")
+    abort("Cloudflare E2E token was not redacted")
+  end
+ensure
+  if original_token
+    ENV["CLOUDFLARE_E2E_API_TOKEN"] = original_token
+  else
+    ENV.delete("CLOUDFLARE_E2E_API_TOKEN")
+  end
+end
+
 puts "external acceptance evidence schema checks passed"

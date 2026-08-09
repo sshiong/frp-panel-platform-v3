@@ -20,7 +20,8 @@ class AcceptanceCollector
   def initialize
     @steps = []
     @secret_values = ENV.values_at(
-      "CLOUDFLARE_API_TOKEN", "ACME_DNS_API_TOKEN", "COSIGN_KEY",
+      "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_E2E_API_TOKEN", "ACME_DNS_API_TOKEN",
+      "FRP_ACME_E2E_EMAIL", "COSIGN_KEY",
       "FRP_E2E_FRPS_SHA256", "FRP_E2E_FRPC_SHA256"
     ).compact.reject(&:empty?)
   end
