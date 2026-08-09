@@ -245,6 +245,7 @@ if ENV.fetch("EXTERNAL_ACCEPTANCE_LOCAL", "1") != "0"
   collector.run("local-security", "Secret 扫描与安全策略", ["make", "security"])
   collector.run("local-license", "依赖 SPDX 许可证策略", ["make", "license"])
   collector.run("local-build", "Server/Client 双发行物构建", ["make", "build"])
+  collector.run("local-performance", "本地性能基线", ["make", "perf"])
 else
   collector.skipped("local-gates", "本地仓库门禁", "EXTERNAL_ACCEPTANCE_LOCAL=0，已由调用方显式跳过。")
 end
