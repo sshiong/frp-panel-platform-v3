@@ -164,6 +164,11 @@ token, private key, or account key. A successful command is still operator
 evidence for TLS-010 only; TLS-009/TLS-012, target deployment and three-owner
 release sign-off remain separate gates.
 
+The operator runner accepts only the official Let's Encrypt Staging directory
+`https://acme-staging-v02.api.letsencrypt.org/directory`. It rejects production
+endpoints, untrusted hosts, userinfo, alternate ports, query strings and
+redirect-like URL data before creating any ACME account or DNS record.
+
 After configuring the `external-acceptance` GitHub environment with the
 disposable-zone secrets `CLOUDFLARE_E2E_API_TOKEN` and `FRP_ACME_E2E_EMAIL`, the
 same two runners can be executed from the manual-only
@@ -172,6 +177,11 @@ fresh DNS names as inputs, uploads only the redacted runner JSON for 14 days,
 and refuses to run automatically on push or pull request. The workflow is a
 preparation aid; the reviewed evidence bundle and separate TLS/target/sign-off
 gates are still required for release.
+
+The release workflow also refuses manual publication from any ref other than
+protected `main`, and tag-triggered publication must be running on the pushed
+tag ref. This keeps the revision-bound evidence and keyless signature identity
+on the same release source.
 
 The tracked status remains in [`acceptance-matrix.md`](acceptance-matrix.md)
 and [`PROGRESS.md`](../PROGRESS.md). Until the reviewed bundle exists, the

@@ -11,6 +11,8 @@ required_fragments = {
   "signature verification" => "cosign verify-blob",
   "OIDC issuer verification" => "--certificate-oidc-issuer",
   "workflow identity verification" => "--certificate-identity",
+  "protected manual release ref" => 'manual releases must run from the protected main branch',
+  "tag release ref binding" => 'tag releases must run from the pushed tag ref',
   "GitHub release publication" => "softprops/action-gh-release@v2"
 }
 required_fragments.each do |name, fragment|

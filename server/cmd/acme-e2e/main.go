@@ -14,13 +14,14 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"time"
 
 	"github.com/ricardo/frp-panel-platform/server/internal/acme"
 )
 
 const confirmation = "acme-staging"
+
+const letsEncryptStagingHost = "acme-staging-v02.api.letsencrypt.org"
 
 var domainPattern = regexp.MustCompile(`^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$`)
 
@@ -59,9 +60,8 @@ func run() (int, result) {
 	if directory == "" {
 		return failure(errors.New("FRP_ACME_E2E_DIRECTORY_URL is required and must be an ACME Staging URL"))
 	}
-	directoryURL, err := url.Parse(directory)
-	if err != nil || directoryURL.Scheme != "https" || !strings.Contains(strings.ToLower(directoryURL.Host), "staging") {
-		return failure(errors.New("FRP_ACME_E2E_DIRECTORY_URL must be an HTTPS ACME Staging endpoint"))
+	if err := validateStagingDirectory(directory); err != nil {
+		return failure(err)
 	}
 	if len(token) == 0 {
 		return failure(errors.New("CLOUDFLARE_E2E_API_TOKEN must not be empty"))
@@ -116,6 +116,16 @@ func run() (int, result) {
 			"chain_bytes": len(certificate.ChainPEM),
 		},
 	}
+}
+
+func validateStagingDirectory(raw string) error {
+	directoryURL, err := url.Parse(raw)
+	if err != nil || directoryURL.Scheme != "https" || directoryURL.User != nil ||
+		directoryURL.Hostname() != letsEncryptStagingHost || directoryURL.Port() != "" ||
+		directoryURL.Path != "/directory" || directoryURL.RawQuery != "" || directoryURL.Fragment != "" {
+		return errors.New("FRP_ACME_E2E_DIRECTORY_URL must be exactly the official HTTPS ACME Staging directory")
+	}
+	return nil
 }
 
 func required(name string) (string, error) {

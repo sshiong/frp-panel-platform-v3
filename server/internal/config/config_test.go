@@ -15,6 +15,8 @@ func TestValidateTransportSecurity(t *testing.T) {
 		{Environment: "production", AllowedOrigins: []string{"https://panel.example.com"}},
 		{Environment: "production", TLSCertFile: "/etc/panel/cert.pem", TLSKeyFile: "/etc/panel/key.pem", AllowedOrigins: []string{"http://panel.example.com"}},
 		{Environment: "production", TLSCertFile: "/etc/panel/cert.pem", AllowedOrigins: []string{"https://panel.example.com"}},
+		{Environment: "production", TLSCertFile: "/etc/panel/cert.pem", TLSKeyFile: "/etc/panel/key.pem", AllowedOrigins: []string{"https://panel.example.com"}, CloudflareAPIBaseURL: "http://api.cloudflare.test/client/v4"},
+		{Environment: "production", TLSCertFile: "/etc/panel/cert.pem", TLSKeyFile: "/etc/panel/key.pem", AllowedOrigins: []string{"https://panel.example.com"}, ACMEDirectoryURL: "https://user:password@acme.example.test/directory"},
 	} {
 		if err := invalid.ValidateTransportSecurity(); err == nil {
 			t.Fatalf("invalid production transport config was accepted: %#v", invalid)

@@ -64,11 +64,13 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -n "$INPUT_RELEASE_TAG" ]]; then
+            test "$GITHUB_REF" = "refs/heads/main" || { echo "manual releases must run from the protected main branch" >&2; exit 1; }
             release_tag="$INPUT_RELEASE_TAG"
             server_version="$INPUT_SERVER_VERSION"
             client_version="$INPUT_CLIENT_VERSION"
           else
             release_tag="$GITHUB_REF_NAME"
+            test "$GITHUB_REF" = "refs/tags/$release_tag" || { echo "tag releases must run from the pushed tag ref" >&2; exit 1; }
             server_version="${release_tag#v}"
             client_version="${release_tag#v}"
           fi
