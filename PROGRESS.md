@@ -144,6 +144,7 @@
 | 2026-08-09 | CI Go 缓存警告清理 | 已实现，待托管复核；`fuzz`、`security` 与 `release-metadata` 的 `setup-go` 现在显式使用 `server/go.sum`，消除根目录缺少 `go.sum` 的缓存恢复警告，不改变任何验收范围。 |
 | 2026-08-09 | 外部验收 Environment 初始化 | 已创建 GitHub `external-acceptance` Environment，供手动 Cloudflare/ACME workflow 使用；secrets、disposable Zone、目标硬件、签名与 reviewer 仍未配置，因此外部报告继续 fail-closed。 |
 | 2026-08-10 | 双面板触控目标加固 | 通过本地回归；Admin/Client 图标操作按钮统一为 44×44px，符合移动端触控目标要求；`make lint`、`make build` 与 `npm run test:accessibility` 全部通过。 |
+| 2026-08-10 | OpenAPI 前端调用边界加固 | 已实现并通过类型检查；Admin/Client 请求改为生成契约约束的方法、schema path、path/query 参数、请求 Body 和响应类型，移除手写响应 DTO、动态 API URL 与 `JSON.stringify`；新增 `scripts/openapi-client-policy.rb` 并接入 `make contract`，双面板 typecheck/lint 与 OpenAPI contract 全部通过。 |
 
 ## 未决与发布阻断项
 

@@ -1,4 +1,6 @@
 import createClient from 'openapi-fetch'
+import type { MaybeOptionalInit } from 'openapi-fetch'
+import type { HttpMethod, PathsWithMethod, RequiredKeysOf } from 'openapi-typescript-helpers'
 import type { components, paths } from '../../../contracts/generated/server-api'
 
 export type Problem = Partial<components['schemas']['Problem']>
@@ -34,19 +36,22 @@ serverAPI.use({
   },
 })
 
-export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const method = (init.method ?? 'GET').toLowerCase()
-  const body = typeof init.body === 'string' ? JSON.parse(init.body) : init.body
-  const headers = new Headers(init.headers)
-  const result = await serverAPI.request(method as never, path as never, {
-    ...init,
-    body,
-    headers,
-    credentials: 'include',
-  } as never)
+type RelaxedParams<Params> = Params extends { header: infer Header } ? Omit<Params, 'header'> & { header?: Header } : Params
+type RelaxedParamsOption<Params> = RequiredKeysOf<Omit<Params, 'header'>> extends never ? { params?: RelaxedParams<Params> } : { params: RelaxedParams<Params> }
+type RelaxedInit<Init> = Init extends { params: infer Params }
+  ? Omit<Init, 'params'> & RelaxedParamsOption<Params>
+  : Init
+type InitParam<Init> = RequiredKeysOf<RelaxedInit<Init>> extends never ? [init?: RelaxedInit<Init>] : [init: RelaxedInit<Init>]
+
+export async function api<
+  Method extends HttpMethod,
+  Path extends PathsWithMethod<paths, Method>,
+  Init extends MaybeOptionalInit<paths[Path], Method>,
+>(method: Method, path: Path, ...init: InitParam<Init>) {
+  const result = await serverAPI.request(method, path, ...(init as never))
   if (!result.response.ok) {
     const problem = result.error as Problem | undefined
     throw new Error(problem?.detail || problem?.code || `HTTP ${result.response.status}`)
   }
-  return result.data as T
+  return result.data as NonNullable<typeof result.data>
 }

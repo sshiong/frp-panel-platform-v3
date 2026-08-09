@@ -57,6 +57,7 @@ lint:
 
 contract:
 	npm run generate:contracts
+	ruby scripts/openapi-client-policy.rb
 	ruby scripts/acceptance-matrix-policy.rb
 	ruby scripts/validate-openapi.rb
 	ruby scripts/test-external-acceptance.rb
