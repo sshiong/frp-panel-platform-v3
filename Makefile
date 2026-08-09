@@ -69,6 +69,7 @@ contract:
 	ruby scripts/release-workflow-policy.rb
 	ruby scripts/external-workflow-policy.rb
 	ruby -c scripts/cloudflare-sandbox-e2e.rb
+	ruby scripts/test-cloudflare-sandbox-e2e.rb
 	cd server && $(GO_ENV) go test ./cmd/acme-e2e
 	cd server && $(GO_ENV) go test ./internal/httpapi -run '^TestHTTPContract' -count=1
 

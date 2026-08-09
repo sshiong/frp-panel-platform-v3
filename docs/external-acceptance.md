@@ -139,7 +139,9 @@ CLOUDFLARE_E2E_CONFIRM=disposable-zone \
 make cloudflare-e2e
 ```
 
-The runner prints redacted JSON with step results and Cloudflare request IDs;
+The runner only accepts the official `https://api.cloudflare.com/client/v4`
+endpoint (with an optional trailing slash), so a misconfigured HTTPS endpoint
+cannot receive the Sandbox token. It prints redacted JSON with step results and Cloudflare request IDs;
 it never prints the token. Its output is provider smoke evidence, not a
 release sign-off by itself: DNS timeout ambiguity, ACME Staging, Full(strict),
 target hardware and owner approvals still require the reviewed evidence bundle.

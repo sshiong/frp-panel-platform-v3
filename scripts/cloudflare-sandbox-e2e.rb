@@ -11,6 +11,7 @@ require "uri"
 
 class CloudflareSandboxE2E
   CONFIRMATION = "disposable-zone"
+  OFFICIAL_API_BASE_URL = "https://api.cloudflare.com/client/v4"
   INITIAL_CONTENT = "192.0.2.10"
   UPDATED_CONTENT = "192.0.2.11"
 
@@ -75,10 +76,17 @@ class CloudflareSandboxE2E
     unless @record_name.match?(/\A(?=.{1,253}\z)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}\z/)
       raise "CLOUDFLARE_E2E_RECORD_NAME must be a fully-qualified DNS name"
     end
-    uri = URI.parse(@base_url)
-    raise "CLOUDFLARE_API_BASE_URL must use https" unless uri.is_a?(URI::HTTPS)
+    self.class.validate_api_base_url(@base_url)
   rescue URI::InvalidURIError
     raise "CLOUDFLARE_API_BASE_URL is invalid"
+  end
+
+  def self.validate_api_base_url(raw)
+    normalized = raw.to_s.sub(%r{/\z}, "")
+    uri = URI.parse(normalized)
+    return if uri.is_a?(URI::HTTPS) && normalized == OFFICIAL_API_BASE_URL && uri.user.nil? && uri.query.nil? && uri.fragment.nil?
+
+    raise "CLOUDFLARE_API_BASE_URL must be exactly the official HTTPS Cloudflare API endpoint"
   end
 
   def require_confirmation
@@ -218,4 +226,4 @@ class CloudflareSandboxE2E
   end
 end
 
-CloudflareSandboxE2E.new.run
+CloudflareSandboxE2E.new.run if $PROGRAM_NAME == __FILE__
