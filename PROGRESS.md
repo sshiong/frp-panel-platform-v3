@@ -147,6 +147,7 @@
 | 2026-08-10 | OpenAPI 前端调用边界加固 | 已实现并通过类型检查；Admin/Client 请求改为生成契约约束的方法、schema path、path/query 参数、请求 Body 和响应类型，移除手写响应 DTO、动态 API URL 与 `JSON.stringify`；新增 `scripts/openapi-client-policy.rb` 并接入 `make contract`，双面板 typecheck/lint 与 OpenAPI contract 全部通过。 |
 | 2026-08-10 | 外部验收报告脱敏边界加固 | 已实现并通过回归；`scripts/external-acceptance.rb` 现在把 Cloudflare E2E Token 和 ACME E2E 标识纳入已知秘密值脱敏清单，新增 schema/脱敏测试，避免外部 runner 输出意外暴露凭据。 |
 | 2026-08-10 | main 分支保护门禁加强 | 已完成公开仓库治理加固；在既有两次审批、Code Owner、线性历史、禁止强推/删除和常规 CI 之外，新增 `frp-linux-e2e`、`fault-injection`、`CodeQL` 为必需检查；第二名安全/数据库/加密评审者仍需由仓库所有者指定。 |
+| 2026-08-10 | OpenAPI 元数据与 CI 门禁收口 | 已实现并通过本地 contract；新增 `scripts/openapi-metadata-policy.rb`，对 62 个 Server/Client operation 校验公开/认证边界、写幂等键、路径参数和 Problem Details 错误响应；同时将 OpenAPI 客户端策略、元数据策略和验收矩阵策略接入 GitHub `contract` job，防止仅本地门禁有效。 |
 
 ## 未决与发布阻断项
 

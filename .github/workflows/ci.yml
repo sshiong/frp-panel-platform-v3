@@ -47,6 +47,9 @@ jobs:
       - run: npm run generate:contracts
       - run: git diff --exit-code -- contracts/generated/server-api.d.ts contracts/generated/client-api.d.ts
       - run: ruby scripts/validate-openapi.rb
+      - run: ruby scripts/openapi-client-policy.rb
+      - run: ruby scripts/openapi-metadata-policy.rb
+      - run: ruby scripts/acceptance-matrix-policy.rb
       - run: ruby -c scripts/external-acceptance.rb
       - run: ruby scripts/test-external-acceptance.rb
       - run: ruby scripts/release-workflow-policy.rb
