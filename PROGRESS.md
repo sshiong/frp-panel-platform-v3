@@ -164,6 +164,8 @@
 | 2026-08-10 | 当前 revision 最终验收与托管复核 | 通过/按标准阻断；提交 [`0b02dc5`](https://github.com/sshiong/frp-panel-platform-v3/commit/0b02dc5d25d2bdeefd97543c35cb699cc36a5803) 的 [`ci run 31336793148`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31336793148) 与 [`CodeQL run 31336793155`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31336793155) 全部成功；本地 `make external-acceptance` 报告为 9 passed / 0 failed / 1 blocked，`make contract`、`make perf`、固定 FRP 网络 E2E、verify 与 Plugin E2E 均通过，唯一阻断仍是 Cloudflare/ACME/目标环境/正式签名/负责人签字证据。 |
 | 2026-08-10 | 进度证据绑定最新文档 revision | 通过/按标准阻断；提交 [`acff393`](https://github.com/sshiong/frp-panel-platform-v3/commit/acff39332c04adfe975522a8b58831186866ef91) 的 [`ci run 31337118973`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31337118973) 与 [`CodeQL run 31337118979`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31337118979) 全部成功；当前 `output/external-acceptance.json` 已绑定该 revision，记录 9 passed / 0 failed / 1 blocked，唯一阻断仍是缺少真实 Provider、目标环境、签名和负责人签字证据。 |
 
+| 2026-08-10 | 文档同步后的外部收集器复验 | 通过/按标准阻断；提交 [`48a478b`](https://github.com/sshiong/frp-panel-platform-v3/commit/48a478baf8837292348e6230b257d99395d7cf37) 的 [`ci run 31337487666`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31337487666) 与 [`CodeQL run 31337487642`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31337487642) 全部成功；同 revision 的 `make external-acceptance` 记录 9 passed / 0 failed / 1 blocked，固定 FRP TCP、verify、Plugin E2E、本地 contract/perf 均通过。 |
+
 ## 未决与发布阻断项
 
 以下不是“已实现”的替代品，必须在发布前完成：
