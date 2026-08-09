@@ -1,9 +1,10 @@
 # External acceptance runbook
 
 `scripts/external-acceptance.rb` is the single evidence collector for gates that
-cannot be proven by an isolated unit test. It runs the repository-local
-contract, migration, secret, license and build checks, then runs fixed-version
-FRPS/FRPC checks when their artifacts and isolated configuration are supplied.
+cannot be proven by an isolated unit test. It runs the complete repository-local
+`make contract` target plus migration, secret, license and build checks, then
+runs fixed-version FRPS/FRPC checks when their artifacts and isolated
+configuration are supplied.
 
 The collector never creates a Cloudflare record, requests an ACME certificate,
 changes a production DNS zone, or treats missing credentials as success. It
