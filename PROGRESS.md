@@ -161,6 +161,7 @@
 | 2026-08-10 | 当前提交最终本地回归复验 | 通过/按标准阻断；在提交 [`db5c64b`](https://github.com/sshiong/frp-panel-platform-v3/commit/db5c64bdd262a06074a6be055a424439cef3ea54) 上重新通过 `make test`、`make perf`、`npm run test:accessibility`、Secret scan；固定 FRP v0.68.0 外部收集器为 8 passed、0 failed、1 blocked，退出码 2 仅表示缺少真实 Provider/ACME/目标环境/签字证据。 |
 | 2026-08-10 | 外部收集器本地契约强度收口 | 已实现；`make external-acceptance` 的 local-contract 步骤现在执行完整 `make contract`，不再只执行 OpenAPI 路由校验；外部流程和报告说明已同步，缺少真实 Provider/目标环境/签字证据时继续 fail-closed。 |
 | 2026-08-10 | 外部收集器本地性能证据收口 | 已实现；收集器新增 `local-performance` 步骤执行 `make perf`，把 PERF-001~007 的开发机基线写入同一份脱敏机器报告，同时明确不替代固定 2 vCPU/2 GiB 目标环境签收。 |
+| 2026-08-10 | 当前 revision 最终验收与托管复核 | 通过/按标准阻断；提交 [`0b02dc5`](https://github.com/sshiong/frp-panel-platform-v3/commit/0b02dc5d25d2bdeefd97543c35cb699cc36a5803) 的 [`ci run 31336793148`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31336793148) 与 [`CodeQL run 31336793155`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31336793155) 全部成功；本地 `make external-acceptance` 报告为 9 passed / 0 failed / 1 blocked，`make contract`、`make perf`、固定 FRP 网络 E2E、verify 与 Plugin E2E 均通过，唯一阻断仍是 Cloudflare/ACME/目标环境/正式签名/负责人签字证据。 |
 
 ## 未决与发布阻断项
 
