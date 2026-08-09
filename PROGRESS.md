@@ -141,6 +141,7 @@
 | 2026-08-09 | 手动外部验收 workflow | 已实现并通过托管复核；新增仅 `workflow_dispatch`、绑定 `external-acceptance` environment 的 Cloudflare/ACME workflow，输入 disposable zone/DNS 名称，上传 14 天脱敏 runner JSON，并拒绝自动 push/PR 写入；策略脚本已接入 contract。真实 GitHub secrets、目标环境和 reviewer 仍需外部配置 |
 | 2026-08-09 | 本地工具链与 lint 可复现性修复 | 通过本地；Server module 固定 `toolchain go1.25.4`，OpenAPI route validator 默认复用 `go env` 的稳定 GOCACHE/GOMODCACHE，`make lint` 在 PATH 缺少 `staticcheck` 时回退到当前 Go `GOPATH/bin`；无额外环境变量的 `make contract`、显式 Go 1.25.4 的 `make test`/`make lint` 均通过。 |
 | 2026-08-09 | 工具链修复托管复核与当前证据刷新 | 通过；提交 [`b56f750`](https://github.com/sshiong/frp-panel-platform-v3/commit/b56f7509d768ff7b3a2c26c8cbc2c184d4dfb4b2) 的 [`ci run 31314283976`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31314283976) 与 [`CodeQL run 31314283974`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31314283974) 全部成功，包含双 Go race/staticcheck、双面板 WCAG、fuzz、Linux FRP E2E、fault-injection、security、container scan 与 release metadata；当前 revision 外部收集器为 8 passed / 0 failed / 1 blocked，阻断仍仅来自未配置真实 Provider/目标硬件/签名/负责人证据。 |
+| 2026-08-09 | CI Go 缓存警告清理 | 已实现，待托管复核；`fuzz`、`security` 与 `release-metadata` 的 `setup-go` 现在显式使用 `server/go.sum`，消除根目录缺少 `go.sum` 的缓存恢复警告，不改变任何验收范围。 |
 
 ## 未决与发布阻断项
 

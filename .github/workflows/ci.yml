@@ -175,6 +175,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.x'
+          cache-dependency-path: server/go.sum
       - run: ruby scripts/validate-openapi.rb
       - run: ruby scripts/generate-sbom.rb
 
@@ -188,6 +189,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.x'
+          cache-dependency-path: server/go.sum
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
@@ -270,6 +272,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.x'
+          cache-dependency-path: server/go.sum
       - run: go test -run=^$ -fuzz=FuzzNormalizeDomain -fuzztime=30s ./internal/service
         working-directory: server
       - run: go test -run=^$ -fuzz=FuzzSnapshotRoundTrip -fuzztime=30s ./internal/router
