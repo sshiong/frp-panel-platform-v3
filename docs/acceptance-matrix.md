@@ -110,7 +110,7 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 | TLS-006 | 本地通过 | control_routes 与 business_routes 物理分组、不同 target。 |
 | TLS-007 | 本地通过 | Runtime 只读签名 snapshot；坏 DB/快照不影响 last-good。 |
 | TLS-008 | 本地通过 | bad HMAC/schema/version 保留旧路由。 |
-| TLS-009 | 部分通过 | 证书文件原子替换、内存 CertificateStore 热加载已测；真实 SNI 部署待外部。 |
+| TLS-009 | 部分通过 | 证书文件原子替换、数据库 `cert_hash` 与证书文件 SHA-256 完整性校验、内存 CertificateStore 热加载已测；真实 SNI 部署待外部。 |
 | TLS-010 | 待外部 | ACME Staging、DNS TXT propagation/cleanup 和 Retry-After 需真实 CA。 |
 | TLS-011 | 本地通过 | certificate wrapping key 独立于 master/router key，私钥只存密文。 |
 | TLS-012 | 待外部 | Cloudflare Full (strict) 源站证书需真实 Zone/代理环境签收。 |

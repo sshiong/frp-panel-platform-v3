@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -56,7 +58,7 @@ func (a *App) RouterStatus(ctx context.Context) (RouterStatus, error) {
 // key. A failed load leaves callers free to retain their previous in-memory
 // certificate set.
 func (a *App) RouterCertificates(ctx context.Context) (map[string]tls.Certificate, error) {
-	rows, err := a.DB.QueryContext(ctx, `SELECT d.id,d.normalized_domain,COALESCE(c.cert_path,''),c.private_key_ciphertext,c.private_key_nonce,COALESCE(c.wrapping_key_version,0) FROM certificates c JOIN domain_bindings d ON d.id=c.domain_binding_id WHERE c.provider='acme' AND c.status='valid' AND d.status NOT IN ('deleted','deleting')`)
+	rows, err := a.DB.QueryContext(ctx, `SELECT d.id,d.normalized_domain,COALESCE(c.cert_path,''),c.private_key_ciphertext,c.private_key_nonce,COALESCE(c.wrapping_key_version,0),COALESCE(c.cert_hash,'') FROM certificates c JOIN domain_bindings d ON d.id=c.domain_binding_id WHERE c.provider='acme' AND c.status='valid' AND d.status NOT IN ('deleted','deleting')`)
 	if err != nil {
 		return nil, err
 	}
@@ -64,11 +66,12 @@ func (a *App) RouterCertificates(ctx context.Context) (map[string]tls.Certificat
 		domainID, hostname, path string
 		ciphertext, nonce        []byte
 		keyVersion               int64
+		certificateHash          string
 	}
 	rowsData := make([]certificateRow, 0)
 	for rows.Next() {
 		var item certificateRow
-		if err := rows.Scan(&item.domainID, &item.hostname, &item.path, &item.ciphertext, &item.nonce, &item.keyVersion); err != nil {
+		if err := rows.Scan(&item.domainID, &item.hostname, &item.path, &item.ciphertext, &item.nonce, &item.keyVersion, &item.certificateHash); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -101,6 +104,9 @@ func (a *App) RouterCertificates(ctx context.Context) (map[string]tls.Certificat
 		if err != nil {
 			return nil, err
 		}
+		if item.certificateHash != "" && item.certificateHash != certificateHash(certPEM) {
+			return nil, fmt.Errorf("certificate file hash does not match stored hash for %s", item.hostname)
+		}
 		privatePEM, err := a.Crypto.DecryptCertificate(item.keyVersion, item.ciphertext, item.nonce, "domain:"+item.domainID+":certificate_private_key:v1")
 		if err != nil {
 			return nil, fmt.Errorf("decrypt certificate key for %s: %w", item.hostname, err)
@@ -112,6 +118,11 @@ func (a *App) RouterCertificates(ctx context.Context) (map[string]tls.Certificat
 		certificates[strings.ToLower(strings.TrimSuffix(strings.TrimSpace(item.hostname), "."))] = pair
 	}
 	return certificates, nil
+}
+
+func certificateHash(value []byte) string {
+	sum := sha256.Sum256(value)
+	return hex.EncodeToString(sum[:])
 }
 
 type routeSource struct {

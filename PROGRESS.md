@@ -154,6 +154,8 @@
 | 2026-08-10 | ACME 与发布来源边界加固 | 已实现并通过本地回归；ACME Staging runner 仅允许官方 Let's Encrypt Staging directory，拒绝生产/不可信 host、userinfo、端口、query 和 fragment；生产配置拒绝明文 Cloudflare/ACME service URL；release workflow 要求手动发布来自 protected `main`、tag 发布绑定 pushed tag ref。 |
 | 2026-08-10 | ACME 与发布来源边界托管复核 | 通过；提交 [`763c559`](https://github.com/sshiong/frp-panel-platform-v3/commit/763c559a86efb3de01585f432c274bbc5365d988) 的 [`ci run 31333890995`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31333890995) 与 [`CodeQL run 31333891002`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31333891002) 全部成功；ACME URL、生产服务 URL 和发布 ref policy 回归通过，外部 Provider/目标硬件/正式签名/负责人签字仍保持 blocked。 |
 
+| 2026-08-10 | Router 证书完整性边界 | 已实现并通过服务层回归；Router 加载证书时校验数据库 `cert_hash` 与证书文件 SHA-256，哈希不匹配时拒绝热加载并允许调用方保留 last-good 内存证书集；旧数据的空哈希保持向后兼容，真实 SNI 部署仍待外部。 |
+
 ## 未决与发布阻断项
 
 以下不是“已实现”的替代品，必须在发布前完成：

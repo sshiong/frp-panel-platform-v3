@@ -11,6 +11,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -64,6 +65,22 @@ func TestRouterServiceCertificateMaterialAndFailureEdges(t *testing.T) {
 	}
 	if _, ok := certificates[domain.Normalized]; !ok {
 		t.Fatalf("certificate hostname was not normalized into the runtime set: %#v", certificates)
+	}
+	certificateDigest := certificateHash(certPEM)
+	if _, err := app.DB.ExecContext(ctx, `UPDATE certificates SET cert_hash=? WHERE domain_binding_id=?`, certificateDigest, domain.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.RouterCertificates(ctx); err != nil {
+		t.Fatalf("certificate with matching stored hash was rejected: %v", err)
+	}
+	if _, err := app.DB.ExecContext(ctx, `UPDATE certificates SET cert_hash=? WHERE domain_binding_id=?`, strings.Repeat("0", 64), domain.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.RouterCertificates(ctx); err == nil {
+		t.Fatal("certificate with mismatched stored hash was accepted")
+	}
+	if _, err := app.DB.ExecContext(ctx, `UPDATE certificates SET cert_hash=? WHERE domain_binding_id=?`, certificateDigest, domain.ID); err != nil {
+		t.Fatal(err)
 	}
 
 	if _, err := app.DB.ExecContext(ctx, `UPDATE certificates SET cert_path=? WHERE domain_binding_id=?`, filepath.Join(os.TempDir(), "outside-cert.pem"), domain.ID); err != nil {
