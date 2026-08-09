@@ -19,6 +19,10 @@ make dev-server
 make dev-client
 ```
 
+本地门禁需要 Go 1.25.4、Node.js 22 和 Ruby 3.3；Server module 已通过
+`toolchain go1.25.4` 固定 Go 补丁基线。`make lint` 会优先使用 PATH 中的
+`staticcheck`，否则回退到当前 Go `GOPATH/bin`，但不会自动下载工具。
+
 `make build` first compiles both independent Vue panels and embeds their
 static assets into the matching Go binary. `FRP_ADMIN_WEB_DIR` and
 `FRP_CLIENT_WEB_DIR` remain optional development/test overrides; a release

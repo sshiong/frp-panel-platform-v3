@@ -1,5 +1,13 @@
 # Installation and deployment
 
+## Toolchain prerequisites
+
+For local development and release checks, use Go 1.25.4, Node.js 22 and
+Ruby 3.3. The Server module pins the Go toolchain with `toolchain go1.25.4`;
+the Client remains an independent Go module. Install `staticcheck` with
+`go install honnef.co/go/tools/cmd/staticcheck@latest` when it is not already
+available. `make lint` also finds the binary in the first `GOPATH/bin` entry.
+
 ## Server Panel
 
 The Server Panel is the public control plane. It must run with a persistent local filesystem; do not place SQLite on NFS/SMB.

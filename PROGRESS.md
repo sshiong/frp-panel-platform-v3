@@ -139,6 +139,7 @@
 | 2026-08-09 | 固定 FRP E2E fixture 生命周期修复 | 通过本地与托管复核；修复 `frp-network-e2e.sh` 未启动本地 upstream fixture 导致真实代理访问误失败的问题，脚本现在负责 fixture 的启动、就绪检查、失败日志和清理；提交 [`8357f16`](https://github.com/sshiong/frp-panel-platform-v3/commit/8357f16) 的 [`ci run 31269140501`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31269140501) 与 [`CodeQL run 31269140438`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31269140438) 全部成功，本机官方 FRP v0.68.0 ARM 二进制的 native TCP、FRPC verify、真实 Plugin E2E 通过 |
 | 2026-08-09 | Cloudflare/ACME 外部验收 runner | 已实现并通过托管复核；新增受 `disposable-zone` 显式确认保护的 Cloudflare DNS smoke runner，以及只接受 ACME Staging URL、受 `acme-staging` 确认保护的真实 DNS-01 runner；token、私钥和 ACME 账户材料不写入输出，均有清理边界；提交 [`82d9dd3`](https://github.com/sshiong/frp-panel-platform-v3/commit/82d9dd3) 的 CI/CodeQL 全部成功。真实 Sandbox/ACME credentials 和 reviewed evidence bundle 仍待外部操作 |
 | 2026-08-09 | 手动外部验收 workflow | 已实现并通过托管复核；新增仅 `workflow_dispatch`、绑定 `external-acceptance` environment 的 Cloudflare/ACME workflow，输入 disposable zone/DNS 名称，上传 14 天脱敏 runner JSON，并拒绝自动 push/PR 写入；策略脚本已接入 contract。真实 GitHub secrets、目标环境和 reviewer 仍需外部配置 |
+| 2026-08-09 | 本地工具链与 lint 可复现性修复 | 通过本地；Server module 固定 `toolchain go1.25.4`，OpenAPI route validator 默认复用 `go env` 的稳定 GOCACHE/GOMODCACHE，`make lint` 在 PATH 缺少 `staticcheck` 时回退到当前 Go `GOPATH/bin`；无额外环境变量的 `make contract`、显式 Go 1.25.4 的 `make test`/`make lint` 均通过。 |
 
 ## 未决与发布阻断项
 

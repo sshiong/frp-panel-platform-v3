@@ -5,9 +5,14 @@ require "json"
 require "open3"
 require "tmpdir"
 
+def go_env_value(name, fallback)
+	output, status = Open3.capture2("go", "env", name)
+	status.success? && !output.strip.empty? ? output.strip : fallback
+end
+
 go_env = {
-	"GOCACHE" => ENV.fetch("GOCACHE", File.join(Dir.tmpdir, "frp-panel-go-build-cache")),
-	"GOMODCACHE" => ENV.fetch("GOMODCACHE", File.join(Dir.tmpdir, "frp-panel-go-module-cache"))
+	"GOCACHE" => ENV.fetch("GOCACHE") { go_env_value("GOCACHE", File.join(Dir.tmpdir, "frp-panel-go-build-cache")) },
+	"GOMODCACHE" => ENV.fetch("GOMODCACHE") { go_env_value("GOMODCACHE", File.join(Dir.tmpdir, "frp-panel-go-module-cache")) }
 }
 
 def validate_contract(path, module_dir, minimum_paths, require_websocket, go_env)
