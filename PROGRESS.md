@@ -155,6 +155,7 @@
 | 2026-08-10 | ACME 与发布来源边界托管复核 | 通过；提交 [`763c559`](https://github.com/sshiong/frp-panel-platform-v3/commit/763c559a86efb3de01585f432c274bbc5365d988) 的 [`ci run 31333890995`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31333890995) 与 [`CodeQL run 31333891002`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31333891002) 全部成功；ACME URL、生产服务 URL 和发布 ref policy 回归通过，外部 Provider/目标硬件/正式签名/负责人签字仍保持 blocked。 |
 
 | 2026-08-10 | Router 证书完整性边界 | 已实现并通过服务层回归；Router 加载证书时校验数据库 `cert_hash` 与证书文件 SHA-256，哈希不匹配时拒绝热加载并允许调用方保留 last-good 内存证书集；旧数据的空哈希保持向后兼容，真实 SNI 部署仍待外部。 |
+| 2026-08-10 | Router 证书完整性托管复核 | 通过；提交 [`4a94c41`](https://github.com/sshiong/frp-panel-platform-v3/commit/4a94c4107fd46ffa439a9aba1018e252a2f000eb) 的 [`ci run 31334721807`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31334721807) 与 [`CodeQL run 31334721817`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31334721817) 全部成功；证书哈希匹配/不匹配回归、coverage、双面板 WCAG、Linux FRP E2E、故障注入、安全、容器扫描和发布元数据均通过，真实 SNI/Provider/目标硬件/正式签名/负责人签字仍保持 blocked。 |
 
 ## 未决与发布阻断项
 
