@@ -30,7 +30,7 @@ sources.each do |path|
   end
   # The base palette is declared in the first :root rule. Repeated component
   # surfaces below it must use semantic aliases from the app's tokens.css.
-  body = text.include?(":root") ? text.sub(/\A.*?\}/m, "") : text
+  body = text.include?(":root") ? text.sub(/\A.*?:root\{.*?\}/m, "") : text
   forbidden_literals.each do |label, pattern|
     violations << "#{path.delete_prefix("#{root}/")}: #{label} must use a semantic token" if body.match?(pattern)
   end
