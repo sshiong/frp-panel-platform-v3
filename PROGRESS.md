@@ -143,6 +143,7 @@
 | 2026-08-09 | 工具链修复托管复核与当前证据刷新 | 通过；提交 [`b56f750`](https://github.com/sshiong/frp-panel-platform-v3/commit/b56f7509d768ff7b3a2c26c8cbc2c184d4dfb4b2) 的 [`ci run 31314283976`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31314283976) 与 [`CodeQL run 31314283974`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31314283974) 全部成功，包含双 Go race/staticcheck、双面板 WCAG、fuzz、Linux FRP E2E、fault-injection、security、container scan 与 release metadata；当前 revision 外部收集器为 8 passed / 0 failed / 1 blocked，阻断仍仅来自未配置真实 Provider/目标硬件/签名/负责人证据。 |
 | 2026-08-09 | CI Go 缓存警告清理 | 已实现，待托管复核；`fuzz`、`security` 与 `release-metadata` 的 `setup-go` 现在显式使用 `server/go.sum`，消除根目录缺少 `go.sum` 的缓存恢复警告，不改变任何验收范围。 |
 | 2026-08-09 | 外部验收 Environment 初始化 | 已创建 GitHub `external-acceptance` Environment，供手动 Cloudflare/ACME workflow 使用；secrets、disposable Zone、目标硬件、签名与 reviewer 仍未配置，因此外部报告继续 fail-closed。 |
+| 2026-08-10 | 双面板触控目标加固 | 通过本地回归；Admin/Client 图标操作按钮统一为 44×44px，符合移动端触控目标要求；`make lint`、`make build` 与 `npm run test:accessibility` 全部通过。 |
 
 ## 未决与发布阻断项
 
