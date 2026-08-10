@@ -4,10 +4,10 @@ This report records evidence available in the local development environment. It 
 
 ## Current revision evidence
 
-The latest verified implementation revision is `77b41db566098c8f3f8c0181b0399d489c501b55`. Its PR CI run
-[`31392232994`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31392232994)
+The latest verified implementation revision is `b8bf730a6b4e29f943d006f2b5c4539c9dc5d7d2`. Its PR CI run
+[`31395358970`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31395358970)
 and CodeQL run
-[`31392232917`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31392232917)
+[`31395359111`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31395359111)
 passed all required checks, including contract, coverage, Go race/static analysis,
 both panel builds and WCAG checks, fixed Linux FRP E2E, fault injection, fuzz,
 security, container scanning, release metadata and the fixed Ubuntu 24.04 / 2 vCPU /
@@ -22,9 +22,10 @@ only blocked step is the intentionally absent reviewed Provider, target-environm
 signing and owner-approval bundle. The 142-record acceptance
 index is also bound to this revision and remains `blocked` while the matrix has
 incomplete external rows. This revision also adds Cloudflare Token clear/rotation
-guards across DNS and ACME Jobs; the running-job regression proves stale DNS/ACME
-results are blocked before local success publication. PR #2 remains open for required
-human review.
+guards across DNS and ACME Jobs, Token verification, and explicit activation; the
+running-job regression proves stale DNS/ACME results are blocked before local success
+publication and a cleared candidate cannot become active. PR #2 remains open for
+required human review.
 
 Target-environment automation is now available through `make target-acceptance` and
 the manual [`target-acceptance.yml`](.github/workflows/target-acceptance.yml). It
