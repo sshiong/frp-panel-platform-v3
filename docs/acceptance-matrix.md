@@ -13,10 +13,11 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 - `部分通过`：本地实现已有证据，但标准要求的外部/目标环境仍未完成；
 - `待外部`：需要真实 Provider、Linux、Docker、CA、签字或目标硬件。
 
-最近一次实现与托管门禁证据：实现 revision `75fb6e6f5fb583beda4dffb9c68c319cc3d0127c` 的 CI
-run `31365422945` 与 CodeQL run `31365422966` 均成功；导航按钮新增
-`aria-current="page"` 语义并由认证态 Playwright 回归验证。该 revision 的
-`make external-acceptance` 报告为 9 passed / 0 failed / 1 blocked。当前
+最近一次实现与托管门禁证据：实现 revision `eaed6bf230ddd887252d9a4fbf9e475a49972ba4` 的 CI
+run `31366537532` 与 CodeQL run `31366537522` 均成功；导航按钮使用
+`aria-current="page"`，所有面板按钮显式声明 `type`，并由认证态 Playwright
+回归验证。该 revision 的 `make external-acceptance` 报告为 9 passed / 0 failed /
+1 blocked。当前
 `output/external-acceptance.json` 的 40 位 commit 字段是最终工作树的权威绑定；
 阻断项仍严格限于真实 Provider、目标环境、正式签名和负责人签字，不改变
 下方逐项状态的外部证据要求。
@@ -184,7 +185,7 @@ run `31365422945` 与 CodeQL run `31365422966` 均成功；导航按钮新增
 | UI-004 | 本地通过 | Cloudflare capability missing 列表在 Admin UI 展示。 |
 | UI-005 | 本地通过 | DNS adopt/overwrite/cancel 与 managed/adopted 文案一致。 |
 | UI-006 | 本地通过 | Token 页面只显示 configured/status/version/verified_at。 |
-| UI-007 | 本地/CI 通过 | Admin/Client 构建后运行 axe WCAG 2.1 AA、表单标签、键盘 Tab/reduced-motion、390px 无横向溢出检查均通过；PR #2 的 `web (admin)` 与 `web (client)` 门禁通过。 |
+| UI-007 | 本地/CI 通过 | Admin/Client 构建后运行 axe WCAG 2.1 AA、表单标签、键盘 Tab/reduced-motion、390px 无横向溢出检查均通过；导航按钮有唯一 `aria-current="page"`，所有按钮显式声明 `type`；PR #2 的 `web (admin)` 与 `web (client)` 门禁通过。 |
 | UI-008 | 本地通过 | Operations 展示阶段、步骤、失败原因、residue 和 retry。 |
 | DOD-001 | 待外部 | 所有 P0/P1 尚未完成真实 Cloudflare、ACME、Linux/FRP、灾备和签字，因此当前版本不是 Release Candidate。 |
 
