@@ -4,16 +4,16 @@ This report records evidence available in the local development environment. It 
 
 ## Current revision evidence
 
-The latest verified implementation revision is `b8bf730a6b4e29f943d006f2b5c4539c9dc5d7d2`. Its PR CI run
-[`31395358970`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31395358970)
+The latest verified implementation revision is `567c27489180829d3f99e8beec0db94ccfc3e61a`. Its PR CI run
+[`31395884164`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31395884164)
 and CodeQL run
-[`31395359111`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31395359111)
+[`31395883960`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31395883960)
 passed all required checks, including contract, coverage, Go race/static analysis,
 both panel builds and WCAG checks, fixed Linux FRP E2E, fault injection, fuzz,
 security, container scanning, release metadata and the fixed Ubuntu 24.04 / 2 vCPU /
 2 GiB target acceptance profile. The measured target profile records PERF-001/002
-read/write p95 46.398/43.768ms, PERF-003 111.702ms, PERF-005 4.444ms, PERF-006
-6.515ms and PERF-007 WebSocket/HTTP/old-FRP invalidation 60.561/0.292/0.305ms.
+read/write p95 66.198813/36.916817ms, PERF-003 115.616085ms, PERF-005 4.460577ms, PERF-006
+7.240448ms and PERF-007 WebSocket/HTTP/old-FRP invalidation 67.823673/0.317631/0.374081ms.
 Using the verified official FRP v0.68.0 Darwin ARM64 binaries, the local collector
 also passed real TCP networking, fixed FRPC `verify`, and FRPS/FRPC Plugin network
 E2E. The current local fixed-artifact collector report is bound to the same
@@ -97,7 +97,7 @@ hardware, Provider/ACME, signing, or owner approval.
 - Latest verified implementation revision [`b444975`](https://github.com/sshiong/frp-panel-platform-v3/commit/b444975d7dc6b4ab1935bedf9d9229ac1dfe1c49): [`ci run 31368552030`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31368552030) and [`CodeQL run 31368552064`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31368552064) passed all required jobs. The local collector records 9 passed, 0 failed and 1 blocked; each collector step now includes the standard environment/steps/expected/actual/artifacts/operator/time fields and a redacted 0600 log artifact. The blocked state still represents missing reviewed Provider/ACME/target-environment/signing/owner evidence, not a release pass.
 - Release workflow gate hardening: `.github/workflows/release.yml` now installs Staticcheck and Chromium, reruns `make test lint accessibility`, and executes the shared fixed 2 vCPU/2 GiB performance profile on the exact release checkout before the fixed-FRP/external-evidence gate and before cosign signing. `scripts/release-workflow-policy.rb` enforces that ordering; this closes the gap where a release could otherwise rely only on historical PR checks or stale performance evidence.
 - Fixed performance profile implementation: `.github/workflows/performance.yml` defines an Ubuntu 24.04 Docker profile constrained to exactly 2 vCPU and 2 GiB RAM, runs the complete PERF-001/002/003/005/006/007 suite with SQLite WAL, uploads a separate log, and is protected by `scripts/performance-workflow-policy.rb`; the result is recorded below.
-- Fixed performance profile result: [`performance run 31370452806`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31370452806) passed the Ubuntu 24.04 Docker profile constrained to 2 vCPU/2 GiB. The uploaded log records PERF-001/002 p95 113.155572ms/53.0123ms with zero errors, PERF-003 668.38362ms, PERF-005 4.494568ms, PERF-006 8.059851ms, and PERF-007 WebSocket/HTTP/old-FRP invalidation 63.694019ms/0.406546ms/0.314556ms. These now satisfy the documented reference baseline; production deployment capacity and network sign-off remain separate release evidence.
+- Fixed performance profile result: the final target-acceptance artifact from [`ci run 31395884164`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31395884164) passed the Ubuntu 24.04 Docker profile constrained to 2 vCPU/2 GiB. The uploaded log records PERF-001/002 p95 66.198813ms/36.916817ms with zero errors, PERF-003 115.616085ms, PERF-005 4.460577ms, PERF-006 7.240448ms, and PERF-007 WebSocket/HTTP/old-FRP invalidation 67.823673ms/0.317631ms/0.374081ms. These satisfy the documented reference baseline; production deployment capacity and network sign-off remain separate release evidence.
 - Fixed-profile runner repair record: the first attempt [`performance run 31370268438`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31370268438) failed before tests because `bash -lc` removed the Go image PATH; it produced no performance result. The workflow now uses non-login `bash -c`, the policy locks that boundary, and only the subsequent successful run is used as acceptance evidence.
 - Current release evidence binding: revision [`639a184`](https://github.com/sshiong/frp-panel-platform-v3/commit/639a18483054072b9e273a09323fbaf872b1c0f2) passed [`ci run 31371628773`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31371628773) and [`CodeQL run 31371628772`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31371628772). The release checkout invokes the shared fixed 2 vCPU/2 GiB performance script before external evidence and cosign signing; the revision-bound collector recorded 9 passed, 0 failed and 1 blocked, so absent reviewed Provider/target/signing/owner evidence remains blocked.
 - Accessibility automation: the built Admin and Client panels pass axe WCAG 2.1 AA, unlabeled-control checks, keyboard focus/reduced-motion checks, and 390px horizontal-overflow checks through `npm run test:accessibility`. The deterministic fixture also scans every authenticated navigation surface and the Admin create-user, Client Mapping, and Client Domain dialogs; the root Playwright tool is wired into the existing `web (admin)` CI matrix job.

@@ -13,15 +13,15 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 - `部分通过`：本地实现已有证据，但标准要求的外部/目标环境仍未完成；
 - `待外部`：需要真实 Provider、Linux、Docker、CA、签字或目标硬件。
 
-最近一次已验证实现与托管门禁证据：当前 revision
-`e5a4ebe71900a0104f14b45608eedacc01f863d9` 的 CI run
-`31382087916` 与 CodeQL run `31382087541` 均成功；required checks 还包括
+最近一次已验证实现与托管门禁证据：最终证据 revision
+`567c27489180829d3f99e8beec0db94ccfc3e61a` 的 CI run
+`31395884164` 与 CodeQL run `31395883960` 均成功；required checks 还包括
 coverage、固定 FRP Linux E2E、fault injection、security、container scan 和
-release metadata。固定性能 workflow run `31370452806` 在 Ubuntu 24.04 Docker
-2 vCPU/2 GiB profile 下通过 PERF-001/002/003/005/006/007；导航按钮使用
+release metadata。该 revision 上传的 target-acceptance artifact 在 Ubuntu 24.04
+Docker 2 vCPU/2 GiB profile 下通过 PERF-001/002/003/005/006/007；导航按钮使用
 `aria-current="page"`，所有面板按钮显式声明 `type`，性能项也已准确区分开发/Hosted
 profile 与固定 Linux 2 vCPU/2 GiB 目标基线。当前 revision 的
-`make external-acceptance` 报告为 7 passed / 0 failed / 4 blocked，
+`make external-acceptance` 报告为 10 passed / 0 failed / 1 blocked，
 `make acceptance-evidence` 索引为 142 条记录且保持 `blocked`。
 `output/external-acceptance.json` 的 40 位 commit 字段始终是当前工作树验收报告的权威绑定；
 阻断项仍严格限于真实 Provider、目标环境、正式签名和负责人签字，不改变下方逐项状态的外部证据要求。
@@ -41,8 +41,8 @@ Cloudflare、ACME、生产容量、签名或三方发布签字。
 发布 workflow 加固 revision [`639a184`](https://github.com/sshiong/frp-panel-platform-v3/commit/639a18483054072b9e273a09323fbaf872b1c0f2)
 已通过 [`ci run 31371628773`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31371628773)
 与 [`CodeQL run 31371628772`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31371628772)；它将固定性能脚本绑定到
-release checkout，并要求该性能门禁先于外部证据与签名。该记录不改变固定性能
-`31370452806` 的历史证据绑定，也不把真实 Provider、目标部署或签字状态改为通过。
+release checkout，并要求该性能门禁先于外部证据与签名。该记录不把真实 Provider、
+目标部署或签字状态改为通过。
 
 ## 架构、身份和地址
 
@@ -173,22 +173,22 @@ release checkout，并要求该性能门禁先于外部证据与签名。该记�
 | API-005 | 本地通过 | Client 发送 `X-FRP-Client-Version`；过旧/非法版本返回 426、`Upgrade-Required` 和 `CLIENT_VERSION_UNSUPPORTED`，兼容版本可登录并显示可升级提示，回归测试通过；Server/Client 发行版本可由独立 `-ldflags` 注入并进入 compatibility API。 |
 | API-006 | 本地通过 | WebSocket 指数退避、抖动、lease heartbeat 测试通过。 |
 | API-007 | 本地通过 | 丢通知触发 full sync，配置 hash/version 收敛测试通过。 |
-| PERF-001 | 本地/CI 通过 | 固定 Ubuntu 24.04 Docker profile（2 vCPU/2 GiB、SQLite WAL）run 31370452806：100 并发读 p95=113.155572ms、错误率 0；低于 300ms 阈值。该 profile 是标准参考环境证据，不替代生产部署容量签收。 |
-| PERF-002 | 本地/CI 通过 | 同一固定 profile：20 并发写 p95=53.0123ms、错误率 0；低于 800ms 阈值且无永久 lock。该 profile 是标准参考环境证据，不替代生产部署容量签收。 |
-| PERF-003 | 本地/CI 通过 | 同一固定 profile：1000 Mapping + 2000 Domain Router snapshot generate/apply=668.38362ms；低于 5 秒阈值。该 profile 是标准参考环境证据，不替代生产部署容量签收。 |
+| PERF-001 | 本地/CI 通过 | 最终 target-acceptance artifact（CI run 31395884164，Ubuntu 24.04 Docker 2 vCPU/2 GiB、SQLite WAL）：100 并发读 p95=66.198813ms、错误率 0；低于 300ms 阈值。该 profile 是标准参考环境证据，不替代生产部署容量签收。 |
+| PERF-002 | 本地/CI 通过 | 同一最终固定 profile：20 并发写 p95=36.916817ms、错误率 0；低于 800ms 阈值且无永久 lock。该 profile 是标准参考环境证据，不替代生产部署容量签收。 |
+| PERF-003 | 本地/CI 通过 | 同一最终固定 profile：1000 Mapping + 2000 Domain Router snapshot generate/apply=115.616085ms；低于 5 秒阈值。该 profile 是标准参考环境证据，不替代生产部署容量签收。 |
 | PERF-004 | 本地通过 | snapshot reload 不主动中断 in-flight HTTP 流。 |
-| PERF-005 | 本地/CI 通过 | 同一固定 profile：200 Mapping config generate/sign=4.494568ms；低于 2 秒阈值。该 profile 是标准参考环境证据，不替代生产部署容量签收。 |
-| PERF-006 | 本地/CI 通过 | 同一固定 profile：配置提交到 Client apply=8.059851ms；低于 5 秒阈值。该 profile 是标准参考环境证据，不替代生产网络签收。 |
-| PERF-007 | 本地/CI 通过 | 同一固定 profile：WebSocket=63.694019ms、旧 HTTP=0.406546ms、旧 FRP Login=0.314556ms；均低于标准阈值。该 profile 是标准参考环境证据，不替代生产网络签收。 |
+| PERF-005 | 本地/CI 通过 | 同一最终固定 profile：200 Mapping config generate/sign=4.460577ms；低于 2 秒阈值。该 profile 是标准参考环境证据，不替代生产部署容量签收。 |
+| PERF-006 | 本地/CI 通过 | 同一最终固定 profile：配置提交到 Client apply=7.240448ms；低于 5 秒阈值。该 profile 是标准参考环境证据，不替代生产网络签收。 |
+| PERF-007 | 本地/CI 通过 | 同一最终固定 profile：WebSocket=67.823673ms、旧 HTTP=0.317631ms、旧 FRP Login=0.374081ms；均低于标准阈值。该 profile 是标准参考环境证据，不替代生产网络签收。 |
 | REL-001 | 本地通过 | Supervisor 临时配置/last-good/重启恢复测试通过。 |
 | REL-002 | 本地通过 | Port lease/Mapping 事务和 SQLite rollback race 测试通过。 |
 | REL-003 | 本地通过 | Worker lease、ambiguous Provider query 和 malformed payload recovery 测试通过。 |
 | REL-004 | 本地通过 | Router bad snapshot 保留 last-good 测试通过。 |
-| REL-005 | 部分通过 | WAL bytes 指标、checkpoint 命令和 `TestCheckpointUnderWALPressure` 已通过；Ubuntu 24.04 `make fault-injection` 会在 disposable tmpfs 中验证 WAL 压力、checkpoint 和重启恢复，长时间/生产磁盘演练仍待外部。 |
+| REL-005 | 部分通过 | WAL bytes 指标、checkpoint 命令和 `TestCheckpointUnderWALPressure` 已通过；最终 CI run 31395884164 的 Ubuntu 24.04 `make fault-injection` 在 disposable tmpfs 中验证 WAL 压力、checkpoint 和重启恢复，长时间/生产磁盘演练仍待外部。 |
 | REL-006 | 本地通过 | WebSocket 断线后全量同步/心跳恢复测试通过。 |
-| REL-007 | 部分通过 | Ubuntu 24.04 [`ci` run 31189601927](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31189601927) 的 disposable 32MiB tmpfs 真实填满文件系统，验证 Router 原子写失败不覆盖 last-good；本地 backup archive 无 partial output、restore post-install 失败回滚测试通过；目标部署磁盘演练仍待外部。 |
-| REL-008 | 部分通过 | 同一 Ubuntu 24.04 fault-injection job 验证 Cloudflare/ACME Provider Date 偏差的 fail-safe 路径；真实系统时钟偏差、Session/ACME 长时行为仍待外部。 |
-| SEC-001 | 本地/CI 通过 | 本地 gosec/govulncheck 和 secret scan 清零；最终提交 [`2f73156`](https://github.com/sshiong/frp-panel-platform-v3/commit/2f731567da6933d4fc2ae1db333ad9d61fc2ca19) 的 [`ci` security job](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30745496136) 与 CodeQL 均成功，双 gosec SARIF 已独立上传。 |
+| REL-007 | 部分通过 | 最终 CI run 31395884164 的 Ubuntu 24.04 disposable 32MiB tmpfs 真实填满文件系统，验证 Router 原子写失败不覆盖 last-good；本地 backup archive 无 partial output、restore post-install 失败回滚测试通过；目标部署磁盘演练仍待外部。 |
+| REL-008 | 部分通过 | 最终 CI run 31395884164 的 Ubuntu 24.04 fault-injection job 验证 Cloudflare/ACME Provider Date 偏差的 fail-safe 路径；真实系统时钟偏差、Session/ACME 长时行为仍待外部。 |
+| SEC-001 | 本地/CI 通过 | 本地 gosec/govulncheck 和 secret scan 清零；最终 revision [`567c274`](https://github.com/sshiong/frp-panel-platform-v3/commit/567c27489180829d3f99e8beec0db94ccfc3e61a) 的 [`ci` security job](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31395884164) 与 CodeQL 均成功，双 gosec SARIF 已独立上传。 |
 | SEC-002 | 本地通过 | Auth/domain/port/file path 权限测试和 race 测试通过。 |
 | SEC-003 | 本地通过 | CSRF、CORS、Origin、Host、WebSocket 和 XSS 边界测试通过。 |
 | SEC-004 | 本地通过 | Server URL parser 拒绝危险 Scheme/Userinfo/redirect 绕过。 |
