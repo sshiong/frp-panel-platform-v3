@@ -13,8 +13,9 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 - `部分通过`：本地实现已有证据，但标准要求的外部/目标环境仍未完成；
 - `待外部`：需要真实 Provider、Linux、Docker、CA、签字或目标硬件。
 
-最近一次已验证实现与托管门禁证据：实现 revision `b444975d7dc6b4ab1935bedf9d9229ac1dfe1c49` 的 CI
-run `31368552030` 与 CodeQL run `31368552064` 均成功；导航按钮使用
+最近一次已验证实现与托管门禁证据：实现 revision `a3cc167fea202f128182bd8aa06db9f49c0b22fa` 的 CI
+run `31369627764` 与 CodeQL run `31369627644` 均成功；固定性能 workflow run
+`31370452806` 在 Ubuntu 24.04 Docker 2 vCPU/2 GiB profile 下通过 PERF-001/002/003/005/006/007；导航按钮使用
 `aria-current="page"`，所有面板按钮显式声明 `type`，性能项也已准确区分开发/Hosted
 profile 与固定 Linux 2 vCPU/2 GiB 目标基线。该 revision 的
 `make external-acceptance` 报告为 9 passed / 0 failed / 1 blocked。
@@ -150,13 +151,13 @@ profile 与固定 Linux 2 vCPU/2 GiB 目标基线。该 revision 的
 | API-005 | 本地通过 | Client 发送 `X-FRP-Client-Version`；过旧/非法版本返回 426、`Upgrade-Required` 和 `CLIENT_VERSION_UNSUPPORTED`，兼容版本可登录并显示可升级提示，回归测试通过；Server/Client 发行版本可由独立 `-ldflags` 注入并进入 compatibility API。 |
 | API-006 | 本地通过 | WebSocket 指数退避、抖动、lease heartbeat 测试通过。 |
 | API-007 | 本地通过 | 丢通知触发 full sync，配置 hash/version 收敛测试通过。 |
-| PERF-001 | 部分通过 | 本机 profile 通过；Ubuntu 24.04 hosted run 31191465839 的 100 并发读 p95=102.321716ms、错误率 0；新增固定 2 vCPU/2 GiB Linux workflow profile，真实 run 证据仍待签收。 |
-| PERF-002 | 部分通过 | 本机 profile 通过；同一 hosted run 的 20 并发写 p95=45.921474ms、错误率 0；新增固定 2 vCPU/2 GiB Linux workflow profile，真实 run 证据仍待签收。 |
-| PERF-003 | 部分通过 | Ubuntu 24.04 hosted run 31191465839 的 1000 Mapping + 2000 Domain Router snapshot generate/apply=523.973835ms；新增固定 2 vCPU/2 GiB Linux workflow profile，真实 run 证据仍待签收。 |
+| PERF-001 | 本地/CI 通过 | 固定 Ubuntu 24.04 Docker profile（2 vCPU/2 GiB、SQLite WAL）run 31370452806：100 并发读 p95=113.155572ms、错误率 0；低于 300ms 阈值。该 profile 是标准参考环境证据，不替代生产部署容量签收。 |
+| PERF-002 | 本地/CI 通过 | 同一固定 profile：20 并发写 p95=53.0123ms、错误率 0；低于 800ms 阈值且无永久 lock。该 profile 是标准参考环境证据，不替代生产部署容量签收。 |
+| PERF-003 | 本地/CI 通过 | 同一固定 profile：1000 Mapping + 2000 Domain Router snapshot generate/apply=668.38362ms；低于 5 秒阈值。该 profile 是标准参考环境证据，不替代生产部署容量签收。 |
 | PERF-004 | 本地通过 | snapshot reload 不主动中断 in-flight HTTP 流。 |
-| PERF-005 | 部分通过 | 本机 profile 通过；同一 hosted run 的 200 Mapping config generate/sign=4.54487ms；新增固定 2 vCPU/2 GiB Linux workflow profile，真实 run 证据仍待签收。 |
-| PERF-006 | 部分通过 | 本机 profile 通过；同一 hosted run 的配置提交到 Client apply=6.235335ms；目标网络矩阵待外部。 |
-| PERF-007 | 部分通过 | 本机 profile 通过；同一 hosted run 的 WebSocket=65.514317ms、旧 HTTP=0.376666ms、旧 FRP Login=0.325481ms；生产延迟基线待外部。 |
+| PERF-005 | 本地/CI 通过 | 同一固定 profile：200 Mapping config generate/sign=4.494568ms；低于 2 秒阈值。该 profile 是标准参考环境证据，不替代生产部署容量签收。 |
+| PERF-006 | 本地/CI 通过 | 同一固定 profile：配置提交到 Client apply=8.059851ms；低于 5 秒阈值。该 profile 是标准参考环境证据，不替代生产网络签收。 |
+| PERF-007 | 本地/CI 通过 | 同一固定 profile：WebSocket=63.694019ms、旧 HTTP=0.406546ms、旧 FRP Login=0.314556ms；均低于标准阈值。该 profile 是标准参考环境证据，不替代生产网络签收。 |
 | REL-001 | 本地通过 | Supervisor 临时配置/last-good/重启恢复测试通过。 |
 | REL-002 | 本地通过 | Port lease/Mapping 事务和 SQLite rollback race 测试通过。 |
 | REL-003 | 本地通过 | Worker lease、ambiguous Provider query 和 malformed payload recovery 测试通过。 |

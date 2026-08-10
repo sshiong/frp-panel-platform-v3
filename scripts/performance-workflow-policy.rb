@@ -9,6 +9,7 @@ required_fragments = {
   "memory limit" => "--memory=2g",
   "no swap expansion" => "--memory-swap=2g",
   "Linux Go image" => "golang:1.25-bookworm",
+  "non-login shell keeps Go PATH" => "bash -c '",
   "server performance profile" => "^TestPerformance(Baseline|Scale|SessionReplacement)$",
   "client performance profile" => "^TestPerformanceConfigSubmitToClientApply$",
   "performance scale flag" => "FRP_PERF_SCALE=1",

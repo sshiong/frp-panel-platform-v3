@@ -55,7 +55,7 @@
 - [x] Client 登录前只做 TLS 证书检查，不发送登录密码；生产 HTTPS 需系统 CA、IP SAN/custom CA 或用户确认的 SPKI pin，pin 仅驻留内存并绑定当前 Server；切换 Server 会注销旧会话、停止旧 FRPC 并清理缓存/秘密。
 - [x] Client 离线回退只允许当前登录会话的 GET 快照，4xx/会话替换/停用永不被缓存掩盖；退出、切换 Server、会话失效会清理缓存和内存运行时秘密；浏览器 `localStorage` 仅保存 `last_server_panel_url`。
 - [x] Client Operations 页面展示阶段、步骤、状态、错误、重试和 external residues；所有异步操作保留可见的 loading/error/retry 反馈。
-- [x] PERF-001~007 本地验收 profile：并发读写、目标规模 Router/Domain 快照、200 Mapping 配置签名、Client 提交到应用以及旧 HTTP/WS/FRP Plugin 会话在替换后失效均有可重复测试；目标 Linux/硬件基线仍需外部环境签收。
+- [x] PERF-001~007 本地与固定参考环境验收 profile：并发读写、目标规模 Router/Domain 快照、200 Mapping 配置签名、Client 提交到应用以及旧 HTTP/WS/FRP Plugin 会话在替换后失效均有可重复测试；固定 Ubuntu 24.04 Docker 2 vCPU/2 GiB profile 已通过，生产部署容量/网络仍需外部签收。
 - [x] `http_only` 固定为无证书、无 HTTPS 跳转；API、服务层、Client 表单和 SQLite CHECK/trigger migration 均拒绝冲突配置。
 - [x] 正式 FPPB1 包包含数据库、受保护数据目录密钥/证书/ACME 文件，逐文件校验并安全恢复；Server 启动会重新排队 Router 快照。
 - [x] OpenAPI 3.1 路径/operationId/WebSocket 元数据校验脚本、双模块 CI contract job、`make sbom`、`make checksums`、固定 FRP 版本下载归档校验和发布清单已加入；正式发布仍需签名和第三方扫描。
@@ -180,7 +180,8 @@
 | 2026-08-10 | 性能验收状态准确化 | 文档修正；PERF-001/002/005/006/007 的本机与 Ubuntu Hosted profile 数值仍保留，但因尚未在标准要求的固定 2 vCPU/2 GiB Linux 与目标网络环境签收，矩阵状态改为 `部分通过`，避免把开发/Hosted 结果误报为正式容量基线。 |
 | 2026-08-10 | 外部收集器逐步骤证据结构化 | 已实现并通过托管复核；本地、阻塞和跳过步骤统一保存标准要求的 `environment`、`steps`、`expected`、`actual`、`artifacts`、`operator`、`executed_at` 字段，命令输出写入 0600 脱敏日志；`scripts/test-external-acceptance.rb` 增加字段与文件权限回归。提交 [`b444975`](https://github.com/sshiong/frp-panel-platform-v3/commit/b444975d7dc6b4ab1935bedf9d9229ac1dfe1c49) 的 [`ci run 31368552030`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31368552030) 与 [`CodeQL run 31368552064`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31368552064) 全部通过；缺少真实 Provider/目标环境/签名/负责人证据仍保持 blocked。 |
 | 2026-08-10 | 正式发布 workflow 门禁收口 | 已实现并通过本地策略校验；release checkout 在外部证据和 cosign 签名之前重新执行 `make test lint accessibility`，并自动安装 Staticcheck 与 Chromium；`scripts/release-workflow-policy.rb` 强制质量门禁先于外部证据，避免正式发布依赖历史 PR 状态。真实 Provider、签名和负责人签字仍待外部。 |
-| 2026-08-10 | 固定 2 vCPU/2 GiB 性能 profile | 已实现，待 Ubuntu runner 实测；`performance.yml` 新增 Docker 资源限制为 2 vCPU/2 GiB、SQLite WAL 的 Linux profile，运行 PERF-001/002/003/005/006/007 并上传独立日志；`scripts/performance-workflow-policy.rb` 已接入 contract/CI，当前 PERF 状态保持 `部分通过`，不提前宣称目标基线通过。 |
+| 2026-08-10 | 固定 2 vCPU/2 GiB 性能 profile | 已实现并通过 Ubuntu runner 实测；[`performance run 31370452806`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31370452806) 在 Docker 2 vCPU/2 GiB、SQLite WAL profile 下通过 PERF-001/002/003/005/006/007，日志已上传并同步矩阵数值；标准参考基线已满足，生产部署容量/网络签收仍保持独立外部门禁。 |
+| 2026-08-10 | 固定性能 runner PATH 修复 | 已验证；首次 run [`31370268438`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31370268438) 在测试开始前因 `bash -lc` 重置 Go 镜像 PATH 失败，未计入验收；改为非登录 `bash -c` 后 run [`31370452806`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31370452806) 完整通过，policy 已锁定该边界。 |
 
 ## 未决与发布阻断项
 
@@ -190,7 +191,7 @@
 2. Cloudflare Sandbox Token 权限、DNS 三种冲突语义、超时补偿和真实外部残留验证。
 3. 使用真实 Cloudflare Sandbox + ACME Staging 完成 DNS-01 传播、TXT 清理、证书原子替换与 Router TLS SNI/Host 热切换；本地 Provider 已实现但未伪造外部成功。
 4. 加密归档备份恢复的 clean-host 灾备演练、生产环境 WAL checkpoint 长时观察和目标磁盘满/时钟偏差故障注入；实现级 disposable Linux 自动化已补齐但不替代目标部署演练。
-5. 1000 Mapping/2000 Domain、200 Mapping、配置同步和会话替换等 PERF-003~007 的目标环境基线；本地开发 profile 已通过，但尚未替代 Linux/生产目标机的容量基线。
+5. 生产部署容量/网络签收：固定 Ubuntu 24.04 Docker 2 vCPU/2 GiB、SQLite WAL profile 已通过 PERF-001/002/003/005/006/007；仍需真实部署环境确认长期容量、磁盘和网络行为。
 6. 生成正式 cosign 签名并完成发布负责人、安全负责人和测试负责人签字；GitHub Actions/CodeQL、SAST/SCA、Secret scan 和 container scan 已在提交 [`2f73156`](https://github.com/sshiong/frp-panel-platform-v3/commit/2f731567da6933d4fc2ae1db333ad9d61fc2ca19) 全绿。
 7. 完成上述 P0/P1 外部验收前，仓库只能作为开发预览，不得声明生产就绪。
 
