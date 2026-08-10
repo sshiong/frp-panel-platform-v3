@@ -88,6 +88,52 @@ paths:
       responses:
         '200': { description: Credential reset result; local session is revoked, content: { application/json: { schema: { $ref: '#/components/schemas/FRPSecretResetResult' } } } }
         '400': { $ref: '#/components/responses/Problem' }
+  /api/v1/cloudflare/status:
+    get:
+      operationId: localCloudflareStatus
+      security: [{ localSession: [] }]
+      responses:
+        '200': { description: Cloudflare credential and capability state, content: { application/json: { schema: { $ref: '#/components/schemas/CloudflareStatus' } } } }
+        '503': { $ref: '#/components/responses/Problem' }
+  /api/v1/cloudflare/token:
+    post:
+      operationId: localSaveCloudflareToken
+      security: [{ localSession: [] }]
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CloudflareTokenRequest' }
+      responses:
+        '202': { description: Token verification queued, content: { application/json: { schema: { $ref: '#/components/schemas/TokenPendingResponse' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: localClearCloudflareToken
+      security: [{ localSession: [] }]
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CloudflareReauthRequest' }
+      responses:
+        '200': { description: Cloudflare credentials retired, content: { application/json: { schema: { $ref: '#/components/schemas/CloudflareTokenClearedResponse' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+  /api/v1/cloudflare/token/activate:
+    post:
+      operationId: localActivateCloudflareToken
+      security: [{ localSession: [] }]
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CloudflareActivationRequest' }
+      responses:
+        '200': { description: Verified Token explicitly activated, content: { application/json: { schema: { $ref: '#/components/schemas/CloudflareTokenActivatedResponse' } } } }
+        '409': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
   /api/v1/session:
     get:
       operationId: localSession
@@ -305,6 +351,9 @@ components:
         client_version: { type: string }
         minimum_client_version: { type: string }
         latest_client_version: { type: string }
+        activation_status: { type: string }
+        token_version: { type: integer, minimum: 1 }
+        impacted_domains: { type: array, items: { $ref: '#/components/schemas/CloudflareDomainImpact' } }
     UserSummary:
       type: object
       required: [id, username, role, status, must_change_password, must_change_username]
@@ -518,6 +567,98 @@ components:
         status: { type: string }
         secret_version: { type: integer, format: int64 }
         session_generation: { type: integer, format: int64 }
+    CloudflareStatus:
+      type: object
+      required: [configured, status, active_token_version]
+      properties:
+        configured: { type: boolean }
+        status: { type: string }
+        token_version: { type: integer, minimum: 1 }
+        active_token_version: { type: integer, minimum: 0 }
+        verified_at: { type: string, format: date-time }
+        activated_at: { type: string, format: date-time }
+        capabilities: { $ref: '#/components/schemas/CloudflareCapabilities' }
+        pending_activation: { $ref: '#/components/schemas/CloudflarePendingActivation' }
+    CloudflareCapabilities:
+      type: object
+      additionalProperties: true
+      properties:
+        token_valid: { type: boolean }
+        zone_read: { type: boolean }
+        dns_read: { type: boolean }
+        dns_write: { type: boolean }
+        dns_write_checked: { type: boolean }
+        missing: { type: array, items: { type: string } }
+    CloudflareDomainImpact:
+      type: object
+      required: [id, hostname, normalized_domain, reason]
+      properties:
+        id: { type: string, format: uuid }
+        hostname: { type: string }
+        normalized_domain: { type: string }
+        reason: { type: string }
+    CloudflarePendingActivation:
+      type: object
+      required: [token_version, impacted_domains, activation_ready]
+      properties:
+        token_version: { type: integer, minimum: 1 }
+        verified_at: { type: string, format: date-time }
+        capabilities: { $ref: '#/components/schemas/CloudflareCapabilities' }
+        impacted_domains: { type: array, items: { $ref: '#/components/schemas/CloudflareDomainImpact' } }
+        activation_ready: { type: boolean }
+    CloudflareTokenRequest:
+      type: object
+      required: [token, reauth_ticket]
+      properties:
+        token: { type: string, minLength: 20, format: password }
+        reauth_ticket: { type: string, minLength: 32 }
+    CloudflareReauthRequest:
+      type: object
+      required: [reauth_ticket]
+      properties:
+        reauth_ticket: { type: string, minLength: 32 }
+    CloudflareActivationRequest:
+      type: object
+      required: [token_version, reauth_ticket]
+      properties:
+        token_version: { type: integer, format: int64, minimum: 1 }
+        confirm_impacts: { type: boolean, default: false }
+        reauth_ticket: { type: string, minLength: 32 }
+    TokenPendingResponse:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [pending] }
+        message: { type: string }
+        request_id: { type: string }
+    CloudflareTokenClearedResponse:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [missing] }
+        message: { type: string }
+        request_id: { type: string }
+    CloudflareTokenActivatedResponse:
+      type: object
+      required: [configured, status, token_version, active_token_version]
+      properties:
+        configured: { type: boolean }
+        status: { type: string, enum: [valid] }
+        token_version: { type: integer, minimum: 1 }
+        active_token_version: { type: integer, minimum: 1 }
+        activated_at: { type: string, format: date-time }
+        impacted_domains: { type: array, items: { $ref: '#/components/schemas/CloudflareDomainImpact' } }
+        confirmed_impacts: { type: boolean }
+        request_id: { type: string }
+    CloudflareActivationConflictResponse:
+      type: object
+      required: [status, token_version, impacted_domains, message]
+      properties:
+        status: { type: string, enum: [confirmation_required] }
+        token_version: { type: integer, minimum: 1 }
+        impacted_domains: { type: array, items: { $ref: '#/components/schemas/CloudflareDomainImpact' } }
+        message: { type: string }
+        request_id: { type: string }
     ConfigSnapshot:
       type: object
       required: [schema_version, config_version, session_generation, payload]

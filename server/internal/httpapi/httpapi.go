@@ -125,9 +125,10 @@ func (a *API) routeTree() chi.Router {
 			r.Post("/session/heartbeat", a.heartbeat)
 			r.Get("/operations", a.operations)
 			r.Post("/operations/{id}/retry", a.retryOperation)
-			r.With(a.requireAdmin).Get("/cloudflare/status", a.cloudflareStatus)
-			r.With(a.requireAdmin).Post("/cloudflare/token", a.cloudflareToken)
-			r.With(a.requireAdmin).Delete("/cloudflare/token", a.clearCloudflare)
+			r.Get("/cloudflare/status", a.cloudflareStatus)
+			r.Post("/cloudflare/token", a.cloudflareToken)
+			r.Post("/cloudflare/token/activate", a.activateCloudflare)
+			r.Delete("/cloudflare/token", a.clearCloudflare)
 			r.Get("/ws", a.websocket)
 			r.Route("/admin", func(r chi.Router) {
 				r.Use(a.requireAdmin)
@@ -1008,6 +1009,44 @@ func (a *API) cloudflareToken(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{"status": "pending", "message": "Token 已加密保存，等待权限验证。"})
 }
 
+func (a *API) activateCloudflare(w http.ResponseWriter, r *http.Request) {
+	if mustChange(w, r, authFrom(r)) {
+		return
+	}
+	var input struct {
+		TokenVersion   int64  `json:"token_version"`
+		ConfirmImpacts bool   `json:"confirm_impacts"`
+		ReauthTicket   string `json:"reauth_ticket"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if input.TokenVersion <= 0 {
+		problem(w, r, http.StatusBadRequest, "CLOUDFLARE_TOKEN_INVALID", "待激活 Token 版本无效。", nil)
+		return
+	}
+	if !a.requireReauthTicket(w, r, input.ReauthTicket) {
+		return
+	}
+	result, err := a.App.ActivateCloudflareToken(r.Context(), authFrom(r), input.TokenVersion, input.ConfirmImpacts, input.ReauthTicket)
+	if err != nil {
+		var conflict *service.CloudflareActivationConflict
+		if errors.As(err, &conflict) {
+			writeProblem(w, r, http.StatusConflict, "CLOUDFLARE_ACTIVATION_CONFIRMATION_REQUIRED", "新 Token 无法访问部分现有域名对应的 Cloudflare Zone，确认前未切换 active Token。", problemDetail{ActivationStatus: "confirmation_required", TokenVersion: conflict.TokenVersion, ImpactedDomains: conflict.Impacts}, err)
+			return
+		}
+		status, code, detail := http.StatusBadRequest, "CLOUDFLARE_TOKEN_ACTIVATION_FAILED", "Cloudflare Token 尚未通过验证，或已失效。"
+		if errors.Is(err, service.ErrReauthRequired) {
+			status, code, detail = http.StatusUnauthorized, "AUTH_REAUTH_REQUIRED", "敏感操作需要先完成二次认证。"
+		} else if errors.Is(err, service.ErrNotFound) {
+			status, code, detail = http.StatusNotFound, "CLOUDFLARE_TOKEN_NOT_FOUND", "待激活 Token 不存在或已失效。"
+		}
+		problem(w, r, status, code, detail, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (a *API) clearCloudflare(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		ReauthTicket string `json:"reauth_ticket"`
@@ -1021,7 +1060,7 @@ func (a *API) clearCloudflare(w http.ResponseWriter, r *http.Request) {
 	if err := a.App.ClearCloudflareToken(r.Context(), authFrom(r), input.ReauthTicket); err != nil {
 		status, code, detail := http.StatusInternalServerError, "CLOUDFLARE_TOKEN_CLEAR_FAILED", "清除 Cloudflare Token 失败。"
 		if errors.Is(err, service.ErrInvalidCredentials) {
-			status, code, detail = http.StatusUnauthorized, "AUTH_INVALID_CREDENTIALS", "当前管理员密码不正确。"
+			status, code, detail = http.StatusUnauthorized, "AUTH_INVALID_CREDENTIALS", "当前密码不正确。"
 		} else if errors.Is(err, service.ErrReauthRequired) {
 			status, code, detail = http.StatusUnauthorized, "AUTH_REAUTH_REQUIRED", "敏感操作需要先完成二次认证。"
 		}
@@ -1665,17 +1704,20 @@ func writeJSON(w http.ResponseWriter, status int, value interface{}) {
 }
 
 type problemDetail struct {
-	Type                 string `json:"type"`
-	Title                string `json:"title"`
-	Status               int    `json:"status"`
-	Detail               string `json:"detail"`
-	Instance             string `json:"instance"`
-	Code                 string `json:"code"`
-	RequestID            string `json:"request_id"`
-	UpgradeRequired      bool   `json:"upgrade_required,omitempty"`
-	ClientVersion        string `json:"client_version,omitempty"`
-	MinimumClientVersion string `json:"minimum_client_version,omitempty"`
-	LatestClientVersion  string `json:"latest_client_version,omitempty"`
+	Type                 string                           `json:"type"`
+	Title                string                           `json:"title"`
+	Status               int                              `json:"status"`
+	Detail               string                           `json:"detail"`
+	Instance             string                           `json:"instance"`
+	Code                 string                           `json:"code"`
+	RequestID            string                           `json:"request_id"`
+	UpgradeRequired      bool                             `json:"upgrade_required,omitempty"`
+	ClientVersion        string                           `json:"client_version,omitempty"`
+	MinimumClientVersion string                           `json:"minimum_client_version,omitempty"`
+	LatestClientVersion  string                           `json:"latest_client_version,omitempty"`
+	ActivationStatus     string                           `json:"activation_status,omitempty"`
+	TokenVersion         int64                            `json:"token_version,omitempty"`
+	ImpactedDomains      []service.CloudflareDomainImpact `json:"impacted_domains,omitempty"`
 }
 
 func problem(w http.ResponseWriter, r *http.Request, status int, code, detail string, err error) {

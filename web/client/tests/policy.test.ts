@@ -18,6 +18,8 @@ test('client domain statuses retain pending and failure semantics', () => {
 test('client dangerous actions and domain prerequisites are explicit', () => {
   assert.equal(isDangerousClientAction('delete_mapping'), true)
   assert.equal(isDangerousClientAction('overwrite_dns'), true)
+  assert.equal(isDangerousClientAction('upload_cloudflare_token'), true)
+  assert.equal(isDangerousClientAction('activate_cloudflare_token'), true)
   assert.equal(isDangerousClientAction('refresh'), false)
   assert.equal(canCreateDomain(1), true)
   assert.equal(canCreateDomain(0), false)

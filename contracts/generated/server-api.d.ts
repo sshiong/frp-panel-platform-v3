@@ -391,6 +391,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/cloudflare/token/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["activateCloudflareToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/router/status": {
         parameters: {
             query?: never;
@@ -604,6 +620,27 @@ export interface components {
             status: "missing";
             message: string;
         };
+        CloudflareTokenActivatedResponse: {
+            request_id: string;
+            /** @constant */
+            configured: true;
+            /** @enum {string} */
+            status: "valid";
+            token_version: number;
+            active_token_version: number;
+            /** Format: date-time */
+            activated_at?: string;
+            impacted_domains?: components["schemas"]["CloudflareDomainImpact"][];
+            confirmed_impacts?: boolean;
+        };
+        CloudflareActivationConflictResponse: {
+            request_id: string;
+            /** @enum {string} */
+            status: "confirmation_required";
+            token_version: number;
+            impacted_domains: components["schemas"]["CloudflareDomainImpact"][];
+            message: string;
+        };
         PendingMessageResponse: {
             request_id: string;
             /** @enum {string} */
@@ -768,9 +805,28 @@ export interface components {
             configured: boolean;
             status: string;
             token_version?: number;
+            active_token_version?: number;
+            /** Format: date-time */
+            verified_at?: string;
+            /** Format: date-time */
+            activated_at?: string;
+            capabilities?: components["schemas"]["CloudflareCapabilities"];
+            pending_activation?: components["schemas"]["CloudflarePendingActivation"];
+        };
+        CloudflarePendingActivation: {
+            token_version: number;
             /** Format: date-time */
             verified_at?: string;
             capabilities?: components["schemas"]["CloudflareCapabilities"];
+            impacted_domains: components["schemas"]["CloudflareDomainImpact"][];
+            activation_ready: boolean;
+        };
+        CloudflareDomainImpact: {
+            /** Format: uuid */
+            id: string;
+            hostname: string;
+            normalized_domain: string;
+            reason: string;
         };
         CloudflareCapabilities: {
             token_valid?: boolean;
@@ -949,6 +1005,9 @@ export interface components {
             client_version?: string;
             minimum_client_version?: string;
             latest_client_version?: string;
+            activation_status?: string;
+            token_version?: number;
+            impacted_domains?: components["schemas"]["CloudflareDomainImpact"][];
         };
     };
     responses: {
@@ -1718,6 +1777,39 @@ export interface operations {
                     "application/json": components["schemas"]["CloudflareTokenClearedResponse"];
                 };
             };
+        };
+    };
+    activateCloudflareToken: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: int64 */
+                    token_version: number;
+                    /** @default false */
+                    confirm_impacts?: boolean;
+                    reauth_ticket: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Verified Token explicitly activated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CloudflareTokenActivatedResponse"];
+                };
+            };
+            409: components["responses"]["Problem"];
         };
     };
     routerStatus: {

@@ -40,6 +40,15 @@ var (
 	ErrReauthRequired     = errors.New("reauthentication required")
 )
 
+type CloudflareActivationConflict struct {
+	TokenVersion int64
+	Impacts      []CloudflareDomainImpact
+}
+
+func (e *CloudflareActivationConflict) Error() string {
+	return "cloudflare token activation requires domain access confirmation"
+}
+
 type App struct {
 	DB                   *db.DB
 	Config               config.Config
@@ -1869,19 +1878,29 @@ func (a *App) enqueueUserDeleteJob(ctx context.Context, userID, operationID stri
 }
 
 func (a *App) CloudflareStatus(ctx context.Context, userID string) (map[string]interface{}, error) {
+	var activeVersion sql.NullInt64
+	if err := a.DB.QueryRowContext(ctx, `SELECT active_cloudflare_token_version FROM users WHERE id=?`, userID).Scan(&activeVersion); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
 	var status string
 	var version int
-	var verified, capabilitiesJSON string
-	err := a.DB.QueryRowContext(ctx, `SELECT status,token_version,COALESCE(verified_at,''),COALESCE(capabilities_json,'{}') FROM cloudflare_credentials WHERE user_id=? AND status <> 'retired' ORDER BY token_version DESC LIMIT 1`, userID).Scan(&status, &version, &verified, &capabilitiesJSON)
+	var verified, activated, capabilitiesJSON, impactsJSON string
+	err := a.DB.QueryRowContext(ctx, `SELECT status,token_version,COALESCE(verified_at,''),COALESCE(activated_at,''),COALESCE(capabilities_json,'{}'),COALESCE(impact_domains_json,'[]') FROM cloudflare_credentials WHERE user_id=? AND status <> 'retired' ORDER BY token_version DESC LIMIT 1`, userID).Scan(&status, &version, &verified, &activated, &capabilitiesJSON, &impactsJSON)
 	if errors.Is(err, sql.ErrNoRows) {
-		return map[string]interface{}{"configured": false, "status": "missing"}, nil
+		return map[string]interface{}{"configured": false, "status": "missing", "active_token_version": 0}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
 	capabilities := map[string]interface{}{}
 	_ = json.Unmarshal([]byte(capabilitiesJSON), &capabilities)
-	return map[string]interface{}{"configured": true, "status": status, "token_version": version, "verified_at": verified, "capabilities": capabilities}, nil
+	impacts := []CloudflareDomainImpact{}
+	_ = json.Unmarshal([]byte(impactsJSON), &impacts)
+	result := map[string]interface{}{"configured": true, "status": status, "token_version": version, "active_token_version": activeVersion.Int64, "verified_at": verified, "activated_at": activated, "capabilities": capabilities}
+	if status == "verified_pending" {
+		result["pending_activation"] = map[string]interface{}{"token_version": version, "verified_at": verified, "capabilities": capabilities, "impacted_domains": impacts, "activation_ready": len(impacts) == 0}
+	}
+	return result, nil
 }
 
 func (a *App) SaveCloudflareToken(ctx context.Context, ac AuthContext, token string, reauthProof ...string) error {
@@ -1905,6 +1924,9 @@ func (a *App) SaveCloudflareToken(ctx context.Context, ac AuthContext, token str
 	// Keep the previous active credential until the new pending version has
 	// completed capability verification. A failed replacement must not take a
 	// working DNS integration offline.
+	if _, err = a.DB.ExecContext(ctx, `UPDATE cloudflare_credentials SET status='retired',retired_at=? WHERE user_id=? AND status IN ('pending','verified_pending')`, now, ac.UserID); err != nil {
+		return err
+	}
 	_, err = a.DB.ExecContext(ctx, `INSERT INTO cloudflare_credentials(id,user_id,token_version,ciphertext,nonce,key_version,status,capabilities_json,created_at) VALUES(?,?,?,?,?,?,?,'{}',?)`, id.New(), ac.UserID, next, ciphertext, nonce, a.Crypto.CurrentMasterKeyVersion(), "pending", now)
 	if err == nil {
 		_ = a.Audit(ctx, ac, "cloudflare_token_uploaded", "cloudflare_token", fmt.Sprint(next), "pending", nil, "")
@@ -1922,9 +1944,70 @@ func (a *App) ClearCloudflareToken(ctx context.Context, ac AuthContext, currentP
 	}
 	_, err := a.DB.ExecContext(ctx, `UPDATE cloudflare_credentials SET status='retired',retired_at=? WHERE user_id=? AND status <> 'retired'`, nowString(), ac.UserID)
 	if err == nil {
+		_, err = a.DB.ExecContext(ctx, `UPDATE users SET active_cloudflare_token_version=NULL,updated_at=? WHERE id=?`, nowString(), ac.UserID)
+	}
+	if err == nil {
 		_ = a.Audit(ctx, ac, "cloudflare_token_cleared", "cloudflare_token", ac.UserID, "success", nil, "")
 	}
 	return err
+}
+
+// ActivateCloudflareToken is the explicit user confirmation boundary for a
+// verified replacement. Verification never changes the active credential;
+// activation re-checks provider access immediately before switching it.
+func (a *App) ActivateCloudflareToken(ctx context.Context, ac AuthContext, version int64, confirmImpacts bool, reauthProof ...string) (map[string]interface{}, error) {
+	proof := ""
+	if len(reauthProof) > 0 {
+		proof = reauthProof[0]
+	}
+	if err := a.requireReauth(ctx, ac, proof); err != nil {
+		return nil, err
+	}
+	var credentialID string
+	var ciphertext, nonce []byte
+	var keyVersion int64
+	if err := a.DB.QueryRowContext(ctx, `SELECT id,ciphertext,nonce,key_version FROM cloudflare_credentials WHERE user_id=? AND token_version=? AND status='verified_pending'`, ac.UserID, version).Scan(&credentialID, &ciphertext, &nonce, &keyVersion); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	token, err := a.Crypto.DecryptVersioned(keyVersion, ciphertext, nonce, "user:"+ac.UserID+":cloudflare_token:v1")
+	if err != nil {
+		return nil, err
+	}
+	provider := a.cloudflareProvider(string(token))
+	impacts, err := a.cloudflareDomainImpacts(ctx, ac.UserID, provider)
+	if err != nil {
+		return nil, err
+	}
+	impactJSON, _ := json.Marshal(impacts)
+	if _, err := a.DB.ExecContext(ctx, `UPDATE cloudflare_credentials SET impact_domains_json=? WHERE id=?`, string(impactJSON), credentialID); err != nil {
+		return nil, err
+	}
+	if len(impacts) > 0 && !confirmImpacts {
+		return nil, &CloudflareActivationConflict{TokenVersion: version, Impacts: impacts}
+	}
+	now := nowString()
+	tx, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `UPDATE cloudflare_credentials SET status='retired',retired_at=? WHERE user_id=? AND status='valid' AND token_version <> ?`, now, ac.UserID, version); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE cloudflare_credentials SET status='valid',activated_at=?,impact_domains_json='[]' WHERE id=? AND status='verified_pending'`, now, credentialID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET active_cloudflare_token_version=?,updated_at=? WHERE id=?`, version, now, ac.UserID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	_ = a.Audit(ctx, ac, "cloudflare_token_activated", "cloudflare_token", fmt.Sprint(version), "success", map[string]interface{}{"impact_domain_count": len(impacts), "confirmed_impacts": confirmImpacts}, "")
+	return map[string]interface{}{"configured": true, "status": "valid", "token_version": version, "active_token_version": version, "activated_at": now, "impacted_domains": impacts, "confirmed_impacts": confirmImpacts}, nil
 }
 
 // AuthorizeFRP is the fail-closed boundary used by the FRPS plugin. It intentionally

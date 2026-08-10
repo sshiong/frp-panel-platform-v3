@@ -17,7 +17,7 @@ func TestOpenAppliesWALAndAllMigrations(t *testing.T) {
 	}
 	defer database.Close()
 	var migrations int
-	if err := database.QueryRow(`SELECT COUNT(1) FROM schema_migrations`).Scan(&migrations); err != nil || migrations != 7 {
+	if err := database.QueryRow(`SELECT COUNT(1) FROM schema_migrations`).Scan(&migrations); err != nil || migrations != 8 {
 		t.Fatalf("migrations=%d err=%v", migrations, err)
 	}
 	for _, table := range []string{"certificates", "router_snapshots", "router_state", "jobs", "external_residues"} {
@@ -50,7 +50,7 @@ func TestMigrationUpgradeFromPreviousStableBackup(t *testing.T) {
 	if err := database.QueryRow(`SELECT COUNT(1) FROM schema_migrations`).Scan(&migrations); err != nil {
 		t.Fatal(err)
 	}
-	if migrations != 7 {
+	if migrations != 8 {
 		t.Fatalf("stable backup was not upgraded: migrations=%d", migrations)
 	}
 	var triggerName string

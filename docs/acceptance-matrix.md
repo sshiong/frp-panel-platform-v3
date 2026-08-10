@@ -126,11 +126,11 @@ release checkout，并要求该性能门禁先于外部证据与签名。该记�
 
 | ID | 状态 | 实际结果与证据 |
 |---|---|---|
-| CF-001 | 本地通过 | Token API 只返回 configured/status/version，不返回明文。 |
+| CF-001 | 本地通过 | Server/Client Token API 只返回 configured/status/version/capabilities/影响域名，不返回明文；Client 代理不缓存 Token。 |
 | CF-002 | 本地通过 | AES-256-GCM、随机 nonce、AAD、key_version 测试通过。 |
 | CF-003 | 本地通过 | 日志/审计/trace 脱敏和 Secret scan 通过。 |
 | CF-004 | 本地通过 | 401/403 权限错误返回缺少 capability 信息。 |
-| CF-005 | 本地通过 | 新 Token pending 验证失败时旧 Token 保持 active。 |
+| CF-005 | 本地通过 | 新 Token 经 `pending → verified_pending` 验证；验证失败或未确认时旧 Token 保持 active，确认后才原子切换 active，并记录失去 Zone 访问的域名。 |
 | CF-006 | 本地通过 | UI 三秒倒计时、reauth ticket 和删除语义测试通过。 |
 | CF-007 | 部分通过 | Job blocked/retry 状态已实现；真实 Provider 停止/阻塞待 Sandbox。 |
 | TLS-001 | 本地通过 | UI、API、服务层、SQLite CHECK/trigger 同时拒绝非法模式。 |
@@ -204,9 +204,9 @@ release checkout，并要求该性能门禁先于外部证据与签名。该记�
 | UI-001 | 本地通过 | Admin/Client 登录字段、路由和组件完全独立；390×844 Playwright 检查通过。 |
 | UI-002 | 本地通过 | 删除、Token 清除、凭证重置、DNS 冲突均有统一确认、reauth/倒计时和防重复提交。 |
 | UI-003 | 本地通过 | reserved/pending/running/offline/error 文案和状态色分离。 |
-| UI-004 | 本地通过 | Cloudflare capability missing 列表在 Admin UI 展示。 |
+| UI-004 | 本地通过 | Cloudflare capability missing 列表在 Admin/Client UI 展示，普通用户可查看自己的 Token 状态。 |
 | UI-005 | 本地通过 | DNS adopt/overwrite/cancel 与 managed/adopted 文案一致。 |
-| UI-006 | 本地通过 | Token 页面只显示 configured/status/version/verified_at。 |
+| UI-006 | 本地通过 | Client Token 页面只显示 configured/status/version/verified_at/capabilities/影响域名，上传、激活、清除均需在线和 reauth。 |
 | UI-007 | 本地/CI 通过 | Admin/Client 构建后运行 axe WCAG 2.1 AA、表单标签、键盘 Tab/reduced-motion、390px 无横向溢出检查均通过；导航按钮有唯一 `aria-current="page"`，所有按钮显式声明 `type`；PR #2 的 `web (admin)` 与 `web (client)` 门禁通过。 |
 | UI-008 | 本地通过 | Operations 展示阶段、步骤、失败原因、residue 和 retry。 |
 | DOD-001 | 待外部 | 所有 P0/P1 尚未完成真实 Cloudflare、ACME、Linux/FRP、灾备和签字，因此当前版本不是 Release Candidate。 |

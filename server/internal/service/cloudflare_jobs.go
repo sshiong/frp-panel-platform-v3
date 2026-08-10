@@ -17,6 +17,13 @@ import (
 	"github.com/ricardo/frp-panel-platform/server/internal/providers/cloudflare"
 )
 
+type CloudflareDomainImpact struct {
+	ID               string `json:"id"`
+	Hostname         string `json:"hostname"`
+	NormalizedDomain string `json:"normalized_domain"`
+	Reason           string `json:"reason"`
+}
+
 // RunJobs starts the Server Panel's durable external-operation worker. The
 // worker owns no SQLite write transaction while calling Cloudflare.
 func (a *App) RunJobs(ctx context.Context) error {
@@ -453,26 +460,72 @@ func (a *App) verifyCloudflareToken(ctx context.Context, job jobs.Job) error {
 		return err
 	}
 	encoded, _ := json.Marshal(capabilities)
-	status := "valid"
+	status := "verified_pending"
 	if !capabilities.TokenValid {
 		status = "invalid"
 	} else if len(capabilities.Missing) > 0 {
 		status = "permission_denied"
 	}
-	now := nowString()
-	if status == "valid" {
-		_, err = a.DB.ExecContext(ctx, `UPDATE cloudflare_credentials SET status='retired',retired_at=? WHERE user_id=? AND status='valid' AND token_version <> ?`, now, userID, version)
-		if err == nil {
-			_, err = a.DB.ExecContext(ctx, `UPDATE users SET active_cloudflare_token_version=?,updated_at=? WHERE id=?`, version, now, userID)
+	impacts := []CloudflareDomainImpact{}
+	if status == "verified_pending" {
+		impacts, err = a.cloudflareDomainImpacts(ctx, userID, provider)
+		if err != nil {
+			return err
 		}
 	}
+	impactJSON, _ := json.Marshal(impacts)
+	now := nowString()
 	if err == nil {
-		_, err = a.DB.ExecContext(ctx, `UPDATE cloudflare_credentials SET status=?,capabilities_json=?,verified_at=?,activated_at=CASE WHEN ?='valid' THEN ? ELSE activated_at END WHERE id=?`, status, string(encoded), now, status, now, credentialID)
+		_, err = a.DB.ExecContext(ctx, `UPDATE cloudflare_credentials SET status=?,capabilities_json=?,impact_domains_json=?,verified_at=? WHERE id=?`, status, string(encoded), string(impactJSON), now, credentialID)
 	}
 	if err == nil {
-		_ = a.Audit(ctx, AuthContext{UserID: userID, Role: "system"}, "cloudflare_token_verified", "cloudflare_token", fmt.Sprint(version), status, map[string]interface{}{"token_status": status}, "")
+		_ = a.Audit(ctx, AuthContext{UserID: userID, Role: "system"}, "cloudflare_token_verified", "cloudflare_token", fmt.Sprint(version), status, map[string]interface{}{"token_status": status, "impact_domain_count": len(impacts)}, "")
 	}
 	return err
+}
+
+func (a *App) cloudflareDomainImpacts(ctx context.Context, userID string, provider *cloudflare.HTTPProvider) ([]CloudflareDomainImpact, error) {
+	zones := make([]cloudflare.Zone, 0)
+	for page := 1; ; page++ {
+		pageZones, more, err := provider.ListZones(ctx, page)
+		if err != nil {
+			return nil, err
+		}
+		zones = append(zones, pageZones...)
+		if !more {
+			break
+		}
+	}
+	rows, err := a.DB.QueryContext(ctx, `SELECT b.id,b.hostname,b.normalized_domain,COALESCE(b.zone_id,'') FROM domain_bindings b WHERE b.user_id=? AND b.status <> 'deleted' ORDER BY b.created_at`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	impacts := make([]CloudflareDomainImpact, 0)
+	for rows.Next() {
+		var impact CloudflareDomainImpact
+		var zoneID string
+		if err := rows.Scan(&impact.ID, &impact.Hostname, &impact.NormalizedDomain, &zoneID); err != nil {
+			return nil, err
+		}
+		if zoneID != "" {
+			accessible := false
+			for _, zone := range zones {
+				if zone.ID == zoneID {
+					accessible = true
+					break
+				}
+			}
+			if accessible {
+				continue
+			}
+		} else if _, ok := cloudflare.MatchZone(impact.NormalizedDomain, zones); ok {
+			continue
+		}
+		impact.Reason = "new Token cannot access the Cloudflare Zone currently used by this domain"
+		impacts = append(impacts, impact)
+	}
+	return impacts, rows.Err()
 }
 
 func (a *App) syncDomainDNS(ctx context.Context, job jobs.Job) error {

@@ -3,6 +3,7 @@
 - Passwords use Argon2id with a per-password salt and versioned encoded parameters.
 - Server Sessions are opaque random values; only their SHA-256 hashes are stored. Browser storage never receives a Server Session.
 - Cloudflare Tokens are encrypted with AES-256-GCM using a purpose-specific AAD. They are never returned by API responses or written to logs.
+- Cloudflare Token upload follows `Client Panel → HTTPS → Server Panel`; the Client accepts the opaque value only in memory, does not include it in local cache/log responses, and exposes only status/capability/impact metadata after the request.
 - Config snapshots use a distinct Ed25519 signing key. Certificate wrapping, Router snapshot HMAC, Session handling, and backup password derivation use separate purposes.
 - Server startup creates `router-snapshot.key` and `certificate-wrapping.key` separately from `server-master.key` and the Ed25519 signing key. Certificate private keys use only the certificate wrapping key; Router snapshots use only the Router HMAC key.
 - Encryption keys use a versioned key ring. `make key-rotate` (with the Server process drained) creates the next master and certificate-wrapping versions, re-wraps FRP credentials, Cloudflare Tokens, and certificate private keys in one SQLite transaction, and retains old versions for restart/rollback compatibility. The command prints row counts; release operators must still complete the environment rotation rehearsal and sign-off.

@@ -63,6 +63,10 @@ func (a *API) routeTree() chi.Router {
 		r.Post("/api/v1/password", a.password)
 		r.Post("/api/v1/reauth", a.reauth)
 		r.Post("/api/v1/frp-credential/reset", a.resetFRPCredential)
+		r.Get("/api/v1/cloudflare/status", a.cloudflareStatus)
+		r.Post("/api/v1/cloudflare/token", a.cloudflareToken)
+		r.Post("/api/v1/cloudflare/token/activate", a.activateCloudflare)
+		r.Delete("/api/v1/cloudflare/token", a.clearCloudflare)
 		r.Get("/api/v1/session", a.session)
 		r.Get("/api/v1/dashboard", a.dashboard)
 		r.Get("/api/v1/mappings", a.mappings)
@@ -326,6 +330,71 @@ func (a *API) reauth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, response)
+}
+
+func (a *API) cloudflareStatus(w http.ResponseWriter, r *http.Request) {
+	var output interface{}
+	if err := a.App.Proxy(r.Context(), "GET", "/api/v1/cloudflare/status", nil, "", &output); err != nil {
+		problem(w, r, 503, "SERVER_UNAVAILABLE", "Server Panel 暂不可达，无法读取 Cloudflare Token 状态。")
+		return
+	}
+	a.markDataSource(w)
+	writeJSON(w, 200, output)
+}
+
+func (a *API) cloudflareToken(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Token        string `json:"token"`
+		ReauthTicket string `json:"reauth_ticket"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	var output interface{}
+	if err := a.App.Proxy(r.Context(), "POST", "/api/v1/cloudflare/token", input, r.Header.Get("X-CSRF-Token"), &output, r.Header.Get("Idempotency-Key")); err != nil {
+		// Never forward the remote error detail for a request that contained the
+		// opaque provider Token; the local boundary is deliberately redacted.
+		problem(w, r, 400, "CLOUDFLARE_TOKEN_UPLOAD_FAILED", "Cloudflare Token 未能提交到 Server Panel。")
+		return
+	}
+	writeJSON(w, 202, output)
+}
+
+func (a *API) activateCloudflare(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		TokenVersion   int64  `json:"token_version"`
+		ConfirmImpacts bool   `json:"confirm_impacts"`
+		ReauthTicket   string `json:"reauth_ticket"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	var output interface{}
+	if err := a.App.Proxy(r.Context(), "POST", "/api/v1/cloudflare/token/activate", input, r.Header.Get("X-CSRF-Token"), &output, r.Header.Get("Idempotency-Key")); err != nil {
+		var remote app.RemoteError
+		if errors.As(err, &remote) && remote.Status == http.StatusConflict {
+			problem(w, r, http.StatusConflict, "CLOUDFLARE_ACTIVATION_CONFIRMATION_REQUIRED", "新 Token 无法访问部分已有域名，激活前需要重新检查域名影响。", err)
+			return
+		}
+		problem(w, r, 400, "CLOUDFLARE_TOKEN_ACTIVATION_FAILED", "Cloudflare Token 尚未激活。", err)
+		return
+	}
+	writeJSON(w, 200, output)
+}
+
+func (a *API) clearCloudflare(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		ReauthTicket string `json:"reauth_ticket"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	var output interface{}
+	if err := a.App.Proxy(r.Context(), "DELETE", "/api/v1/cloudflare/token", input, r.Header.Get("X-CSRF-Token"), &output, r.Header.Get("Idempotency-Key")); err != nil {
+		problem(w, r, 400, "CLOUDFLARE_TOKEN_CLEAR_FAILED", "Cloudflare Token 未能清除。", err)
+		return
+	}
+	writeJSON(w, 200, output)
 }
 
 func (a *API) resetFRPCredential(w http.ResponseWriter, r *http.Request) {

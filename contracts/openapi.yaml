@@ -506,6 +506,30 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/CloudflareTokenClearedResponse' }
+  /api/v1/cloudflare/token/activate:
+    post:
+      operationId: activateCloudflareToken
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token_version, reauth_ticket]
+              properties:
+                token_version: { type: integer, format: int64, minimum: 1 }
+                confirm_impacts: { type: boolean, default: false }
+                reauth_ticket: { type: string, minLength: 32 }
+      responses:
+        '200':
+          description: Verified Token explicitly activated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CloudflareTokenActivatedResponse' }
+        '409': { $ref: '#/components/responses/Problem' }
   /api/v1/admin/router/status:
     get:
       operationId: routerStatus
@@ -806,6 +830,29 @@ components:
         request_id: { type: string }
         status: { type: string, enum: [missing] }
         message: { type: string }
+    CloudflareTokenActivatedResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, configured, status, token_version, active_token_version]
+      properties:
+        request_id: { type: string }
+        configured: { type: boolean, const: true }
+        status: { type: string, enum: [valid] }
+        token_version: { type: integer, minimum: 1 }
+        active_token_version: { type: integer, minimum: 1 }
+        activated_at: { type: string, format: date-time }
+        impacted_domains: { type: array, items: { $ref: '#/components/schemas/CloudflareDomainImpact' } }
+        confirmed_impacts: { type: boolean }
+    CloudflareActivationConflictResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, status, token_version, impacted_domains, message]
+      properties:
+        request_id: { type: string }
+        status: { type: string, enum: [confirmation_required] }
+        token_version: { type: integer, minimum: 1 }
+        impacted_domains: { type: array, items: { $ref: '#/components/schemas/CloudflareDomainImpact' } }
+        message: { type: string }
     PendingMessageResponse:
       type: object
       additionalProperties: false
@@ -1014,8 +1061,30 @@ components:
         configured: { type: boolean }
         status: { type: string }
         token_version: { type: integer, minimum: 1 }
+        active_token_version: { type: integer, minimum: 0 }
+        verified_at: { type: string, format: date-time }
+        activated_at: { type: string, format: date-time }
+        capabilities: { $ref: '#/components/schemas/CloudflareCapabilities' }
+        pending_activation: { $ref: '#/components/schemas/CloudflarePendingActivation' }
+    CloudflarePendingActivation:
+      type: object
+      additionalProperties: false
+      required: [token_version, impacted_domains, activation_ready]
+      properties:
+        token_version: { type: integer, minimum: 1 }
         verified_at: { type: string, format: date-time }
         capabilities: { $ref: '#/components/schemas/CloudflareCapabilities' }
+        impacted_domains: { type: array, items: { $ref: '#/components/schemas/CloudflareDomainImpact' } }
+        activation_ready: { type: boolean }
+    CloudflareDomainImpact:
+      type: object
+      additionalProperties: false
+      required: [id, hostname, normalized_domain, reason]
+      properties:
+        id: { type: string, format: uuid }
+        hostname: { type: string }
+        normalized_domain: { type: string }
+        reason: { type: string }
     CloudflareCapabilities:
       type: object
       additionalProperties: true
@@ -1169,3 +1238,6 @@ components:
         client_version: { type: string }
         minimum_client_version: { type: string }
         latest_client_version: { type: string }
+        activation_status: { type: string }
+        token_version: { type: integer, minimum: 1 }
+        impacted_domains: { type: array, items: { $ref: '#/components/schemas/CloudflareDomainImpact' } }

@@ -100,6 +100,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/cloudflare/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["localCloudflareStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cloudflare/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["localSaveCloudflareToken"];
+        delete: operations["localClearCloudflareToken"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cloudflare/token/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["localActivateCloudflareToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/session": {
         parameters: {
             query?: never;
@@ -343,6 +391,9 @@ export interface components {
             client_version?: string;
             minimum_client_version?: string;
             latest_client_version?: string;
+            activation_status?: string;
+            token_version?: number;
+            impacted_domains?: components["schemas"]["CloudflareDomainImpact"][];
         };
         UserSummary: {
             /** Format: uuid */
@@ -563,6 +614,90 @@ export interface components {
             secret_version: number;
             /** Format: int64 */
             session_generation: number;
+        };
+        CloudflareStatus: {
+            configured: boolean;
+            status: string;
+            token_version?: number;
+            active_token_version: number;
+            /** Format: date-time */
+            verified_at?: string;
+            /** Format: date-time */
+            activated_at?: string;
+            capabilities?: components["schemas"]["CloudflareCapabilities"];
+            pending_activation?: components["schemas"]["CloudflarePendingActivation"];
+        };
+        CloudflareCapabilities: {
+            token_valid?: boolean;
+            zone_read?: boolean;
+            dns_read?: boolean;
+            dns_write?: boolean;
+            dns_write_checked?: boolean;
+            missing?: string[];
+        } & {
+            [key: string]: unknown;
+        };
+        CloudflareDomainImpact: {
+            /** Format: uuid */
+            id: string;
+            hostname: string;
+            normalized_domain: string;
+            reason: string;
+        };
+        CloudflarePendingActivation: {
+            token_version: number;
+            /** Format: date-time */
+            verified_at?: string;
+            capabilities?: components["schemas"]["CloudflareCapabilities"];
+            impacted_domains: components["schemas"]["CloudflareDomainImpact"][];
+            activation_ready: boolean;
+        };
+        CloudflareTokenRequest: {
+            /** Format: password */
+            token: string;
+            reauth_ticket: string;
+        };
+        CloudflareReauthRequest: {
+            reauth_ticket: string;
+        };
+        CloudflareActivationRequest: {
+            /** Format: int64 */
+            token_version: number;
+            /** @default false */
+            confirm_impacts: boolean;
+            reauth_ticket: string;
+        };
+        TokenPendingResponse: {
+            /** @enum {string} */
+            status: "pending";
+            message?: string;
+            request_id?: string;
+        };
+        CloudflareTokenClearedResponse: {
+            /** @enum {string} */
+            status: "missing";
+            message?: string;
+            request_id?: string;
+        };
+        CloudflareTokenActivatedResponse: {
+            configured: boolean;
+            /** @enum {string} */
+            status: "valid";
+            token_version: number;
+            active_token_version: number;
+            /** Format: date-time */
+            activated_at?: string;
+            impacted_domains?: components["schemas"]["CloudflareDomainImpact"][];
+            confirmed_impacts?: boolean;
+            request_id?: string;
+        };
+        CloudflareActivationConflictResponse: {
+            /** @enum {string} */
+            status: "confirmation_required";
+            token_version: number;
+            impacted_domains: components["schemas"]["CloudflareDomainImpact"][];
+            message: string;
+            request_id?: string;
         };
         ConfigSnapshot: {
             schema_version: string;
@@ -787,6 +922,109 @@ export interface operations {
                 };
             };
             400: components["responses"]["Problem"];
+        };
+    };
+    localCloudflareStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cloudflare credential and capability state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CloudflareStatus"];
+                };
+            };
+            503: components["responses"]["Problem"];
+        };
+    };
+    localSaveCloudflareToken: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CloudflareTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description Token verification queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenPendingResponse"];
+                };
+            };
+            400: components["responses"]["Problem"];
+        };
+    };
+    localClearCloudflareToken: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CloudflareReauthRequest"];
+            };
+        };
+        responses: {
+            /** @description Cloudflare credentials retired */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CloudflareTokenClearedResponse"];
+                };
+            };
+            400: components["responses"]["Problem"];
+        };
+    };
+    localActivateCloudflareToken: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CloudflareActivationRequest"];
+            };
+        };
+        responses: {
+            /** @description Verified Token explicitly activated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CloudflareTokenActivatedResponse"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
         };
     };
     localSession: {

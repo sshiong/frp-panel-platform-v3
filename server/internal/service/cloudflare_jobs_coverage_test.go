@@ -116,6 +116,9 @@ func TestCloudflareJobsCoverageFailureRecoveryAndACME(t *testing.T) {
 	if err := app.Jobs.Complete(ctx, tokenJob.ID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := app.ActivateCloudflareToken(ctx, fixture.client, 1, false, ticket); err != nil {
+		t.Fatalf("Cloudflare token activation: %v", err)
+	}
 
 	mapping, err := app.CreateMapping(ctx, fixture.client, MappingRequest{Name: "jobs-http", ProxyType: "http", LocalIP: "127.0.0.1", LocalPort: 8130}, "jobs-http-map-000001")
 	if err != nil {
