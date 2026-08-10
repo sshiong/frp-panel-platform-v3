@@ -215,7 +215,15 @@ function accessibleName(element) {
   return element.getAttribute('aria-label') || element.getAttribute('title') || element.textContent?.trim() || ''
 }
 
+async function assertButtonTypes(page, appName) {
+  const violations = await page.evaluate(() => [...document.querySelectorAll('button')]
+    .filter((button) => !button.hasAttribute('type'))
+    .map((button) => button.outerHTML.slice(0, 240)))
+  if (violations.length > 0) throw new Error(`${appName}: buttons must declare an explicit type: ${JSON.stringify(violations)}`)
+}
+
 async function assertKeyboardAndLabels(page, appName) {
+  await assertButtonTypes(page, appName)
   const violations = await page.evaluate(() => {
     const controls = [...document.querySelectorAll('button, input, select, textarea, a, [role="button"], [tabindex]:not([tabindex="-1"])')]
     return controls.flatMap((element) => {
