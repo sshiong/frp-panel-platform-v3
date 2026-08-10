@@ -336,6 +336,7 @@ def run_external_acceptance
 
 if ENV.fetch("EXTERNAL_ACCEPTANCE_LOCAL", "1") != "0"
   collector.run("local-contract", "完整本地契约与实现门禁", ["make", "contract"])
+  collector.run("acceptance-evidence", "141 项标准验收证据索引", ["make", "acceptance-evidence"])
   collector.run("local-migration", "空库与上一稳定版 Migration", ["make", "migration-check"])
   collector.run("local-security", "Secret 扫描与安全策略", ["make", "security"])
   collector.run("local-license", "依赖 SPDX 许可证策略", ["make", "license"])

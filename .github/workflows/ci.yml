@@ -67,6 +67,19 @@ jobs:
       - run: ruby scripts/openapi-client-policy.rb
       - run: ruby scripts/openapi-metadata-policy.rb
       - run: ruby scripts/acceptance-matrix-policy.rb
+      - run: ruby scripts/acceptance-evidence.rb --check
+      - run: ruby scripts/test-acceptance-evidence.rb
+      - name: Generate acceptance evidence index
+        run: make acceptance-evidence
+      - name: Upload acceptance evidence index
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-evidence-${{ github.sha }}
+          path: |
+            output/acceptance-evidence.json
+            output/acceptance-evidence/
+          if-no-files-found: error
+          retention-days: 14
       - run: ruby -c scripts/external-acceptance.rb
       - run: ruby scripts/test-external-acceptance.rb
       - run: ruby scripts/release-workflow-policy.rb

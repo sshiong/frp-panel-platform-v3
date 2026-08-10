@@ -14,6 +14,17 @@ writes a redacted, mode `0600` report to
 `output/external-acceptance.json` (or `EXTERNAL_ACCEPTANCE_REPORT`) and prints
 the same JSON to stdout.
 
+Before the external steps, the collector also runs `make acceptance-evidence`.
+That command writes `output/acceptance-evidence.json` plus one mode `0600`
+traceability log per standard item. The index contains all 141 standard
+acceptance IDs and the derived `DOD-001` row, with the required environment,
+steps, expected, actual, artifacts, operator, and execution-time fields. Its
+overall status remains `blocked` whenever the matrix contains `部分通过` or
+`待外部`; it is a traceability record only and never replaces the underlying
+test logs, external request IDs, screenshots, or release-owner review.
+The contract job validates the index schema, and CI uploads the generated
+index as a 14-day artifact for the exact checkout revision.
+
 Every collector step also records the acceptance evidence fields required by
 the standard: `environment`, `steps`, `expected`, `actual`, `artifacts`,
 `operator`, and `executed_at`. Redacted command output is written as a separate

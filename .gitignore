@@ -21,3 +21,5 @@ client/client
 server/frp-panel-server
 client/frp-panel-client
 output/external-acceptance.json
+output/acceptance-evidence.json
+output/acceptance-evidence/

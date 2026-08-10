@@ -22,6 +22,11 @@ profile 与固定 Linux 2 vCPU/2 GiB 目标基线。该 revision 的
 `output/external-acceptance.json` 的 40 位 commit 字段始终是当前工作树验收报告的权威绑定；
 阻断项仍严格限于真实 Provider、目标环境、正式签名和负责人签字，不改变下方逐项状态的外部证据要求。
 
+逐项可追溯性索引由 `make acceptance-evidence` 生成：它覆盖 141 个标准条目和
+一个派生的 `DOD-001` 记录，并为每项保存标准要求、矩阵实际结果、环境、步骤、
+证据日志、执行人和时间。索引的 `blocked` 状态只反映当前矩阵仍有外部依赖，
+不会把本地结果或索引生成动作当作正式发布通过。
+
 发布 workflow 加固 revision [`639a184`](https://github.com/sshiong/frp-panel-platform-v3/commit/639a18483054072b9e273a09323fbaf872b1c0f2)
 已通过 [`ci run 31371628773`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31371628773)
 与 [`CodeQL run 31371628772`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31371628772)；它将固定性能脚本绑定到
