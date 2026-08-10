@@ -129,8 +129,8 @@ provide a redacted machine-readable evidence bundle:
     "REL-005": {"status": "passed", "environment": {"os": "Ubuntu 24.04", "disk": "disposable WAL fixture"}, "steps": ["Apply WAL pressure and checkpoint recovery"], "expected": "The service remains recoverable and reports the pressure", "actual": "Checkpoint and restart completed without data loss", "artifacts": {"logs": ["secure/REL-005.log"], "screenshots": [], "request_ids": []}, "operator": "release-operator", "executed_at": "2026-08-03T00:00:00Z"},
     "REL-007": {"status": "passed", "environment": {"os": "Ubuntu 24.04", "disk": "quota-limited disposable volume"}, "steps": ["Inject disk-full during backup and restore"], "expected": "The operation fails safely and leaves recoverable state", "actual": "Disk-full paths returned bounded errors and preserved the last good state", "artifacts": {"logs": ["secure/REL-007.log"], "screenshots": [], "request_ids": []}, "operator": "release-operator", "executed_at": "2026-08-03T00:00:00Z"},
     "REL-008": {"status": "passed", "environment": {"os": "Ubuntu 24.04", "clock": "isolated skewed clock"}, "steps": ["Inject forward and backward clock skew"], "expected": "Leases, retries, and certificates fail safe under skew", "actual": "Clock-skew cases remained bounded and recoverable", "artifacts": {"logs": ["secure/REL-008.log"], "screenshots": [], "request_ids": []}, "operator": "release-operator", "executed_at": "2026-08-03T00:00:00Z"},
-    "SEC-008": {"status": "passed", "environment": {"registry": "isolated artifact registry", "signer": "cosign test identity"}, "steps": ["Sign the tag and verify the attestation"], "expected": "The release artifact has a verifiable signature and provenance", "actual": "Cosign verification and tag attestation passed", "artifacts": {"logs": ["secure/SEC-008.log"], "screenshots": [], "request_ids": []}, "operator": "security-operator", "executed_at": "2026-08-03T00:00:00Z"},
-    "DOD-001": {"status": "passed", "environment": {"review": "release review record"}, "steps": ["Collect release, security, and test-owner approvals"], "expected": "All three required owners sign the same evidence revision", "actual": "Three-owner sign-off recorded", "artifacts": {"logs": ["secure/DOD-001-signoff.log"], "screenshots": [], "request_ids": []}, "operator": "release-manager", "executed_at": "2026-08-03T00:00:00Z"}
+    "SEC-008": {"status": "passed", "environment": {"registry": "isolated artifact registry", "signer": "cosign test identity"}, "steps": ["Sign the tag and verify the attestation"], "expected": "The release artifact has a verifiable signature and provenance", "actual": "Cosign verification and tag attestation passed", "signature": {"tool": "cosign", "verified": true, "identity": "https://github.com/sshiong/frp-panel-platform-v3/.github/workflows/release.yml@refs/tags/v0.1.0", "issuer": "https://token.actions.githubusercontent.com", "artifacts_verified": ["build/frp-panel-server"]}, "artifacts": {"logs": ["secure/SEC-008.log"], "screenshots": [], "request_ids": []}, "operator": "security-operator", "executed_at": "2026-08-03T00:00:00Z"},
+    "DOD-001": {"status": "passed", "environment": {"review": "release review record"}, "steps": ["Collect release, security, and test-owner approvals"], "expected": "All three required owners sign the same evidence revision", "actual": "Three-owner sign-off recorded", "approvals": [{"role": "release", "name": "release-owner", "commit": "<current-40-character-release-commit>", "approval_ref": "review-release-1", "signed_at": "2026-08-03T00:00:00Z"}, {"role": "security", "name": "security-owner", "commit": "<current-40-character-release-commit>", "approval_ref": "review-security-1", "signed_at": "2026-08-03T00:00:00Z"}, {"role": "test", "name": "test-owner", "commit": "<current-40-character-release-commit>", "approval_ref": "review-test-1", "signed_at": "2026-08-03T00:00:00Z"}], "artifacts": {"logs": ["secure/DOD-001-signoff.log"], "screenshots": [], "request_ids": []}, "operator": "release-manager", "executed_at": "2026-08-03T00:00:00Z"}
   }
 }
 ```
@@ -143,6 +143,14 @@ the operator, and an ISO-8601 execution time. The example uses placeholders for
 redacted artifact paths and request IDs; replace them with reviewed evidence
 before invoking the collector. The schema regression is covered by
 scripts/test-external-acceptance.rb and the contract CI job.
+
+The `SEC-008` gate must additionally contain `signature.tool=cosign`,
+`signature.verified=true`, the keyless certificate `identity` and OIDC
+`issuer`, plus a non-empty `artifacts_verified` list. The `DOD-001` gate must
+contain exactly three distinct approvals with `release`, `security`, and `test`
+roles; every approval must name the owner, reference the same current commit,
+include an `approval_ref`, and carry an ISO-8601 `signed_at` value. Missing or
+weak sign-off metadata is rejected before release.
 
 Run the collector with that file only after the external report has been
 reviewed:

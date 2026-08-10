@@ -16,6 +16,7 @@ class AcceptanceCollector
     FRPS-009 DNS-012 DNS-013 CF-007 TLS-009 TLS-010 TLS-012 KEY-004
     PERF-003 REL-005 REL-007 REL-008 SEC-008 DOD-001
   ].freeze
+  OWNER_SIGNOFF_ROLES = %w[release security test].freeze
   EVIDENCE_ARTIFACT_FIELDS = %w[logs screenshots request_ids].freeze
 
   def initialize(artifact_dir: ARTIFACT_DIR)
@@ -235,6 +236,56 @@ class AcceptanceCollector
     PROVIDER_GATES.each do |gate_id|
       errors.concat(validate_evidence_gate(gate_id, gates[gate_id]))
     end
+    errors.concat(validate_signature_metadata(gates["SEC-008"]))
+    errors.concat(validate_owner_signoff(gates["DOD-001"], current_commit))
+    errors
+  end
+
+  def validate_signature_metadata(gate)
+    signature = gate.is_a?(Hash) ? gate["signature"] : nil
+    return ["SEC-008.signature 必须是对象"] unless signature.is_a?(Hash)
+
+    errors = []
+    errors << "SEC-008.signature.tool 必须为 cosign" unless signature["tool"] == "cosign"
+    errors << "SEC-008.signature.verified 必须为 true" unless signature["verified"] == true
+    %w[identity issuer].each do |field|
+      errors << "SEC-008.signature.#{field} 必须为非空字符串" unless signature[field].is_a?(String) && !signature[field].strip.empty?
+    end
+    artifacts = signature["artifacts_verified"]
+    errors << "SEC-008.signature.artifacts_verified 必须为非空数组" unless artifacts.is_a?(Array) && artifacts.any? { |item| item.is_a?(String) && !item.strip.empty? }
+    errors
+  end
+
+  def validate_owner_signoff(gate, current_commit)
+    approvals = gate.is_a?(Hash) ? gate["approvals"] : nil
+    return ["DOD-001.approvals 必须为包含三位负责人的数组"] unless approvals.is_a?(Array)
+
+    errors = []
+    roles = approvals.map { |approval| approval.is_a?(Hash) ? approval["role"] : nil }.compact
+    errors << "DOD-001.approvals 必须恰好包含 release、security、test 三种角色" unless roles.sort == OWNER_SIGNOFF_ROLES
+    names = []
+    approvals.each_with_index do |approval, index|
+      unless approval.is_a?(Hash)
+        errors << "DOD-001.approvals[#{index}] 必须是对象"
+        next
+      end
+      role = approval["role"].to_s
+      errors << "DOD-001.approvals[#{index}].role 无效" unless OWNER_SIGNOFF_ROLES.include?(role)
+      name = approval["name"]
+      if !name.is_a?(String) || name.strip.empty?
+        errors << "DOD-001.approvals[#{index}].name 必须为非空字符串"
+      else
+        names << name
+      end
+      errors << "DOD-001.approvals[#{index}].commit 必须绑定当前 revision" unless approval["commit"] == current_commit
+      errors << "DOD-001.approvals[#{index}].approval_ref 必须为非空字符串" unless approval["approval_ref"].is_a?(String) && !approval["approval_ref"].strip.empty?
+      begin
+        Time.iso8601(approval["signed_at"].to_s)
+      rescue ArgumentError
+        errors << "DOD-001.approvals[#{index}].signed_at 必须为 ISO-8601 时间"
+      end
+    end
+    errors << "DOD-001.approvals 的负责人必须互不相同" unless names.uniq.length == names.length
     errors
   end
 

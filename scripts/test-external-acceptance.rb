@@ -21,6 +21,18 @@ valid_bundle = {
   "commit" => collector.send(:git_revision),
   "gates" => AcceptanceCollector::PROVIDER_GATES.to_h { |gate| [gate, valid_gate] }
 }
+valid_bundle["gates"]["SEC-008"]["signature"] = {
+  "tool" => "cosign",
+  "verified" => true,
+  "identity" => "https://github.com/sshiong/frp-panel-platform-v3/.github/workflows/release.yml@refs/tags/v0.1.0",
+  "issuer" => "https://token.actions.githubusercontent.com",
+  "artifacts_verified" => ["build/frp-panel-server"]
+}
+valid_bundle["gates"]["DOD-001"]["approvals"] = [
+  { "role" => "release", "name" => "release-owner", "commit" => valid_bundle["commit"], "approval_ref" => "review-release-1", "signed_at" => "2026-08-03T00:00:00Z" },
+  { "role" => "security", "name" => "security-owner", "commit" => valid_bundle["commit"], "approval_ref" => "review-security-1", "signed_at" => "2026-08-03T00:00:00Z" },
+  { "role" => "test", "name" => "test-owner", "commit" => valid_bundle["commit"], "approval_ref" => "review-test-1", "signed_at" => "2026-08-03T00:00:00Z" }
+]
 
 unless collector.send(:validate_evidence_bundle, valid_bundle).empty?
   abort("valid evidence bundle was rejected")
@@ -42,6 +54,18 @@ wrong_repository_bundle = Marshal.load(Marshal.dump(valid_bundle))
 wrong_repository_bundle["repository"] = "another/repository"
 unless collector.send(:validate_evidence_bundle, wrong_repository_bundle).any? { |error| error.include?("repository 必须为") }
   abort("evidence from another repository was accepted")
+end
+
+missing_signature_bundle = Marshal.load(Marshal.dump(valid_bundle))
+missing_signature_bundle["gates"]["SEC-008"].delete("signature")
+unless collector.send(:validate_evidence_bundle, missing_signature_bundle).any? { |error| error.include?("SEC-008.signature") }
+  abort("cosign signature metadata was not required")
+end
+
+missing_owner_bundle = Marshal.load(Marshal.dump(valid_bundle))
+missing_owner_bundle["gates"]["DOD-001"]["approvals"] = missing_owner_bundle["gates"]["DOD-001"]["approvals"][0, 2]
+unless collector.send(:validate_evidence_bundle, missing_owner_bundle).any? { |error| error.include?("DOD-001.approvals") }
+  abort("three-owner sign-off was not required")
 end
 
 Dir.mktmpdir("external-acceptance-evidence") do |artifact_dir|

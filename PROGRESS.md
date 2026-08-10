@@ -184,6 +184,7 @@
 | 2026-08-10 | 固定性能 runner PATH 修复 | 已验证；首次 run [`31370268438`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31370268438) 在测试开始前因 `bash -lc` 重置 Go 镜像 PATH 失败，未计入验收；改为非登录 `bash -c` 后 run [`31370452806`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31370452806) 完整通过，policy 已锁定该边界。 |
 | 2026-08-10 | 当前发布链路绑定复核 | 通过/按标准阻断；提交 [`639a184`](https://github.com/sshiong/frp-panel-platform-v3/commit/639a18483054072b9e273a09323fbaf872b1c0f2) 的 [`ci run 31371628773`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31371628773) 与 [`CodeQL run 31371628772`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31371628772) 全部成功；release checkout 现在在外部证据和 cosign 之前调用共享固定性能脚本，`make contract` 当前通过；该 revision 的外部报告为 9 passed / 0 failed / 1 blocked，唯一阻断仍是未提供真实 Provider/目标环境/签名/负责人签字证据。 |
 | 2026-08-10 | 逐项验收证据索引 | 已实现/本地通过；新增 `make acceptance-evidence` 与 contract/CI 门禁，解析标准 141 项和矩阵 142 行，为每项生成环境、步骤、期望、实际、证据日志、执行人和时间字段；索引明确保持 `blocked`，不替代底层测试日志或真实外部验收，CI 将上传当前 checkout 的 14 天 artifact。 |
+| 2026-08-10 | 发布签名与负责人证据 fail-closed | 已实现/本地通过；外部证据 schema 现在强制 `SEC-008` 提供 cosign tool、verified、OIDC identity/issuer 和产物列表，并强制 `DOD-001` 由 release/security/test 三位不同负责人对同一 commit 提供 approval_ref 与签署时间；缺失字段不能绕过发布门禁。 |
 
 ## 未决与发布阻断项
 
