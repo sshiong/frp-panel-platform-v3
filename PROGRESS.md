@@ -189,6 +189,7 @@
 | 2026-08-10 | 最新 revision 最终门禁复核 | 通过/按标准阻断；提交 [`403eeb4`](https://github.com/sshiong/frp-panel-platform-v3/commit/403eeb4ff41bbb7a7d79a9fde324cbd5b067997d) 本地 `make test lint accessibility`、`make contract`、迁移/安全/许可证/构建/性能门禁全部通过；官方 FRP v0.68.0 固定二进制的 TCP、FRPC verify 和 Plugin E2E 通过，外部收集器记录 10 passed / 0 failed / 1 blocked。PR #2 的 [`ci run 31374117884`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31374117884) 与 [`CodeQL run 31374117949`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31374117949) 全部通过；唯一阻断仍是 Cloudflare/ACME/目标环境/正式签名/三方负责人证据，PR 还需要人工 review。 |
 | 2026-08-10 | 目标环境验收入口与手动工作流 | 已实现并通过本地回归；`ruby scripts/test-target-acceptance.rb`、工作流 policy、`make contract` 全部通过；Darwin 本地 `make target-acceptance` 以退出码 2 生成 `blocked` 报告，报告与 4 个步骤日志均为 `0600`。新增 Ubuntu 24.04 `workflow_dispatch` 会固定校验官方 FRP v0.68.0 并上传同 revision 证据；Linux 故障入口同时执行干净临时数据目录的加密备份解码/恢复；真实目标硬件、Provider/ACME、正式签名和负责人签字仍按标准保持 blocked。 |
 | 2026-08-10 | 目标环境验收托管复核与当前证据刷新 | 通过/按标准阻断；实现提交 [`7fe951e`](https://github.com/sshiong/frp-panel-platform-v3/commit/7fe951ed39b165e688dc1b5794e62f90c2801e3c) 的 [`ci run 31377273082`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31377273082) 与 [`CodeQL run 31377273225`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31377273225) 全部成功，required checks 全绿；当前本地 `make external-acceptance` 报告绑定同一 revision，固定 FRP TCP、FRPC verify、Plugin E2E、本地 contract/perf 等 10 项通过，唯一阻断是缺少 reviewed Provider/ACME/TLS/目标硬件/签名/负责人证据，退出码 2。 |
+| 2026-08-10 | Linux 灾备恢复演练托管复核与当前证据刷新 | 通过/按标准阻断；实现提交 [`03fd039`](https://github.com/sshiong/frp-panel-platform-v3/commit/03fd0396ff8cd3a6c42bbed44377e964d7568edb) 的 [`ci run 31378368765`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31378368765) 与 [`CodeQL run 31378368635`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31378368635) 全部成功，Ubuntu fault-injection 实际执行干净临时目录加密备份解码/恢复；当前本地 `make external-acceptance` 报告绑定同一 revision，固定 FRP TCP、FRPC verify、Plugin E2E、本地 contract/perf 等 10 项通过，唯一阻断是缺少 reviewed Provider/ACME/TLS/目标硬件/签名/负责人证据，退出码 2。 |
 
 ## 未决与发布阻断项
 
@@ -199,7 +200,7 @@
 3. 使用真实 Cloudflare Sandbox + ACME Staging 完成 DNS-01 传播、TXT 清理、证书原子替换与 Router TLS SNI/Host 热切换；本地 Provider 已实现但未伪造外部成功。
 4. 加密归档备份恢复的 clean-host 灾备演练、生产环境 WAL checkpoint 长时观察和目标磁盘满/时钟偏差故障注入；实现级 disposable Linux 自动化已补齐但不替代目标部署演练。
 5. 生产部署容量/网络签收：固定 Ubuntu 24.04 Docker 2 vCPU/2 GiB、SQLite WAL profile 已通过 PERF-001/002/003/005/006/007；仍需真实部署环境确认长期容量、磁盘和网络行为。
-6. 生成正式 cosign 签名并完成发布负责人、安全负责人和测试负责人签字；当前实现 revision [`7fe951e`](https://github.com/sshiong/frp-panel-platform-v3/commit/7fe951ed39b165e688dc1b5794e62f90c2801e3c) 的 [`ci run 31377273082`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31377273082) 与 [`CodeQL run 31377273225`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31377273225) 已全绿，SEC-008 正式 tag 签名和 DOD-001 三方签字仍待发布环境。
+6. 生成正式 cosign 签名并完成发布负责人、安全负责人和测试负责人签字；当前实现 revision [`03fd039`](https://github.com/sshiong/frp-panel-platform-v3/commit/03fd0396ff8cd3a6c42bbed44377e964d7568edb) 的 [`ci run 31378368765`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31378368765) 与 [`CodeQL run 31378368635`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31378368635) 已全绿，SEC-008 正式 tag 签名和 DOD-001 三方签字仍待发布环境。
 7. 完成上述 P0/P1 外部验收前，仓库只能作为开发预览，不得声明生产就绪。
 
 ## 更新规则

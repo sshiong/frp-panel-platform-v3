@@ -14,8 +14,8 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 - `待外部`：需要真实 Provider、Linux、Docker、CA、签字或目标硬件。
 
 最近一次已验证实现与托管门禁证据：当前 revision
-`7fe951ed39b165e688dc1b5794e62f90c2801e3c` 的 CI run
-`31377273082` 与 CodeQL run `31377273225` 均成功；required checks 还包括
+`03fd0396ff8cd3a6c42bbed44377e964d7568edb` 的 CI run
+`31378368765` 与 CodeQL run `31378368635` 均成功；required checks 还包括
 coverage、固定 FRP Linux E2E、fault injection、security、container scan 和
 release metadata。固定性能 workflow run `31370452806` 在 Ubuntu 24.04 Docker
 2 vCPU/2 GiB profile 下通过 PERF-001/002/003/005/006/007；导航按钮使用

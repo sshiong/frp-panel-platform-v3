@@ -4,10 +4,10 @@ This report records evidence available in the local development environment. It 
 
 ## Current revision evidence
 
-The current implementation revision is `7fe951ed39b165e688dc1b5794e62f90c2801e3c`. Its PR CI run
-[`31377273082`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31377273082)
+The current implementation revision is `03fd0396ff8cd3a6c42bbed44377e964d7568edb`. Its PR CI run
+[`31378368765`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31378368765)
 and CodeQL run
-[`31377273225`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31377273225)
+[`31378368635`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31378368635)
 passed all required checks, including contract, coverage, Go race/static analysis,
 both panel builds and WCAG checks, fixed Linux FRP E2E, fault injection, fuzz,
 security, container scanning and release metadata. The current local fixed-artifact
