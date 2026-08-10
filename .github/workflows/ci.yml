@@ -203,6 +203,8 @@ jobs:
 
   target-acceptance:
     uses: ./.github/workflows/target-acceptance.yml
+    with:
+      acceptance_ref: ${{ github.event.pull_request.head.sha || github.sha }}
     permissions:
       contents: read
 

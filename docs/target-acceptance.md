@@ -45,7 +45,9 @@ make target-acceptance
 `.github/workflows/target-acceptance.yml` 是可手动触发、也可由 PR CI 复用的 Ubuntu 24.04 工作流。它
 从官方 FRP v0.68.0 release asset 获取 Linux amd64 二进制，先用 GitHub release
 digest 校验，再调用同一个 Ruby collector，并上传同一 revision 的报告和日志。
-工作流通过 `scripts/target-acceptance-workflow-policy.rb` 纳入 `make contract`。
+PR CI 会显式传入 PR head SHA，workflow checkout、collector 报告和
+`ACCEPTANCE_EXPECTED_COMMIT` 三者必须一致；工作流通过
+`scripts/target-acceptance-workflow-policy.rb` 纳入 `make contract`。
 
 这个工作流证明固定 hosted target profile；它不等同于生产容量、Cloudflare
 Sandbox、ACME Staging、真实生产 TLS、cosign 签名或三方发布负责人 sign-off。

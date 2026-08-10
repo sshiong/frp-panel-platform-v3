@@ -3,6 +3,11 @@ name: target-acceptance
 on:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      acceptance_ref:
+        description: "Exact source revision to checkout and bind in the evidence report"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -14,6 +19,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.acceptance_ref || github.sha }}
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.x'
@@ -60,6 +67,7 @@ jobs:
           FRPC_VERIFY_BINARY: ${{ github.workspace }}/build/frpc
           FRPC_VERIFY_VERSION: 0.68.0
           ACCEPTANCE_OPERATOR: ${{ github.actor }}
+          ACCEPTANCE_EXPECTED_COMMIT: ${{ inputs.acceptance_ref || github.sha }}
         run: ruby scripts/target-acceptance.rb
       - name: Upload target acceptance evidence
         if: always()

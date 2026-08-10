@@ -181,13 +181,16 @@ class TargetAcceptance
   end
 
   def environment_snapshot
-    {
+    snapshot = {
       "host_os" => RbConfig::CONFIG["host_os"],
       "ci" => ENV.fetch("CI", "false"),
       "working_directory" => ROOT,
       "revision" => git_revision,
       "target_profile" => "Linux / 2 vCPU / 2 GiB / SQLite WAL"
     }
+    expected = ENV.fetch("ACCEPTANCE_EXPECTED_COMMIT", "")
+    snapshot["expected_revision"] = expected unless expected.empty?
+    snapshot
   end
 
   def write_log(id, content)
@@ -229,6 +232,10 @@ if $PROGRAM_NAME == __FILE__
 
   collector = TargetAcceptance.new(artifact_dir: options[:artifact_dir])
   document = collector.run
+  expected_revision = ENV.fetch("ACCEPTANCE_EXPECTED_COMMIT", "")
+  if !expected_revision.empty? && document["commit"] != expected_revision
+    abort "target acceptance revision mismatch: expected #{expected_revision}, got #{document["commit"]}"
+  end
   errors = TargetAcceptance.validate!(document)
   abort errors.join("\n") unless errors.empty?
   collector.write(document, output: options[:output])
