@@ -7,6 +7,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -62,6 +64,24 @@ func (p *jobsCoverageProvider) RoundTrip(request *http.Request) (*http.Response,
 type coverageACMEProvider struct{}
 
 func (coverageACMEProvider) IssueDNS01(_ context.Context, domain string) (acme.Certificate, error) {
+	certPEM, privatePEM := testCertificate(nilTestHelper{}, domain)
+	return acme.Certificate{CertPEM: certPEM, PrivateKey: privatePEM, NotBefore: time.Now().UTC().Add(-time.Minute), NotAfter: time.Now().UTC().Add(30 * 24 * time.Hour)}, nil
+}
+
+type clearDuringACMEProvider struct {
+	app      *App
+	auth     AuthContext
+	password string
+	cleared  bool
+}
+
+func (p *clearDuringACMEProvider) IssueDNS01(_ context.Context, domain string) (acme.Certificate, error) {
+	if !p.cleared {
+		p.cleared = true
+		if err := p.app.ClearCloudflareToken(context.Background(), p.auth, p.password); err != nil {
+			return acme.Certificate{}, err
+		}
+	}
 	certPEM, privatePEM := testCertificate(nilTestHelper{}, domain)
 	return acme.Certificate{CertPEM: certPEM, PrivateKey: privatePEM, NotBefore: time.Now().UTC().Add(-time.Minute), NotAfter: time.Now().UTC().Add(30 * 24 * time.Hour)}, nil
 }
@@ -258,6 +278,113 @@ func TestRunJobsSeedsAndStopsOnCancellation(t *testing.T) {
 	}()
 	if err := fixture.app.RunJobs(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("RunJobs cancellation error=%v", err)
+	}
+}
+
+func TestCloudflareJobsBlockWhenTokenIsClearedDuringExternalWork(t *testing.T) {
+	t.Run("dns", func(t *testing.T) {
+		fixture := newServiceCoverageFixture(t)
+		ctx := context.Background()
+		app := fixture.app
+		provider := &jobsCoverageProvider{}
+		app.CloudflareHTTPClient = &http.Client{Transport: provider}
+		app.Config.CloudflareAPIBaseURL = "https://api.example.test/client/v4"
+		activateCoverageCloudflareToken(t, fixture)
+
+		mapping, err := app.CreateMapping(ctx, fixture.client, MappingRequest{Name: "clear-dns", ProxyType: "http", LocalIP: "127.0.0.1", LocalPort: 8170}, "clear-dns-map-000001")
+		if err != nil {
+			t.Fatal(err)
+		}
+		domain, err := app.CreateDomain(ctx, fixture.client, DomainRequest{MappingID: mapping.ID, Hostname: "clear-dns.example.com", HTTPSMode: "http_only"}, "clear-dns-domain-000001")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		cleared := false
+		app.CloudflareHTTPClient = &http.Client{Transport: cloudflareRoundTripper(func(req *http.Request) (*http.Response, error) {
+			if !cleared && req.Method == http.MethodGet && strings.TrimPrefix(req.URL.Path, "/client/v4") == "/zones" {
+				cleared = true
+				if err := app.ClearCloudflareToken(ctx, fixture.client, fixture.password); err != nil {
+					return nil, err
+				}
+			}
+			return provider.RoundTrip(req)
+		})}
+		err = app.syncDomainDNS(ctx, jobs.Job{Payload: map[string]interface{}{"user_id": fixture.client.UserID, "domain_id": domain.ID, "action": "check"}})
+		var blocked *jobs.BlockedError
+		if !errors.As(err, &blocked) || !errors.Is(err, ErrCloudflareTokenInactive) {
+			t.Fatalf("DNS job was not blocked after clear: err=%v", err)
+		}
+		var dnsCount int
+		if err := app.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM dns_records WHERE domain_binding_id=? AND managed_by_panel=1`, domain.ID).Scan(&dnsCount); err != nil {
+			t.Fatal(err)
+		}
+		if dnsCount != 0 {
+			t.Fatalf("stale DNS job persisted a local record: %d", dnsCount)
+		}
+	})
+
+	t.Run("acme", func(t *testing.T) {
+		fixture := newServiceCoverageFixture(t)
+		ctx := context.Background()
+		app := fixture.app
+		app.CloudflareHTTPClient = &http.Client{Transport: &jobsCoverageProvider{}}
+		app.Config.CloudflareAPIBaseURL = "https://api.example.test/client/v4"
+		activateCoverageCloudflareToken(t, fixture)
+		app.Config.ACMEEnabled = true
+		app.ACMEProvider = &clearDuringACMEProvider{app: app, auth: fixture.client, password: fixture.password}
+
+		mapping, err := app.CreateMapping(ctx, fixture.client, MappingRequest{Name: "clear-acme", ProxyType: "http", LocalIP: "127.0.0.1", LocalPort: 8171}, "clear-acme-map-000001")
+		if err != nil {
+			t.Fatal(err)
+		}
+		domain, err := app.CreateDomain(ctx, fixture.client, DomainRequest{MappingID: mapping.ID, Hostname: "clear-acme.example.com", HTTPSMode: "auto_certificate"}, "clear-acme-domain-000001")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := app.DB.ExecContext(ctx, `INSERT OR IGNORE INTO certificates(id,domain_binding_id,provider,status,updated_at) VALUES(?,?,?,?,?)`, "certificate-clear-acme", domain.ID, "acme", "pending", nowString()); err != nil {
+			t.Fatal(err)
+		}
+		err = app.issueCertificate(ctx, jobs.Job{Payload: map[string]interface{}{"user_id": fixture.client.UserID, "domain_id": domain.ID}})
+		var blocked *jobs.BlockedError
+		if !errors.As(err, &blocked) || !errors.Is(err, ErrCloudflareTokenInactive) {
+			t.Fatalf("ACME job was not blocked after clear: err=%v", err)
+		}
+		var status string
+		if err := app.DB.QueryRowContext(ctx, `SELECT status FROM certificates WHERE domain_binding_id=?`, domain.ID).Scan(&status); err != nil {
+			t.Fatal(err)
+		}
+		if status != "pending" {
+			t.Fatalf("stale ACME job changed certificate status to %q", status)
+		}
+		if _, err := os.Stat(filepath.Join(app.Config.DataDir, "certificates", domain.ID, "cert.pem")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("stale ACME job left certificate material: err=%v", err)
+		}
+	})
+}
+
+func activateCoverageCloudflareToken(t *testing.T, fixture serviceCoverageFixture) {
+	t.Helper()
+	ctx := context.Background()
+	ticket, _, err := fixture.app.IssueReauthTicket(ctx, fixture.client, fixture.password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.app.SaveCloudflareToken(ctx, fixture.client, "coverage-token-abcdefghijklmnopqrstuvwxyz", ticket); err != nil {
+		t.Fatal(err)
+	}
+	tokenJob, err := fixture.app.Jobs.Claim(ctx)
+	if err != nil || tokenJob.Type != "cloudflare_token_verify" {
+		t.Fatalf("Cloudflare token job=%#v err=%v", tokenJob, err)
+	}
+	if err := fixture.app.handleJob(ctx, tokenJob); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.app.Jobs.Complete(ctx, tokenJob.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.app.ActivateCloudflareToken(ctx, fixture.client, 1, false, ticket); err != nil {
+		t.Fatal(err)
 	}
 }
 

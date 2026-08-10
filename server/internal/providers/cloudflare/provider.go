@@ -66,6 +66,31 @@ type HTTPProvider struct {
 	Client  *http.Client
 }
 
+// RequestGuard is evaluated immediately before every HTTP request. Callers
+// that keep short-lived credentials in a database can use it to invalidate a
+// request after the credential is cleared or rotated. It deliberately lives
+// in this provider package so compound operations such as UpsertDNS cannot
+// accidentally skip the guard between their internal HTTP calls.
+type RequestGuard func(context.Context) error
+
+type requestGuardContextKey struct{}
+
+// WithRequestGuard attaches a request guard to a provider context.
+func WithRequestGuard(ctx context.Context, guard RequestGuard) context.Context {
+	if guard == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, requestGuardContextKey{}, guard)
+}
+
+// RequestGuardFromContext returns the guard attached to ctx, if any. ACME
+// cleanup creates a fresh timeout context but must preserve this safety
+// boundary while removing a challenge record.
+func RequestGuardFromContext(ctx context.Context) (RequestGuard, bool) {
+	guard, ok := ctx.Value(requestGuardContextKey{}).(RequestGuard)
+	return guard, ok && guard != nil
+}
+
 func New(token string) *HTTPProvider {
 	return &HTTPProvider{
 		BaseURL: "https://api.cloudflare.com/client/v4",
@@ -88,6 +113,11 @@ func NewAt(token, baseURL string) *HTTPProvider {
 }
 
 func (p *HTTPProvider) request(ctx context.Context, method, path string, body interface{}, target interface{}) error {
+	if guard, ok := RequestGuardFromContext(ctx); ok {
+		if err := guard(ctx); err != nil {
+			return err
+		}
+	}
 	var reader io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)

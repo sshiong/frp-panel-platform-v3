@@ -132,7 +132,7 @@ release checkout，并要求该性能门禁先于外部证据与签名。该记�
 | CF-004 | 本地通过 | 401/403 权限错误返回缺少 capability 信息。 |
 | CF-005 | 本地通过 | 新 Token 经 `pending → verified_pending` 验证；验证失败或未确认时旧 Token 保持 active，确认后才原子切换 active，并记录失去 Zone 访问的域名。 |
 | CF-006 | 本地通过 | UI 三秒倒计时、reauth ticket 和删除语义测试通过。 |
-| CF-007 | 部分通过 | Job blocked/retry 状态已实现；真实 Provider 停止/阻塞待 Sandbox。 |
+| CF-007 | 部分通过 | 本地 DNS/ACME 竞态回归已验证：Job 运行中清除/轮换 Token 后，Cloudflare 每次 HTTP 请求与 ACME 检查点拒绝旧版本，Job 返回 `BlockedError`，不落本地 DNS/证书成功状态；真实 Provider/ACME Sandbox 停止或阻塞证据仍待外部。 |
 | TLS-001 | 本地通过 | UI、API、服务层、SQLite CHECK/trigger 同时拒绝非法模式。 |
 | TLS-002 | 本地通过 | 未知 SNI 返回错误，不提供其他证书。 |
 | TLS-003 | 本地通过 | 未绑定 Host=404，offline=502。 |

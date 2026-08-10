@@ -86,6 +86,9 @@ func NewCloudflareDNS01WithKeys(config CloudflareDNS01Config, wrappingKeys [][]b
 }
 
 func (p *CloudflareDNS01Provider) IssueDNS01(ctx context.Context, domain string) (Certificate, error) {
+	if err := checkRequestGuard(ctx); err != nil {
+		return Certificate{}, err
+	}
 	account, err := p.loadOrRegisterAccount(ctx)
 	if err != nil {
 		return Certificate{}, err
@@ -99,6 +102,9 @@ func (p *CloudflareDNS01Provider) IssueDNS01(ctx context.Context, domain string)
 		return Certificate{}, err
 	}
 	client := &acme.Client{Key: account.key, KID: acme.KeyID(account.uri), DirectoryURL: p.config.DirectoryURL, HTTPClient: p.config.HTTPClient, UserAgent: "frp-panel-platform/acme-dns01"}
+	if err := checkRequestGuard(ctx); err != nil {
+		return Certificate{}, err
+	}
 	order, err := client.AuthorizeOrder(ctx, acme.DomainIDs(domain))
 	if err != nil {
 		return Certificate{}, err
@@ -107,11 +113,17 @@ func (p *CloudflareDNS01Provider) IssueDNS01(ctx context.Context, domain string)
 	defer func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
+		if guard, ok := cloudflare.RequestGuardFromContext(ctx); ok {
+			cleanupCtx = cloudflare.WithRequestGuard(cleanupCtx, guard)
+		}
 		for _, record := range challengeRecords {
 			_ = record.provider.DeleteDNS(cleanupCtx, record.zone, record.id)
 		}
 	}()
 	for _, authorizationURL := range order.AuthzURLs {
+		if err := checkRequestGuard(ctx); err != nil {
+			return Certificate{}, err
+		}
 		authorization, err := client.GetAuthorization(ctx, authorizationURL)
 		if err != nil {
 			return Certificate{}, err
@@ -125,6 +137,9 @@ func (p *CloudflareDNS01Provider) IssueDNS01(ctx context.Context, domain string)
 		}
 		value, err := client.DNS01ChallengeRecord(challenge.Token)
 		if err != nil {
+			return Certificate{}, err
+		}
+		if err := checkRequestGuard(ctx); err != nil {
 			return Certificate{}, err
 		}
 		provider, zone, err := p.providerAndZone(ctx, authorization.Identifier.Value)
@@ -142,12 +157,18 @@ func (p *CloudflareDNS01Provider) IssueDNS01(ctx context.Context, domain string)
 		if err := waitTXT(ctx, "_acme-challenge."+authorization.Identifier.Value, value, p.config.Propagation, p.config.LookupTXT); err != nil {
 			return Certificate{}, err
 		}
+		if err := checkRequestGuard(ctx); err != nil {
+			return Certificate{}, err
+		}
 		if _, err := client.Accept(ctx, challenge); err != nil {
 			return Certificate{}, err
 		}
 		if _, err := client.WaitAuthorization(ctx, authorization.URI); err != nil {
 			return Certificate{}, err
 		}
+	}
+	if err := checkRequestGuard(ctx); err != nil {
+		return Certificate{}, err
 	}
 	der, _, err := client.CreateOrderCert(ctx, order.URI, csrDER, true)
 	if err != nil {
@@ -174,6 +195,13 @@ func (p *CloudflareDNS01Provider) IssueDNS01(ctx context.Context, domain string)
 		}
 	}
 	return Certificate{CertPEM: certPEM, ChainPEM: chainPEM, PrivateKey: pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateKeyDER}), NotBefore: certificate.NotBefore, NotAfter: certificate.NotAfter}, nil
+}
+
+func checkRequestGuard(ctx context.Context) error {
+	if guard, ok := cloudflare.RequestGuardFromContext(ctx); ok {
+		return guard(ctx)
+	}
+	return nil
 }
 
 type dnsChallengeRecord struct {

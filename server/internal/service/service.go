@@ -38,6 +38,11 @@ var (
 	ErrIdempotencyReuse   = errors.New("idempotency key reused")
 	ErrPortReserved       = errors.New("port already reserved")
 	ErrReauthRequired     = errors.New("reauthentication required")
+	// ErrCloudflareTokenInactive is returned to an external-operation Job when
+	// its leased credential was cleared or rotated while the Job was running.
+	// Jobs wrap it in jobs.BlockedError so the operation remains retryable and
+	// never falls through to a stale provider call or local success state.
+	ErrCloudflareTokenInactive = errors.New("cloudflare token is no longer active")
 )
 
 type CloudflareActivationConflict struct {

@@ -347,13 +347,23 @@ func (a *App) deleteDomainExternal(ctx context.Context, job jobs.Job) error {
 	if err != nil {
 		return err
 	}
+	guardedCtx, err := a.cloudflareTokenRequestContext(ctx, userID, version)
+	if err != nil {
+		return err
+	}
 	provider := a.cloudflareProvider(string(token))
-	if err := provider.DeleteDNS(ctx, cloudflare.Zone{ID: zoneID}, recordID); err != nil {
+	if err := provider.DeleteDNS(guardedCtx, cloudflare.Zone{ID: zoneID}, recordID); err != nil {
+		if errors.Is(err, ErrCloudflareTokenInactive) {
+			return cloudflareTokenJobError(err)
+		}
 		if code, message, denied := cloudflarePermissionError(err); denied {
 			_ = a.recordCloudflareDNSWriteCapability(ctx, userID, version, false)
 			return a.markDomainDeleteFailure(ctx, domainID, code, message)
 		}
 		return err
+	}
+	if err := a.ensureActiveCloudflareToken(ctx, userID, version); err != nil {
+		return cloudflareTokenJobError(err)
 	}
 	_ = a.recordCloudflareDNSWriteCapability(ctx, userID, version, true)
 	return a.finalizeDeletedDomain(ctx, domainID)
@@ -622,7 +632,7 @@ func (a *App) syncDomainDNS(ctx context.Context, job jobs.Job) error {
 	var ciphertext, nonce []byte
 	err := a.DB.QueryRowContext(ctx, `SELECT c.token_version,c.ciphertext,c.nonce,c.key_version FROM cloudflare_credentials c JOIN users u ON u.active_cloudflare_token_version=c.token_version AND u.id=c.user_id WHERE c.user_id=? AND c.status='valid'`, userID).Scan(&version, &ciphertext, &nonce, &keyVersion)
 	if errors.Is(err, sql.ErrNoRows) {
-		return a.markDomainDNSFailure(ctx, domainID, "CLOUDFLARE_TOKEN_MISSING", "No verified Cloudflare Token is active.")
+		return &jobs.BlockedError{Err: errors.New("no verified Cloudflare Token is active")}
 	}
 	if err != nil {
 		return err
@@ -631,15 +641,25 @@ func (a *App) syncDomainDNS(ctx context.Context, job jobs.Job) error {
 	if err != nil {
 		return err
 	}
+	guardedCtx, err := a.cloudflareTokenRequestContext(ctx, userID, version)
+	if err != nil {
+		return err
+	}
 	provider := a.cloudflareProvider(string(token))
 	zones := make([]cloudflare.Zone, 0)
 	for page := 1; page <= 100; page++ {
-		items, more, listErr := provider.ListZones(ctx, page)
+		items, more, listErr := provider.ListZones(guardedCtx, page)
 		if listErr != nil {
+			if errors.Is(listErr, ErrCloudflareTokenInactive) {
+				return cloudflareTokenJobError(listErr)
+			}
 			if code, message, denied := cloudflarePermissionError(listErr); denied {
 				return a.markDomainDNSFailure(ctx, domainID, code, message)
 			}
 			return listErr
+		}
+		if err := a.ensureActiveCloudflareToken(ctx, userID, version); err != nil {
+			return cloudflareTokenJobError(err)
 		}
 		zones = append(zones, items...)
 		if !more {
@@ -650,12 +670,18 @@ func (a *App) syncDomainDNS(ctx context.Context, job jobs.Job) error {
 	if !ok {
 		return a.markDomainDNSFailure(ctx, domainID, "CLOUDFLARE_ZONE_NOT_FOUND", "No accessible Cloudflare Zone matches this hostname.")
 	}
-	records, err := provider.ListDNS(ctx, zone, normalized, "")
+	records, err := provider.ListDNS(guardedCtx, zone, normalized, "")
 	if err != nil {
+		if errors.Is(err, ErrCloudflareTokenInactive) {
+			return cloudflareTokenJobError(err)
+		}
 		if code, message, denied := cloudflarePermissionError(err); denied {
 			return a.markDomainDNSFailure(ctx, domainID, code, message)
 		}
 		return err
+	}
+	if err := a.ensureActiveCloudflareToken(ctx, userID, version); err != nil {
+		return cloudflareTokenJobError(err)
 	}
 	desired := cloudflare.Record{Type: "CNAME", Name: normalized, Content: a.Config.FRPSPublicHost, TTL: 300, Proxied: httpsMode == "cloudflare_proxy"}
 	var desiredProxied, desiredManaged int
@@ -682,24 +708,36 @@ func (a *App) syncDomainDNS(ctx context.Context, job jobs.Job) error {
 		adopted = true
 	}
 	if selected.ID == "" {
-		selected, err = a.upsertDNSWithRecovery(ctx, provider, zone, desired)
+		selected, err = a.upsertDNSWithRecovery(guardedCtx, provider, zone, desired)
 		if err != nil {
+			if errors.Is(err, ErrCloudflareTokenInactive) {
+				return cloudflareTokenJobError(err)
+			}
 			if code, message, denied := cloudflarePermissionError(err); denied {
 				_ = a.recordCloudflareDNSWriteCapability(ctx, userID, version, false)
 				return a.markDomainDNSFailure(ctx, domainID, code, message)
 			}
 			return err
 		}
+		if err := a.ensureActiveCloudflareToken(ctx, userID, version); err != nil {
+			return cloudflareTokenJobError(err)
+		}
 		_ = a.recordCloudflareDNSWriteCapability(ctx, userID, version, true)
 		managed = true
 	} else if (action == "overwrite" || action == "sync") && (selected.Content != desired.Content || selected.Proxied != desired.Proxied || selected.Type != desired.Type || selected.TTL != desired.TTL) {
-		selected, err = a.upsertDNSWithRecovery(ctx, provider, zone, desired)
+		selected, err = a.upsertDNSWithRecovery(guardedCtx, provider, zone, desired)
 		if err != nil {
+			if errors.Is(err, ErrCloudflareTokenInactive) {
+				return cloudflareTokenJobError(err)
+			}
 			if code, message, denied := cloudflarePermissionError(err); denied {
 				_ = a.recordCloudflareDNSWriteCapability(ctx, userID, version, false)
 				return a.markDomainDNSFailure(ctx, domainID, code, message)
 			}
 			return err
+		}
+		if err := a.ensureActiveCloudflareToken(ctx, userID, version); err != nil {
+			return cloudflareTokenJobError(err)
 		}
 		_ = a.recordCloudflareDNSWriteCapability(ctx, userID, version, true)
 		managed = true
@@ -709,6 +747,9 @@ func (a *App) syncDomainDNS(ctx context.Context, job jobs.Job) error {
 	}
 	if selected.ID == "" {
 		return errors.New("provider returned an empty DNS record id")
+	}
+	if err := a.ensureActiveCloudflareToken(ctx, userID, version); err != nil {
+		return cloudflareTokenJobError(err)
 	}
 	if err := a.saveDNSRecord(ctx, userID, domainID, zone, selected, managed, adopted); err != nil {
 		return err
@@ -755,9 +796,9 @@ func (a *App) issueCertificate(ctx context.Context, job jobs.Job) error {
 	if !a.Config.ACMEEnabled || a.ACMEProvider == nil {
 		return &jobs.BlockedError{Err: acme.ErrUnavailable}
 	}
+	var version, keyVersion int64
 	var ciphertext, nonce []byte
-	var keyVersion int64
-	if err := a.DB.QueryRowContext(ctx, `SELECT c.ciphertext,c.nonce,c.key_version FROM cloudflare_credentials c JOIN users u ON u.active_cloudflare_token_version=c.token_version AND u.id=c.user_id WHERE c.user_id=? AND c.status='valid'`, userID).Scan(&ciphertext, &nonce, &keyVersion); err != nil {
+	if err := a.DB.QueryRowContext(ctx, `SELECT c.token_version,c.ciphertext,c.nonce,c.key_version FROM cloudflare_credentials c JOIN users u ON u.active_cloudflare_token_version=c.token_version AND u.id=c.user_id WHERE c.user_id=? AND c.status='valid'`, userID).Scan(&version, &ciphertext, &nonce, &keyVersion); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return &jobs.BlockedError{Err: errors.New("ACME is waiting for a verified Cloudflare Token")}
 		}
@@ -767,9 +808,19 @@ func (a *App) issueCertificate(ctx context.Context, job jobs.Job) error {
 	if err != nil {
 		return err
 	}
-	certificate, err := a.ACMEProvider.IssueDNS01(acme.WithCloudflareToken(ctx, string(token)), domain)
+	guardedCtx, err := a.cloudflareTokenRequestContext(ctx, userID, version)
 	if err != nil {
 		return err
+	}
+	certificate, err := a.ACMEProvider.IssueDNS01(acme.WithCloudflareToken(guardedCtx, string(token)), domain)
+	if err != nil {
+		if errors.Is(err, ErrCloudflareTokenInactive) {
+			return cloudflareTokenJobError(err)
+		}
+		return err
+	}
+	if err := a.ensureActiveCloudflareToken(ctx, userID, version); err != nil {
+		return cloudflareTokenJobError(err)
 	}
 	if len(certificate.CertPEM) == 0 || len(certificate.PrivateKey) == 0 || len(a.Crypto.CertificateKey) != 32 {
 		return errors.New("ACME provider returned incomplete certificate material")
@@ -789,20 +840,34 @@ func (a *App) issueCertificate(ctx context.Context, job jobs.Job) error {
 			return err
 		}
 	}
+	cleanupCertificateFiles := func() {
+		_ = os.Remove(certPath)
+		_ = os.Remove(chainPath)
+	}
 	privateCiphertext, privateNonce, err := a.Crypto.EncryptCertificate(certificate.PrivateKey, "domain:"+domainID+":certificate_private_key:v1")
 	if err != nil {
+		cleanupCertificateFiles()
 		return err
+	}
+	if err := a.ensureActiveCloudflareToken(ctx, userID, version); err != nil {
+		cleanupCertificateFiles()
+		return cloudflareTokenJobError(err)
 	}
 	now := nowString()
 	renewAfter := time.Time{}
 	if !certificate.NotAfter.IsZero() {
 		renewAfter = certificate.NotAfter.Add(-30 * 24 * time.Hour)
 	}
-	result, err := a.DB.ExecContext(ctx, `UPDATE certificates SET status='valid',not_before=?,not_after=?,renew_after=?,cert_path=?,private_key_ciphertext=?,private_key_nonce=?,wrapping_key_version=?,cert_hash=?,last_error_code=NULL,last_error_message=NULL,updated_at=? WHERE domain_binding_id=? AND provider='acme'`, nullableTime(certificate.NotBefore), nullableTime(certificate.NotAfter), nullableTime(renewAfter), certPath, privateCiphertext, privateNonce, a.Crypto.CurrentCertificateKeyVersion(), sha256Hex(string(fullChain)), now, domainID)
+	result, err := a.DB.ExecContext(ctx, `UPDATE certificates SET status='valid',not_before=?,not_after=?,renew_after=?,cert_path=?,private_key_ciphertext=?,private_key_nonce=?,wrapping_key_version=?,cert_hash=?,last_error_code=NULL,last_error_message=NULL,updated_at=? WHERE domain_binding_id=? AND provider='acme' AND EXISTS (SELECT 1 FROM users u JOIN cloudflare_credentials c ON c.user_id=u.id AND c.token_version=u.active_cloudflare_token_version WHERE u.id=? AND c.token_version=? AND c.status='valid')`, nullableTime(certificate.NotBefore), nullableTime(certificate.NotAfter), nullableTime(renewAfter), certPath, privateCiphertext, privateNonce, a.Crypto.CurrentCertificateKeyVersion(), sha256Hex(string(fullChain)), now, domainID, userID, version)
 	if err != nil {
+		cleanupCertificateFiles()
 		return err
 	}
 	if affected, _ := result.RowsAffected(); affected != 1 {
+		cleanupCertificateFiles()
+		if err := a.ensureActiveCloudflareToken(ctx, userID, version); err != nil {
+			return cloudflareTokenJobError(err)
+		}
 		return errors.New("ACME certificate row is missing")
 	}
 	if _, err := a.DB.ExecContext(ctx, `UPDATE domain_bindings SET status='pending_router',updated_at=? WHERE id=?`, now, domainID); err != nil {
@@ -935,6 +1000,35 @@ func (a *App) cloudflareProvider(token string) *cloudflare.HTTPProvider {
 		provider.Client = a.CloudflareHTTPClient
 	}
 	return provider
+}
+
+// cloudflareTokenRequestContext binds provider HTTP calls to the exact active
+// credential version decrypted for the Job. The guard is evaluated by every
+// HTTPProvider request, including the internal GET/POST pair used by
+// UpsertDNS, so a clear or rotation cannot leave a stale request boundary.
+func (a *App) cloudflareTokenRequestContext(ctx context.Context, userID string, version int64) (context.Context, error) {
+	if err := a.ensureActiveCloudflareToken(ctx, userID, version); err != nil {
+		return nil, &jobs.BlockedError{Err: err}
+	}
+	return cloudflare.WithRequestGuard(ctx, func(guardCtx context.Context) error {
+		return a.ensureActiveCloudflareToken(guardCtx, userID, version)
+	}), nil
+}
+
+func (a *App) ensureActiveCloudflareToken(ctx context.Context, userID string, version int64) error {
+	var present int
+	err := a.DB.QueryRowContext(ctx, `SELECT 1 FROM users u JOIN cloudflare_credentials c ON c.user_id=u.id AND c.token_version=u.active_cloudflare_token_version WHERE u.id=? AND c.token_version=? AND c.status='valid' LIMIT 1`, userID, version).Scan(&present)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrCloudflareTokenInactive
+	}
+	return err
+}
+
+func cloudflareTokenJobError(err error) error {
+	if errors.Is(err, ErrCloudflareTokenInactive) {
+		return &jobs.BlockedError{Err: ErrCloudflareTokenInactive}
+	}
+	return err
 }
 
 func cloudflarePermissionError(err error) (code, message string, denied bool) {
