@@ -4,10 +4,10 @@ This report records evidence available in the local development environment. It 
 
 ## Current revision evidence
 
-The latest verified implementation revision is `e40c7e3f24e20c9d59b14c5316bf9ce94fc69563`. Its PR CI run
-[`31389771137`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31389771137)
+The latest verified implementation revision is `77b41db566098c8f3f8c0181b0399d489c501b55`. Its PR CI run
+[`31392232994`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31392232994)
 and CodeQL run
-[`31389770849`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31389770849)
+[`31392232917`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31392232917)
 passed all required checks, including contract, coverage, Go race/static analysis,
 both panel builds and WCAG checks, fixed Linux FRP E2E, fault injection, fuzz,
 security, container scanning, release metadata and the fixed Ubuntu 24.04 / 2 vCPU /
@@ -21,7 +21,10 @@ implementation revision and records 10 passed, 0 failed and 1 blocked steps; the
 only blocked step is the intentionally absent reviewed Provider, target-environment,
 signing and owner-approval bundle. The 142-record acceptance
 index is also bound to this revision and remains `blocked` while the matrix has
-incomplete external rows. PR #2 remains open for required human review.
+incomplete external rows. This revision also adds Cloudflare Token clear/rotation
+guards across DNS and ACME Jobs; the running-job regression proves stale DNS/ACME
+results are blocked before local success publication. PR #2 remains open for required
+human review.
 
 Target-environment automation is now available through `make target-acceptance` and
 the manual [`target-acceptance.yml`](.github/workflows/target-acceptance.yml). It
