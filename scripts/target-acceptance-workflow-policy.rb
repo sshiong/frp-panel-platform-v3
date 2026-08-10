@@ -4,6 +4,7 @@ errors = []
 
 required_fragments = {
   "manual trigger" => "workflow_dispatch:",
+  "reusable workflow trigger" => "workflow_call:",
   "Ubuntu target runner" => "runs-on: ubuntu-24.04",
   "Ruby runtime" => "ruby-version: '3.3'",
   "Go runtime" => "go-version: '1.25.x'",
@@ -25,4 +26,4 @@ errors << "target acceptance must upload artifacts after failures" unless workfl
 errors << "target acceptance must not use production credentials" if workflow.match?(/CLOUDFLARE|ACME|COSIGN|PRODUCTION/i)
 
 abort "target acceptance workflow policy failed:\n#{errors.join("\n")}" unless errors.empty?
-puts "target acceptance workflow policy valid: manual Ubuntu 24.04 target profile with fixed FRP evidence"
+puts "target acceptance workflow policy valid: manual/reusable Ubuntu 24.04 target profile with fixed FRP evidence"

@@ -26,7 +26,7 @@ profile 与固定 Linux 2 vCPU/2 GiB 目标基线。当前 revision 的
 `output/external-acceptance.json` 的 40 位 commit 字段始终是当前工作树验收报告的权威绑定；
 阻断项仍严格限于真实 Provider、目标环境、正式签名和负责人签字，不改变下方逐项状态的外部证据要求。
 
-目标环境复验现在有独立入口 `make target-acceptance` 和仅手动触发的
+目标环境复验现在有独立入口 `make target-acceptance`、可手动触发/由 PR CI 复用的
 [`target-acceptance.yml`](../.github/workflows/target-acceptance.yml)：它固定
 Ubuntu 24.04、2 vCPU、2 GiB、SQLite WAL，组合固定性能、Linux 故障注入、FRP
 v0.68.0 verify/真实 TCP/Plugin E2E，并上传 `0600` 报告和日志。macOS 或缺少

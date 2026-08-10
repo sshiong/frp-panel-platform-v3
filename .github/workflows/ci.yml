@@ -201,9 +201,14 @@ jobs:
       - name: Run disposable Linux fault injection
         run: make fault-injection
 
+  target-acceptance:
+    uses: ./.github/workflows/target-acceptance.yml
+    permissions:
+      contents: read
+
   release-metadata:
     runs-on: ubuntu-latest
-    needs: [go, web, frp-linux-e2e, fault-injection]
+    needs: [go, web, frp-linux-e2e, fault-injection, target-acceptance]
     steps:
       - uses: actions/checkout@v4
       - uses: ruby/setup-ruby@v1
