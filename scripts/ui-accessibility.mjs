@@ -236,6 +236,11 @@ async function assertKeyboardAndLabels(page, appName) {
   if (focusOrder.every(({ tag }) => !tag || tag === 'BODY')) throw new Error(`${appName}: keyboard Tab never reached a focusable control`)
 }
 
+async function assertNavigationSemantics(page, appName) {
+  const current = page.locator('nav button[aria-current="page"]')
+  if (await current.count() !== 1) throw new Error(`${appName}: expected exactly one aria-current page navigation item`)
+}
+
 async function assertSurface(page, appName, surface) {
   await page.waitForTimeout(50)
   const result = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze()
@@ -263,6 +268,7 @@ async function scanAuthenticatedSurfaces(page, appName, labels) {
   const navigation = page.getByRole('navigation').getByRole('button')
   for (let index = 0; index < await navigation.count(); index += 1) {
     await navigation.nth(index).click()
+    await assertNavigationSemantics(page, appName)
     await assertSurface(page, appName, labels[index])
   }
 

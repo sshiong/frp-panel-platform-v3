@@ -13,8 +13,8 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 - `部分通过`：本地实现已有证据，但标准要求的外部/目标环境仍未完成；
 - `待外部`：需要真实 Provider、Linux、Docker、CA、签字或目标硬件。
 
-最近一次文档同步证据：`48a478baf8837292348e6230b257d99395d7cf37` 的 CI
-run `31337487666` 与 CodeQL run `31337487642` 均成功；同 revision 的
+最近一次文档同步证据：`358563136b92d3cf1352b5cceb7b85acc288cc20` 的 CI
+run `31364719059` 与 CodeQL run `31364719051` 均成功；同 revision 的
 `make external-acceptance` 报告为 9 passed / 0 failed / 1 blocked。当前
 `output/external-acceptance.json` 的 40 位 commit 字段是当前 revision 的
 权威绑定；阻断项仍严格限于真实 Provider、目标环境、正式签名和负责人
