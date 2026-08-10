@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestValidateStagingDirectory(t *testing.T) {
 	tests := []struct {
@@ -27,5 +30,40 @@ func TestValidateStagingDirectory(t *testing.T) {
 				t.Fatal("unsafe staging URL accepted")
 			}
 		})
+	}
+}
+
+func TestHostnameInZone(t *testing.T) {
+	tests := []struct {
+		name     string
+		hostname string
+		zone     string
+		want     bool
+	}{
+		{name: "subdomain", hostname: "a.example.com", zone: "example.com", want: true},
+		{name: "case and trailing dot", hostname: "A.Example.Com.", zone: "example.com.", want: true},
+		{name: "apex", hostname: "example.com", zone: "example.com", want: true},
+		{name: "label boundary", hostname: "a.not-example.com", zone: "example.com", want: false},
+		{name: "suffix attack", hostname: "example.com.evil.test", zone: "example.com", want: false},
+		{name: "empty hostname", hostname: "", zone: "example.com", want: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := hostnameInZone(test.hostname, test.zone); got != test.want {
+				t.Fatalf("hostnameInZone(%q, %q) = %v, want %v", test.hostname, test.zone, got, test.want)
+			}
+		})
+	}
+}
+
+func TestRunRejectsACMEDomainOutsideExpectedZone(t *testing.T) {
+	t.Setenv("CLOUDFLARE_E2E_API_TOKEN", "sandbox-token")
+	t.Setenv("FRP_ACME_E2E_DOMAIN", "outside.example.net")
+	t.Setenv("FRP_ACME_E2E_EXPECTED_ZONE_NAME", "example.com")
+
+	status, output := run()
+	if status == 0 || !strings.Contains(output.Error, "outside expected Cloudflare Zone") {
+		t.Fatalf("run accepted a cross-zone ACME domain: status=%d output=%#v", status, output)
 	}
 }

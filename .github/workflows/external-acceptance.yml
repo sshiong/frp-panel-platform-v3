@@ -8,8 +8,8 @@ on:
         required: true
         type: string
       expected_zone_name:
-        description: "Expected zone name; leave empty only if the operator has separately verified it"
-        required: false
+        description: "Expected name of the selected disposable Cloudflare Zone"
+        required: true
         type: string
       record_name:
         description: "Fresh disposable A-record name under the selected zone"
@@ -78,6 +78,7 @@ jobs:
           FRP_ACME_E2E_DIRECTORY_URL: ${{ inputs.acme_directory_url }}
           FRP_ACME_E2E_EMAIL: ${{ secrets.FRP_ACME_E2E_EMAIL }}
           FRP_ACME_E2E_DOMAIN: ${{ inputs.acme_domain }}
+          FRP_ACME_E2E_EXPECTED_ZONE_NAME: ${{ inputs.expected_zone_name }}
           FRP_ACME_E2E_CONFIRM: acme-staging
           FRP_ACCEPTANCE_EXPECTED_COMMIT: ${{ github.sha }}
         run: |

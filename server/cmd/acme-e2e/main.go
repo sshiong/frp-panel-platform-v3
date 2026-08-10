@@ -60,8 +60,20 @@ func run() (int, result) {
 	if err != nil {
 		return failureWithCommit(commit, err)
 	}
+	domain = normalizeHostname(domain)
 	if len(domain) > 253 || !domainPattern.MatchString(domain) {
 		return failureWithCommit(commit, errors.New("FRP_ACME_E2E_DOMAIN must be a fully-qualified DNS name"))
+	}
+	expectedZone, err := required("FRP_ACME_E2E_EXPECTED_ZONE_NAME")
+	if err != nil {
+		return failureWithCommit(commit, err)
+	}
+	expectedZone = normalizeHostname(expectedZone)
+	if len(expectedZone) > 253 || !domainPattern.MatchString(expectedZone) {
+		return failureWithCommit(commit, errors.New("FRP_ACME_E2E_EXPECTED_ZONE_NAME must be a fully-qualified DNS name"))
+	}
+	if !hostnameInZone(domain, expectedZone) {
+		return failureWithCommit(commit, fmt.Errorf("FRP_ACME_E2E_DOMAIN %s is outside expected Cloudflare Zone %s", domain, expectedZone))
 	}
 	if os.Getenv("FRP_ACME_E2E_CONFIRM") != confirmation {
 		return failureWithCommit(commit, fmt.Errorf("set FRP_ACME_E2E_CONFIRM=%s to authorize an ACME Staging order", confirmation))
@@ -121,6 +133,7 @@ func run() (int, result) {
 		Environment: map[string]interface{}{
 			"ca":     "ACME Staging",
 			"domain": domain,
+			"zone":   expectedZone,
 		},
 		Certificate: map[string]interface{}{
 			"not_before":  certificate.NotBefore.UTC().Format(time.RFC3339Nano),
@@ -146,6 +159,19 @@ func required(name string) (string, error) {
 		return "", fmt.Errorf("%s is required", name)
 	}
 	return value, nil
+}
+
+func normalizeHostname(value string) string {
+	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(value)), ".")
+}
+
+func hostnameInZone(hostname, zoneName string) bool {
+	hostname = normalizeHostname(hostname)
+	zoneName = normalizeHostname(zoneName)
+	if hostname == "" || zoneName == "" {
+		return false
+	}
+	return hostname == zoneName || strings.HasSuffix(hostname, "."+zoneName)
 }
 
 func failureWithCommit(commit string, err error) (int, result) {

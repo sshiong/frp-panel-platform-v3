@@ -9,6 +9,7 @@ required = {
   "ACME email secret" => "FRP_ACME_E2E_EMAIL: ${{ secrets.FRP_ACME_E2E_EMAIL }}",
   "Cloudflare write confirmation" => "CLOUDFLARE_E2E_CONFIRM: disposable-zone",
   "ACME staging confirmation" => "FRP_ACME_E2E_CONFIRM: acme-staging",
+  "ACME Zone binding" => "FRP_ACME_E2E_EXPECTED_ZONE_NAME: ${{ inputs.expected_zone_name }}",
   "redacted artifact upload" => "actions/upload-artifact@v4",
   "runner revision binding" => "FRP_ACCEPTANCE_EXPECTED_COMMIT: ${{ github.sha }}",
   "structured runner evidence validator" => "scripts/validate-external-runners.rb",

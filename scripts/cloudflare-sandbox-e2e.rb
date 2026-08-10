@@ -37,14 +37,18 @@ class CloudflareSandboxE2E
       raise "Cloudflare token verification returned success=false" unless response.fetch("success")
     end
 
-    zone = nil
     step("zone-read", "Read the explicitly selected disposable zone") do
       response = request(:get, "/zones/#{path_escape(@zone_id)}")
       zone = response.fetch("result")
+      zone_name = zone.fetch("name").to_s
       expected = ENV["CLOUDFLARE_E2E_EXPECTED_ZONE_NAME"]
-      if expected && zone.fetch("name") != expected
-        raise "selected zone name #{zone.fetch("name")} does not match expected #{expected}"
+      if expected && self.class.normalize_hostname(zone_name) != self.class.normalize_hostname(expected)
+        raise "selected zone name #{zone_name} does not match expected #{expected}"
       end
+      unless self.class.hostname_in_zone?(@record_name, zone_name)
+        raise "record name #{@record_name} is outside selected zone #{zone_name}"
+      end
+      @zone_name = zone_name
     end
 
     ensure_no_existing_record
@@ -95,6 +99,18 @@ class CloudflareSandboxE2E
     return if uri.is_a?(URI::HTTPS) && normalized == OFFICIAL_API_BASE_URL && uri.user.nil? && uri.query.nil? && uri.fragment.nil?
 
     raise "CLOUDFLARE_API_BASE_URL must be exactly the official HTTPS Cloudflare API endpoint"
+  end
+
+  def self.hostname_in_zone?(hostname, zone_name)
+    hostname = normalize_hostname(hostname)
+    zone_name = normalize_hostname(zone_name)
+    return false if hostname.empty? || zone_name.empty?
+
+    hostname == zone_name || hostname.end_with?(".#{zone_name}")
+  end
+
+  def self.normalize_hostname(value)
+    value.to_s.strip.downcase.sub(/\.+\z/, "")
   end
 
   def require_confirmation
@@ -222,7 +238,7 @@ class CloudflareSandboxE2E
       "repository" => "sshiong/frp-panel-platform-v3",
       "commit" => @commit,
       "generated_at" => Time.now.utc.iso8601(6),
-      "environment" => { "provider" => "Cloudflare Sandbox", "zone_id_present" => true, "record_name" => @record_name },
+      "environment" => { "provider" => "Cloudflare Sandbox", "zone_id_present" => true, "zone_name" => @zone_name, "record_name" => @record_name },
       "steps" => @steps,
       "request_ids" => @request_ids.uniq,
       "error" => @error,

@@ -29,4 +29,17 @@ invalid.each do |value|
   abort "untrusted Cloudflare API base URL was accepted: #{value}"
 end
 
+zone_cases = {
+  ["a.example.com", "example.com"] => true,
+  ["A.Example.Com.", "example.com."] => true,
+  ["example.com", "example.com"] => true,
+  ["a.not-example.com", "example.com"] => false,
+  ["example.com.evil.test", "example.com"] => false,
+  ["", "example.com"] => false
+}
+zone_cases.each do |(hostname, zone_name), expected|
+  actual = CloudflareSandboxE2E.hostname_in_zone?(hostname, zone_name)
+  abort "zone ownership check mismatch for #{hostname.inspect}/#{zone_name.inspect}: #{actual.inspect}" unless actual == expected
+end
+
 puts "Cloudflare sandbox API endpoint policy valid"

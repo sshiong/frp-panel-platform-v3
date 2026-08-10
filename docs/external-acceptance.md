@@ -173,14 +173,17 @@ create/update/readback lifecycle, and removes the record in an `ensure` path:
 ```bash
 CLOUDFLARE_E2E_API_TOKEN="$CLOUDFLARE_SANDBOX_TOKEN" \
 CLOUDFLARE_E2E_ZONE_ID="<disposable-zone-id>" \
+CLOUDFLARE_E2E_EXPECTED_ZONE_NAME="<disposable-zone-name>" \
 CLOUDFLARE_E2E_RECORD_NAME="frp-e2e-$(date +%s).example.test" \
 CLOUDFLARE_E2E_CONFIRM=disposable-zone \
 make cloudflare-e2e
 ```
 
 The runner only accepts the official `https://api.cloudflare.com/client/v4`
-endpoint (with an optional trailing slash), so a misconfigured HTTPS endpoint
-cannot receive the Sandbox token. It prints redacted JSON with step results and Cloudflare request IDs;
+endpoint (with an optional trailing slash), verifies that the record name is a
+label of the selected Zone, and refuses a mismatched expected Zone name, so a
+misconfigured HTTPS endpoint or cross-zone record cannot receive the Sandbox
+token. It prints redacted JSON with step results and Cloudflare request IDs;
 it never prints the token. Its output is provider smoke evidence, not a
 release sign-off by itself: DNS timeout ambiguity, ACME Staging, Full(strict),
 target hardware and owner approvals still require the reviewed evidence bundle.
@@ -196,11 +199,13 @@ CLOUDFLARE_E2E_API_TOKEN="$CLOUDFLARE_SANDBOX_TOKEN" \
 FRP_ACME_E2E_DIRECTORY_URL="https://acme-staging-v02.api.letsencrypt.org/directory" \
 FRP_ACME_E2E_EMAIL="release-operator@example.com" \
 FRP_ACME_E2E_DOMAIN="frp-e2e-$(date +%s).example.com" \
+FRP_ACME_E2E_EXPECTED_ZONE_NAME="<disposable-zone-name>" \
 FRP_ACME_E2E_CONFIRM=acme-staging \
 make acme-e2e
 ```
 
-The command prints only certificate metadata and never prints the Cloudflare
+The command requires the ACME name to be the selected disposable Zone apex or
+one of its subdomains, then prints only certificate metadata and never prints the Cloudflare
 token, private key, or account key. A successful command is still operator
 evidence for TLS-010 only; TLS-009/TLS-012, target deployment and three-owner
 release sign-off remain separate gates.
@@ -213,8 +218,9 @@ redirect-like URL data before creating any ACME account or DNS record.
 After configuring the `external-acceptance` GitHub environment with the
 disposable-zone secrets `CLOUDFLARE_E2E_API_TOKEN` and `FRP_ACME_E2E_EMAIL`, the
 same two runners can be executed from the manual-only
-`.github/workflows/external-acceptance.yml` workflow. It requires the zone and
-fresh DNS names as inputs, uploads only the redacted runner JSON for 14 days,
+`.github/workflows/external-acceptance.yml` workflow. It requires the zone,
+expected Zone name, and fresh DNS names as inputs, verifies both DNS names stay
+within that Zone, and uploads only the redacted runner JSON for 14 days,
 and refuses to run automatically on push or pull request. The checkout is
 explicitly pinned to `github.sha`; both runners include the repository and
 exact 40-character commit in their JSON, and
