@@ -96,6 +96,17 @@ jobs:
           npx playwright install --with-deps chromium
       - name: Run release quality gates
         run: make test lint accessibility
+      - name: Run fixed release performance profile
+        env:
+          FRP_FIXED_PERF_LOG_PATH: ${{ github.workspace }}/release-performance-fixed-2vcpu-2g.log
+        run: ./scripts/fixed-performance.sh
+      - name: Upload release performance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-fixed-2vcpu-2g-performance-${{ github.run_id }}
+          path: release-performance-fixed-2vcpu-2g.log
+          if-no-files-found: error
       - name: Download fixed FRP dependency
         env:
           GH_TOKEN: ${{ github.token }}

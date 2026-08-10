@@ -68,6 +68,7 @@ contract:
 	ruby scripts/release-version-policy.rb
 	ruby scripts/release-workflow-policy.rb
 	ruby scripts/performance-workflow-policy.rb
+	bash -n scripts/fixed-performance.sh
 	ruby scripts/external-workflow-policy.rb
 	ruby -c scripts/cloudflare-sandbox-e2e.rb
 	ruby scripts/test-cloudflare-sandbox-e2e.rb

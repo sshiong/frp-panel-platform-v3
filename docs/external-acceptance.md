@@ -83,8 +83,9 @@ profile with exactly 2 vCPU and 2 GiB RAM, SQLite WAL, and the complete
 PERF-001/002/003/005/006/007 test suite; it uploads the fixed-profile log
 separately from the unconstrained hosted comparison. The release workflow
 applies additional hard gates: it runs `make test`,
-`make lint`, and `make accessibility` on the release checkout before any
-external evidence or signing step; the repository root must also contain
+`make lint`, and `make accessibility`, then reruns the shared fixed
+2 vCPU/2 GiB profile on the exact release checkout before any external
+evidence or signing step; the repository root must also contain
 `release-evidence.json`, and that bundle must validate against the exact
 release revision. The release job also runs the fixed FRP v0.68.0 native
 TCP and Plugin network checks before cosign signing. Missing Cloudflare

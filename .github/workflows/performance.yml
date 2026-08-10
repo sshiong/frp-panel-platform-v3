@@ -35,26 +35,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run resource-constrained SQLite WAL profile
-        run: |
-          set -euo pipefail
-          docker run --rm \
-            --cpus=2 \
-            --memory=2g \
-            --memory-swap=2g \
-            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/workspace" \
-            --workdir /workspace \
-            golang:1.25-bookworm \
-            bash -c '
-              set -euo pipefail
-              export FRP_PERF=1 FRP_PERF_SCALE=1
-              export GOCACHE=/tmp/frp-go-build GOMODCACHE=/tmp/frp-go-mod
-              {
-                cd /workspace/server
-                go test -v -run "^TestPerformance(Baseline|Scale|SessionReplacement)$" -count=1 ./internal/httpapi
-                cd /workspace/client
-                go test -v -run "^TestPerformanceConfigSubmitToClientApply$" -count=1 ./internal/app
-              } 2>&1 | tee /workspace/performance-fixed-2vcpu-2g.log
-            '
+        run: ./scripts/fixed-performance.sh
       - name: Upload fixed resource performance evidence
         if: always()
         uses: actions/upload-artifact@v4
