@@ -223,6 +223,11 @@ func (a *App) routerSnapshotDir() string {
 
 func (a *App) finalizeDomainRouterStates(ctx context.Context, sources []routeSource, version int64) error {
 	now := nowString()
+	tx, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
 	for _, source := range sources {
 		if source.domainStatus == "pending_dns" {
 			continue
@@ -237,7 +242,7 @@ func (a *App) finalizeDomainRouterStates(ctx context.Context, sources []routeSou
 				domainStatus, operationStatus, phase, step = "active", "succeeded", "router", "applied"
 			} else {
 				var certificateStatus string
-				err := a.DB.QueryRowContext(ctx, `SELECT status FROM certificates WHERE domain_binding_id=? AND provider='acme'`, source.domainID).Scan(&certificateStatus)
+				err := tx.QueryRowContext(ctx, `SELECT status FROM certificates WHERE domain_binding_id=? AND provider='acme'`, source.domainID).Scan(&certificateStatus)
 				if err == nil && certificateStatus == "valid" {
 					domainStatus, operationStatus, phase, step = "active", "succeeded", "router", "applied"
 				} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -249,12 +254,15 @@ func (a *App) finalizeDomainRouterStates(ctx context.Context, sources []routeSou
 				}
 			}
 		}
-		if _, err := a.DB.ExecContext(ctx, `UPDATE domain_bindings SET status=?,updated_at=? WHERE id=?`, domainStatus, now, source.domainID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE domain_bindings SET status=?,updated_at=? WHERE id=?`, domainStatus, now, source.domainID); err != nil {
 			return err
 		}
-		if _, err := a.DB.ExecContext(ctx, `UPDATE operations SET status=?,phase=?,step=?,updated_at=?,completed_at=CASE WHEN ?='succeeded' THEN ? ELSE completed_at END WHERE resource_type='domain' AND resource_id=? AND status IN ('pending','running')`, operationStatus, phase, step, now, operationStatus, now, source.domainID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE operations SET status=?,phase=?,step=?,updated_at=?,completed_at=CASE WHEN ?='succeeded' THEN ? ELSE completed_at END WHERE resource_type='domain' AND resource_id=? AND status IN ('pending','running')`, operationStatus, phase, step, now, operationStatus, now, source.domainID); err != nil {
 			return err
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
 	}
 	_ = version
 	return nil

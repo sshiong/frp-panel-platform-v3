@@ -402,7 +402,12 @@ func (a *App) Authenticate(ctx context.Context, bearer string) (AuthContext, err
 	if err := a.DB.QueryRowContext(ctx, `SELECT active_session_generation FROM users WHERE id=?`, ac.UserID).Scan(&currentGeneration); err != nil || currentGeneration != ac.Generation && ac.Channel == "client_panel" {
 		return AuthContext{}, errors.New("session replaced")
 	}
-	_, _ = a.DB.ExecContext(ctx, `UPDATE sessions SET last_seen_at=?, idle_expires_at=? WHERE id=? AND revoked_at IS NULL`, now.Format(time.RFC3339Nano), now.Add(30*time.Minute).Format(time.RFC3339Nano), ac.SessionID)
+	// Avoid turning every authenticated read into a synchronous SQLite write.
+	// The sliding idle window remains bounded by refreshing at most once per
+	// session-touch interval; revocation and expiry are still checked above on
+	// every request.
+	touchBefore := now.Add(-10 * time.Second).Format(time.RFC3339Nano)
+	_, _ = a.DB.ExecContext(ctx, `UPDATE sessions SET last_seen_at=?, idle_expires_at=? WHERE id=? AND revoked_at IS NULL AND last_seen_at<?`, now.Format(time.RFC3339Nano), now.Add(30*time.Minute).Format(time.RFC3339Nano), ac.SessionID, touchBefore)
 	return ac, nil
 }
 
