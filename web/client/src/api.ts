@@ -17,6 +17,8 @@ export type MappingRequest = components['schemas']['MappingRequest']
 export type DomainRequest = components['schemas']['DomainRequest']
 export type SupervisorStatus = components['schemas']['SupervisorStatus']
 export type CloudflareStatus = components['schemas']['CloudflareStatus']
+export type CloudflareCapabilities = components['schemas']['CloudflareCapabilities']
+export type CloudflareZone = components['schemas']['CloudflareZone']
 export type CloudflarePendingActivation = components['schemas']['CloudflarePendingActivation']
 export type CloudflareDomainImpact = components['schemas']['CloudflareDomainImpact']
 

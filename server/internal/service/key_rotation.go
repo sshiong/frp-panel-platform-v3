@@ -93,7 +93,9 @@ func rotateFRPCredentials(ctx context.Context, tx *sql.Tx, manager *crypto.Manag
 }
 
 func rotateCloudflareCredentials(ctx context.Context, tx *sql.Tx, manager *crypto.Manager) (int, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT id,user_id,ciphertext,nonce,COALESCE(key_version,0) FROM cloudflare_credentials`)
+	// Cleared credentials retain only a non-sensitive retired lifecycle row;
+	// there is no ciphertext to re-wrap for those rows.
+	rows, err := tx.QueryContext(ctx, `SELECT id,user_id,ciphertext,nonce,COALESCE(key_version,0) FROM cloudflare_credentials WHERE length(ciphertext)>0 AND length(nonce)>0`)
 	if err != nil {
 		return 0, err
 	}

@@ -633,9 +633,14 @@ export interface components {
             dns_read?: boolean;
             dns_write?: boolean;
             dns_write_checked?: boolean;
+            accessible_zones?: components["schemas"]["CloudflareZone"][];
             missing?: string[];
         } & {
             [key: string]: unknown;
+        };
+        CloudflareZone: {
+            id: string;
+            name: string;
         };
         CloudflareDomainImpact: {
             /** Format: uuid */

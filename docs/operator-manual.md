@@ -5,7 +5,7 @@
 1. 启动 Server 后从权限为 0600 的 `initial-admin.txt` 取得一次性凭据。
 2. 登录 Admin Panel；首次生成的管理员必须同时修改用户名和密码，普通初始用户只能修改密码。
 3. 在 Users 页面创建、停用、重置密码、重置 FRP 凭证或进入删除补偿流程。敏感操作先完成 5 分钟 reauth ticket。
-4. Cloudflare Token 由普通用户在 Client Panel 提交，经过 Client → HTTPS → Server；Token 只在 Server 加密保存。验证成功后先进入 `verified_pending`，页面会列出新 Token 无法访问的现有域名，只有用户再次 reauth 并明确确认后才切换 active。验证失败或取消切换时旧 Token 保持 active。
+4. Cloudflare Token 由普通用户在 Client Panel 提交，经过 Client → HTTPS → Server；Token 只在 Server 加密保存。验证成功后先进入 `verified_pending`，页面会列出可访问 Zone、分项能力和新 Token 无法访问的现有域名，只有用户再次 reauth 并明确确认后才切换 active。验证失败或取消切换时旧 Token 保持 active。清除操作有 3 秒倒计时，并会擦除服务端密文/缓存、取消排队验证任务。
 5. 在 Operations 页面查看 DNS、证书、删除和外部残留阶段；失败 Operation 只能通过重试入口重新入队。
 6. 在 System 页面查看 Router/备份状态。备份密码应通过受保护渠道交付；恢复前停止 Server，恢复后执行 checkpoint/完整性检查并重新生成 Router Snapshot。
 

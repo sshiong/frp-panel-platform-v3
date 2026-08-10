@@ -1942,9 +1942,30 @@ func (a *App) ClearCloudflareToken(ctx context.Context, ac AuthContext, currentP
 	if err := a.requireReauth(ctx, ac, currentPassword); err != nil {
 		return err
 	}
-	_, err := a.DB.ExecContext(ctx, `UPDATE cloudflare_credentials SET status='retired',retired_at=? WHERE user_id=? AND status <> 'retired'`, nowString(), ac.UserID)
-	if err == nil {
-		_, err = a.DB.ExecContext(ctx, `UPDATE users SET active_cloudflare_token_version=NULL,updated_at=? WHERE id=?`, nowString(), ac.UserID)
+	now := nowString()
+	tx, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// Retain a non-sensitive lifecycle row for audit/history, but immediately
+	// wipe the encrypted token, nonce, capability result and zone impact cache.
+	// A cleared credential must not remain decryptable during the migration
+	// window or a later key rotation.
+	if _, err = tx.ExecContext(ctx, `UPDATE cloudflare_credentials SET status='retired',retired_at=?,ciphertext=?,nonce=?,capabilities_json='{}',impact_domains_json='[]' WHERE user_id=? AND status <> 'retired'`, now, []byte{}, []byte{}, ac.UserID); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE users SET active_cloudflare_token_version=NULL,updated_at=? WHERE id=?`, now, ac.UserID); err != nil {
+		return err
+	}
+	// A queued token verification has no useful work after clear. Running jobs
+	// are left leased so their handler can observe the retired state and avoid
+	// publishing a result; pending jobs are explicitly canceled here.
+	if _, err = tx.ExecContext(ctx, `UPDATE jobs SET status='canceled',last_error='CLOUDFLARE_TOKEN_CLEARED',lock_owner=NULL,locked_at=NULL,lock_expires_at=NULL,heartbeat_at=NULL,completed_at=?,updated_at=? WHERE type='cloudflare_token_verify' AND resource_type='cloudflare_token' AND resource_id=? AND status IN ('pending','retry_wait')`, now, now, ac.UserID); err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		return err
 	}
 	if err == nil {
 		_ = a.Audit(ctx, ac, "cloudflare_token_cleared", "cloudflare_token", ac.UserID, "success", nil, "")

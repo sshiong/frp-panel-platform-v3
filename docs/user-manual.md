@@ -33,12 +33,15 @@ TCP/UDP 可以填写远程端口，留空时由 Server 自动租赁。Server 先
 在 Client Panel 的 `Cloudflare Token` 页面上传自己的 API Token。上传路径是
 `Client Panel → HTTPS → Server Panel`；Client 不保存 Token、Authorization
 Header 或 reauth 密码。完成一次 reauth 后，Server 会把 Token 加密保存并异步
-验证 `Token.Verify`、`Zone.Read` 和 `DNS.Read` 能力。
+验证 `Token.Verify`、`Zone.Read` 和 `DNS.Read` 能力，并显示可访问 Zone 清单；`DNS.Write`
+不会在用户 Zone 上做破坏性探测，会明确显示为“待安全写入验证”，直到实际 DNS
+写入成功或被 Cloudflare 拒绝。
 
 验证成功不会立即替换正在使用的 Token，而是显示 `verified_pending` 和影响
 域名清单。确认影响范围并再次完成 reauth 后，Server 才会退休旧 Token、把新
 Token 设为 active。验证失败、权限不足或用户取消确认时，旧 Token 继续服务。
-清除 Token 同样需要在线、确认和 reauth；已有 DNS 记录不会自动删除。
+清除 Token 同样需要在线、3 秒倒计时、确认和 reauth；服务端会退休并擦除密文、Nonce
+和 Zone 权限缓存，取消尚未执行的 Token 验证任务；已有 DNS 记录不会自动删除。
 
 ## 状态和异步操作
 

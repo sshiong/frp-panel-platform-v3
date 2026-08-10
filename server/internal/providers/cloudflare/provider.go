@@ -21,6 +21,7 @@ type Capabilities struct {
 	DNSRead         bool     `json:"dns_read"`
 	DNSWrite        bool     `json:"dns_write"`
 	DNSWriteChecked bool     `json:"dns_write_checked"`
+	AccessibleZones []Zone   `json:"accessible_zones,omitempty"`
 	Missing         []string `json:"missing"`
 }
 
@@ -153,16 +154,27 @@ func (p *HTTPProvider) VerifyToken(ctx context.Context) (Capabilities, error) {
 	if !response.Success {
 		return capabilities, nil
 	}
-	zones, _, err := p.ListZones(ctx, 1)
-	if err != nil {
-		var apiErr *APIError
-		if !errors.As(err, &apiErr) || (apiErr.Status != http.StatusUnauthorized && apiErr.Status != http.StatusForbidden) {
-			return capabilities, err
+	zones := make([]Zone, 0)
+	for page := 1; ; page++ {
+		pageZones, more, listErr := p.ListZones(ctx, page)
+		if listErr != nil {
+			var apiErr *APIError
+			if !errors.As(listErr, &apiErr) || (apiErr.Status != http.StatusUnauthorized && apiErr.Status != http.StatusForbidden) {
+				return capabilities, listErr
+			}
+			capabilities.Missing = append(capabilities.Missing, "Zone.Read")
+			return capabilities, nil
 		}
-		capabilities.Missing = append(capabilities.Missing, "Zone.Read")
-		return capabilities, nil
+		zones = append(zones, pageZones...)
+		if !more {
+			break
+		}
+		if page >= 100 {
+			return capabilities, errors.New("cloudflare zone pagination exceeded safety limit")
+		}
 	}
 	capabilities.ZoneRead = true
+	capabilities.AccessibleZones = zones
 	if len(zones) == 0 {
 		// No accessible Zone means DNS.Read cannot be proven, but this is not a
 		// token failure. The UI keeps the integration pending until a Zone exists.

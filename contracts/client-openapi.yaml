@@ -588,7 +588,14 @@ components:
         dns_read: { type: boolean }
         dns_write: { type: boolean }
         dns_write_checked: { type: boolean }
+        accessible_zones: { type: array, items: { $ref: '#/components/schemas/CloudflareZone' } }
         missing: { type: array, items: { type: string } }
+    CloudflareZone:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: string }
     CloudflareDomainImpact:
       type: object
       required: [id, hostname, normalized_domain, reason]

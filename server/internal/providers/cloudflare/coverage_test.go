@@ -3,6 +3,7 @@ package cloudflare
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -42,7 +43,7 @@ func TestHTTPProviderCapabilitiesAndCRUDBranches(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(strings.NewReader(string(encoded))), Header: make(http.Header), Request: request}, nil
 	})}
 	capabilities, err := provider.VerifyToken(context.Background())
-	if err != nil || !capabilities.TokenValid || !capabilities.ZoneRead || !capabilities.DNSRead || len(capabilities.Missing) != 0 {
+	if err != nil || !capabilities.TokenValid || !capabilities.ZoneRead || !capabilities.DNSRead || len(capabilities.AccessibleZones) != 1 || capabilities.AccessibleZones[0].Name != "example.com" || len(capabilities.Missing) != 0 {
 		t.Fatalf("capabilities=%#v err=%v", capabilities, err)
 	}
 	zones, more, err := provider.ListZones(context.Background(), 1)
@@ -77,5 +78,32 @@ func TestHTTPProviderCapabilitiesAndCRUDBranches(t *testing.T) {
 	}
 	if (*APIError)(nil).Error() != "cloudflare API error" {
 		t.Fatal("nil API error formatting changed")
+	}
+}
+
+func TestVerifyTokenCollectsAllZonePages(t *testing.T) {
+	provider := NewAt("pagination-token", "https://api.example.test/client/v4")
+	provider.Client = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		payload := map[string]interface{}{"success": true, "result": []interface{}{}}
+		switch request.URL.Path {
+		case "/client/v4/user/tokens/verify":
+		case "/client/v4/zones":
+			if request.URL.Query().Get("page") == "2" {
+				payload["result"] = []Zone{{ID: "zone-2", Name: "other.example"}}
+			} else {
+				payload["result"] = []Zone{{ID: "zone-1", Name: "example.com"}}
+			}
+			payload["result_info"] = map[string]int{"page": 1, "total_pages": 2}
+		case "/client/v4/zones/zone-1/dns_records":
+		default:
+			return nil, errors.New("unexpected Cloudflare path")
+		}
+		encoded, _ := json.Marshal(payload)
+		return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(strings.NewReader(string(encoded))), Header: make(http.Header), Request: request}, nil
+	})}
+
+	capabilities, err := provider.VerifyToken(context.Background())
+	if err != nil || len(capabilities.AccessibleZones) != 2 || capabilities.AccessibleZones[1].ID != "zone-2" {
+		t.Fatalf("capabilities=%#v err=%v", capabilities, err)
 	}
 }

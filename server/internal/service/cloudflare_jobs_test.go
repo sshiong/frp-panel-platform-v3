@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -149,6 +150,17 @@ func TestCloudflareTokenAndDomainJobs(t *testing.T) {
 	if !createdRecord {
 		t.Fatal("expected DNS create request")
 	}
+	var capabilitiesJSON string
+	if err := database.QueryRow(`SELECT capabilities_json FROM cloudflare_credentials WHERE user_id=? AND token_version=1`, user.ID).Scan(&capabilitiesJSON); err != nil {
+		t.Fatal(err)
+	}
+	var capabilities map[string]interface{}
+	if err := json.Unmarshal([]byte(capabilitiesJSON), &capabilities); err != nil {
+		t.Fatal(err)
+	}
+	if capabilities["dns_write"] != true || capabilities["dns_write_checked"] != true {
+		t.Fatalf("successful DNS write was not recorded: %#v", capabilities)
+	}
 	if createdPayload["type"] != "A" || createdPayload["content"] != "192.0.2.10" || int(createdPayload["ttl"].(float64)) != 120 || createdPayload["proxied"] != false {
 		t.Fatalf("unexpected DNS payload: %#v", createdPayload)
 	}
@@ -283,6 +295,13 @@ func TestCloudflareTokenAndDomainJobs(t *testing.T) {
 	if err != nil || firstDelete != secondDelete {
 		t.Fatalf("delete idempotency failed: first=%q second=%q err=%v", firstDelete, secondDelete, err)
 	}
+	if err := app.SaveCloudflareToken(context.Background(), userContext, "cf-token-3-with-enough-length", reauthTicket); err != nil {
+		t.Fatalf("pending replacement token: %v", err)
+	}
+	var pendingVerifyJobs int
+	if err := database.QueryRow(`SELECT COUNT(1) FROM jobs WHERE type='cloudflare_token_verify' AND resource_id=? AND status IN ('pending','retry_wait')`, user.ID).Scan(&pendingVerifyJobs); err != nil || pendingVerifyJobs != 1 {
+		t.Fatalf("pending token verification job count: %d %v", pendingVerifyJobs, err)
+	}
 	if err := app.ClearCloudflareToken(context.Background(), userContext, "wrong-password"); err != ErrInvalidCredentials {
 		t.Fatalf("cloudflare clear accepted an invalid re-authentication: %v", err)
 	}
@@ -291,5 +310,20 @@ func TestCloudflareTokenAndDomainJobs(t *testing.T) {
 	}
 	if status, err := app.CloudflareStatus(context.Background(), user.ID); err != nil || status["configured"] != false {
 		t.Fatalf("cloudflare status remained configured after clear: %#v %v", status, err)
+	}
+	var activeVersion sql.NullInt64
+	if err := database.QueryRow(`SELECT active_cloudflare_token_version FROM users WHERE id=?`, user.ID).Scan(&activeVersion); err != nil || activeVersion.Valid {
+		t.Fatalf("active Cloudflare token version was not cleared: %#v %v", activeVersion, err)
+	}
+	var ciphertext, nonce []byte
+	if err := database.QueryRow(`SELECT ciphertext,nonce FROM cloudflare_credentials WHERE user_id=? AND token_version=3`, user.ID).Scan(&ciphertext, &nonce); err != nil {
+		t.Fatal(err)
+	}
+	if len(ciphertext) != 0 || len(nonce) != 0 {
+		t.Fatalf("cleared Cloudflare ciphertext/nonce remained: ciphertext=%d nonce=%d", len(ciphertext), len(nonce))
+	}
+	var canceledVerifyJobs int
+	if err := database.QueryRow(`SELECT COUNT(1) FROM jobs WHERE type='cloudflare_token_verify' AND resource_id=? AND status='canceled' AND last_error='CLOUDFLARE_TOKEN_CLEARED'`, user.ID).Scan(&canceledVerifyJobs); err != nil || canceledVerifyJobs != 1 {
+		t.Fatalf("pending Cloudflare verification job was not canceled: %d %v", canceledVerifyJobs, err)
 	}
 }

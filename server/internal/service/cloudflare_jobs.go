@@ -335,9 +335,9 @@ func (a *App) deleteDomainExternal(ctx context.Context, job jobs.Job) error {
 	if managed != 1 || adopted == 1 && managed != 1 || recordID == "" || zoneID == "" {
 		return a.finalizeDeletedDomain(ctx, domainID)
 	}
+	var version, keyVersion int64
 	var ciphertext, nonce []byte
-	var keyVersion int64
-	if err := a.DB.QueryRowContext(ctx, `SELECT c.ciphertext,c.nonce,c.key_version FROM cloudflare_credentials c JOIN users u ON u.active_cloudflare_token_version=c.token_version AND u.id=c.user_id WHERE c.user_id=? AND c.status='valid'`, userID).Scan(&ciphertext, &nonce, &keyVersion); err != nil {
+	if err := a.DB.QueryRowContext(ctx, `SELECT c.token_version,c.ciphertext,c.nonce,c.key_version FROM cloudflare_credentials c JOIN users u ON u.active_cloudflare_token_version=c.token_version AND u.id=c.user_id WHERE c.user_id=? AND c.status='valid'`, userID).Scan(&version, &ciphertext, &nonce, &keyVersion); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return a.markDomainDeleteFailure(ctx, domainID, "CLOUDFLARE_TOKEN_MISSING", "Cloudflare Token is required to remove the managed DNS record.")
 		}
@@ -350,10 +350,12 @@ func (a *App) deleteDomainExternal(ctx context.Context, job jobs.Job) error {
 	provider := a.cloudflareProvider(string(token))
 	if err := provider.DeleteDNS(ctx, cloudflare.Zone{ID: zoneID}, recordID); err != nil {
 		if code, message, denied := cloudflarePermissionError(err); denied {
+			_ = a.recordCloudflareDNSWriteCapability(ctx, userID, version, false)
 			return a.markDomainDeleteFailure(ctx, domainID, code, message)
 		}
 		return err
 	}
+	_ = a.recordCloudflareDNSWriteCapability(ctx, userID, version, true)
 	return a.finalizeDeletedDomain(ctx, domainID)
 }
 
@@ -450,9 +452,30 @@ func (a *App) verifyCloudflareToken(ctx context.Context, job jobs.Job) error {
 		}
 		return err
 	}
+	// Clear can retire the credential after the worker claims this job. Do not
+	// decrypt or call the provider for a credential that is no longer pending.
+	var currentStatus string
+	if err := a.DB.QueryRowContext(ctx, `SELECT status FROM cloudflare_credentials WHERE id=?`, credentialID).Scan(&currentStatus); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	if currentStatus != "pending" {
+		return nil
+	}
 	token, err := a.Crypto.DecryptVersioned(keyVersion, ciphertext, nonce, "user:"+userID+":cloudflare_token:v1")
 	if err != nil {
 		return err
+	}
+	if err := a.DB.QueryRowContext(ctx, `SELECT status FROM cloudflare_credentials WHERE id=?`, credentialID).Scan(&currentStatus); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	if currentStatus != "pending" {
+		return nil
 	}
 	provider := a.cloudflareProvider(string(token))
 	capabilities, err := provider.VerifyToken(ctx)
@@ -476,7 +499,17 @@ func (a *App) verifyCloudflareToken(ctx context.Context, job jobs.Job) error {
 	impactJSON, _ := json.Marshal(impacts)
 	now := nowString()
 	if err == nil {
-		_, err = a.DB.ExecContext(ctx, `UPDATE cloudflare_credentials SET status=?,capabilities_json=?,impact_domains_json=?,verified_at=? WHERE id=?`, status, string(encoded), string(impactJSON), now, credentialID)
+		result, updateErr := a.DB.ExecContext(ctx, `UPDATE cloudflare_credentials SET status=?,capabilities_json=?,impact_domains_json=?,verified_at=? WHERE id=? AND status='pending'`, status, string(encoded), string(impactJSON), now, credentialID)
+		err = updateErr
+		if err == nil {
+			if affected, rowsErr := result.RowsAffected(); rowsErr != nil {
+				err = rowsErr
+			} else if affected != 1 {
+				// Clear won the race. The provider result must not resurrect a
+				// retired credential or create a new active candidate.
+				return nil
+			}
+		}
 	}
 	if err == nil {
 		_ = a.Audit(ctx, AuthContext{UserID: userID, Role: "system"}, "cloudflare_token_verified", "cloudflare_token", fmt.Sprint(version), status, map[string]interface{}{"token_status": status, "impact_domain_count": len(impacts)}, "")
@@ -526,6 +559,40 @@ func (a *App) cloudflareDomainImpacts(ctx context.Context, userID string, provid
 		impacts = append(impacts, impact)
 	}
 	return impacts, rows.Err()
+}
+
+// recordCloudflareDNSWriteCapability records the result of a real DNS write
+// without performing a destructive permission probe during token upload.
+func (a *App) recordCloudflareDNSWriteCapability(ctx context.Context, userID string, version int64, allowed bool) error {
+	var encoded string
+	if err := a.DB.QueryRowContext(ctx, `SELECT COALESCE(capabilities_json,'{}') FROM cloudflare_credentials WHERE user_id=? AND token_version=? AND status='valid'`, userID, version).Scan(&encoded); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	capabilities := cloudflare.Capabilities{}
+	if err := json.Unmarshal([]byte(encoded), &capabilities); err != nil {
+		return err
+	}
+	capabilities.DNSWriteChecked = true
+	capabilities.DNSWrite = allowed
+	filtered := make([]string, 0, len(capabilities.Missing)+1)
+	for _, missing := range capabilities.Missing {
+		if missing != "DNS.Write" {
+			filtered = append(filtered, missing)
+		}
+	}
+	if !allowed {
+		filtered = append(filtered, "DNS.Write")
+	}
+	capabilities.Missing = filtered
+	updated, err := json.Marshal(capabilities)
+	if err != nil {
+		return err
+	}
+	_, err = a.DB.ExecContext(ctx, `UPDATE cloudflare_credentials SET capabilities_json=? WHERE user_id=? AND token_version=? AND status='valid'`, string(updated), userID, version)
+	return err
 }
 
 func (a *App) syncDomainDNS(ctx context.Context, job jobs.Job) error {
@@ -618,19 +685,23 @@ func (a *App) syncDomainDNS(ctx context.Context, job jobs.Job) error {
 		selected, err = a.upsertDNSWithRecovery(ctx, provider, zone, desired)
 		if err != nil {
 			if code, message, denied := cloudflarePermissionError(err); denied {
+				_ = a.recordCloudflareDNSWriteCapability(ctx, userID, version, false)
 				return a.markDomainDNSFailure(ctx, domainID, code, message)
 			}
 			return err
 		}
+		_ = a.recordCloudflareDNSWriteCapability(ctx, userID, version, true)
 		managed = true
 	} else if (action == "overwrite" || action == "sync") && (selected.Content != desired.Content || selected.Proxied != desired.Proxied || selected.Type != desired.Type || selected.TTL != desired.TTL) {
 		selected, err = a.upsertDNSWithRecovery(ctx, provider, zone, desired)
 		if err != nil {
 			if code, message, denied := cloudflarePermissionError(err); denied {
+				_ = a.recordCloudflareDNSWriteCapability(ctx, userID, version, false)
 				return a.markDomainDNSFailure(ctx, domainID, code, message)
 			}
 			return err
 		}
+		_ = a.recordCloudflareDNSWriteCapability(ctx, userID, version, true)
 		managed = true
 	} else if action == "sync" {
 		managed = true
