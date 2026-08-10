@@ -70,6 +70,7 @@ jobs:
       - run: ruby -c scripts/external-acceptance.rb
       - run: ruby scripts/test-external-acceptance.rb
       - run: ruby scripts/release-workflow-policy.rb
+      - run: ruby scripts/performance-workflow-policy.rb
       - run: ruby scripts/external-workflow-policy.rb
       - run: ruby -c scripts/cloudflare-sandbox-e2e.rb
       - run: ruby scripts/test-cloudflare-sandbox-e2e.rb

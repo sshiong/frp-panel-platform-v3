@@ -180,6 +180,7 @@
 | 2026-08-10 | 性能验收状态准确化 | 文档修正；PERF-001/002/005/006/007 的本机与 Ubuntu Hosted profile 数值仍保留，但因尚未在标准要求的固定 2 vCPU/2 GiB Linux 与目标网络环境签收，矩阵状态改为 `部分通过`，避免把开发/Hosted 结果误报为正式容量基线。 |
 | 2026-08-10 | 外部收集器逐步骤证据结构化 | 已实现并通过托管复核；本地、阻塞和跳过步骤统一保存标准要求的 `environment`、`steps`、`expected`、`actual`、`artifacts`、`operator`、`executed_at` 字段，命令输出写入 0600 脱敏日志；`scripts/test-external-acceptance.rb` 增加字段与文件权限回归。提交 [`b444975`](https://github.com/sshiong/frp-panel-platform-v3/commit/b444975d7dc6b4ab1935bedf9d9229ac1dfe1c49) 的 [`ci run 31368552030`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31368552030) 与 [`CodeQL run 31368552064`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31368552064) 全部通过；缺少真实 Provider/目标环境/签名/负责人证据仍保持 blocked。 |
 | 2026-08-10 | 正式发布 workflow 门禁收口 | 已实现并通过本地策略校验；release checkout 在外部证据和 cosign 签名之前重新执行 `make test lint accessibility`，并自动安装 Staticcheck 与 Chromium；`scripts/release-workflow-policy.rb` 强制质量门禁先于外部证据，避免正式发布依赖历史 PR 状态。真实 Provider、签名和负责人签字仍待外部。 |
+| 2026-08-10 | 固定 2 vCPU/2 GiB 性能 profile | 已实现，待 Ubuntu runner 实测；`performance.yml` 新增 Docker 资源限制为 2 vCPU/2 GiB、SQLite WAL 的 Linux profile，运行 PERF-001/002/003/005/006/007 并上传独立日志；`scripts/performance-workflow-policy.rb` 已接入 contract/CI，当前 PERF 状态保持 `部分通过`，不提前宣称目标基线通过。 |
 
 ## 未决与发布阻断项
 

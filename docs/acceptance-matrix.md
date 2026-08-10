@@ -150,11 +150,11 @@ profile 与固定 Linux 2 vCPU/2 GiB 目标基线。该 revision 的
 | API-005 | 本地通过 | Client 发送 `X-FRP-Client-Version`；过旧/非法版本返回 426、`Upgrade-Required` 和 `CLIENT_VERSION_UNSUPPORTED`，兼容版本可登录并显示可升级提示，回归测试通过；Server/Client 发行版本可由独立 `-ldflags` 注入并进入 compatibility API。 |
 | API-006 | 本地通过 | WebSocket 指数退避、抖动、lease heartbeat 测试通过。 |
 | API-007 | 本地通过 | 丢通知触发 full sync，配置 hash/version 收敛测试通过。 |
-| PERF-001 | 部分通过 | 本机 profile 通过；Ubuntu 24.04 hosted run 31191465839 的 100 并发读 p95=102.321716ms、错误率 0；固定 Linux 2 vCPU/2 GiB release 基线仍待签收。 |
-| PERF-002 | 部分通过 | 本机 profile 通过；同一 hosted run 的 20 并发写 p95=45.921474ms、错误率 0；目标机基线仍待外部。 |
-| PERF-003 | 部分通过 | Ubuntu 24.04 hosted run 31191465839 的 1000 Mapping + 2000 Domain Router snapshot generate/apply=523.973835ms；固定目标硬件结果尚未签收。 |
+| PERF-001 | 部分通过 | 本机 profile 通过；Ubuntu 24.04 hosted run 31191465839 的 100 并发读 p95=102.321716ms、错误率 0；新增固定 2 vCPU/2 GiB Linux workflow profile，真实 run 证据仍待签收。 |
+| PERF-002 | 部分通过 | 本机 profile 通过；同一 hosted run 的 20 并发写 p95=45.921474ms、错误率 0；新增固定 2 vCPU/2 GiB Linux workflow profile，真实 run 证据仍待签收。 |
+| PERF-003 | 部分通过 | Ubuntu 24.04 hosted run 31191465839 的 1000 Mapping + 2000 Domain Router snapshot generate/apply=523.973835ms；新增固定 2 vCPU/2 GiB Linux workflow profile，真实 run 证据仍待签收。 |
 | PERF-004 | 本地通过 | snapshot reload 不主动中断 in-flight HTTP 流。 |
-| PERF-005 | 部分通过 | 本机 profile 通过；同一 hosted run 的 200 Mapping config generate/sign=4.54487ms；目标机结果待外部。 |
+| PERF-005 | 部分通过 | 本机 profile 通过；同一 hosted run 的 200 Mapping config generate/sign=4.54487ms；新增固定 2 vCPU/2 GiB Linux workflow profile，真实 run 证据仍待签收。 |
 | PERF-006 | 部分通过 | 本机 profile 通过；同一 hosted run 的配置提交到 Client apply=6.235335ms；目标网络矩阵待外部。 |
 | PERF-007 | 部分通过 | 本机 profile 通过；同一 hosted run 的 WebSocket=65.514317ms、旧 HTTP=0.376666ms、旧 FRP Login=0.325481ms；生产延迟基线待外部。 |
 | REL-001 | 本地通过 | Supervisor 临时配置/last-good/重启恢复测试通过。 |
