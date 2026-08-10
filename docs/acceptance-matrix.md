@@ -13,12 +13,16 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 - `部分通过`：本地实现已有证据，但标准要求的外部/目标环境仍未完成；
 - `待外部`：需要真实 Provider、Linux、Docker、CA、签字或目标硬件。
 
-最近一次已验证实现与托管门禁证据：实现 revision `a3cc167fea202f128182bd8aa06db9f49c0b22fa` 的 CI
-run `31369627764` 与 CodeQL run `31369627644` 均成功；固定性能 workflow run
-`31370452806` 在 Ubuntu 24.04 Docker 2 vCPU/2 GiB profile 下通过 PERF-001/002/003/005/006/007；导航按钮使用
+最近一次已验证实现与托管门禁证据：当前 revision
+`4b6d2655a0f210028542de08d2840275470bdc75` 的 CI run
+`31375206383` 与 CodeQL run `31375206666` 均成功；required checks 还包括
+coverage、固定 FRP Linux E2E、fault injection、security、container scan 和
+release metadata。固定性能 workflow run `31370452806` 在 Ubuntu 24.04 Docker
+2 vCPU/2 GiB profile 下通过 PERF-001/002/003/005/006/007；导航按钮使用
 `aria-current="page"`，所有面板按钮显式声明 `type`，性能项也已准确区分开发/Hosted
-profile 与固定 Linux 2 vCPU/2 GiB 目标基线。该 revision 的
-`make external-acceptance` 报告为 9 passed / 0 failed / 1 blocked。
+profile 与固定 Linux 2 vCPU/2 GiB 目标基线。当前 revision 的
+`make external-acceptance` 报告为 10 passed / 0 failed / 1 blocked，
+`make acceptance-evidence` 索引为 142 条记录且保持 `blocked`。
 `output/external-acceptance.json` 的 40 位 commit 字段始终是当前工作树验收报告的权威绑定；
 阻断项仍严格限于真实 Provider、目标环境、正式签名和负责人签字，不改变下方逐项状态的外部证据要求。
 

@@ -196,7 +196,7 @@
 3. 使用真实 Cloudflare Sandbox + ACME Staging 完成 DNS-01 传播、TXT 清理、证书原子替换与 Router TLS SNI/Host 热切换；本地 Provider 已实现但未伪造外部成功。
 4. 加密归档备份恢复的 clean-host 灾备演练、生产环境 WAL checkpoint 长时观察和目标磁盘满/时钟偏差故障注入；实现级 disposable Linux 自动化已补齐但不替代目标部署演练。
 5. 生产部署容量/网络签收：固定 Ubuntu 24.04 Docker 2 vCPU/2 GiB、SQLite WAL profile 已通过 PERF-001/002/003/005/006/007；仍需真实部署环境确认长期容量、磁盘和网络行为。
-6. 生成正式 cosign 签名并完成发布负责人、安全负责人和测试负责人签字；GitHub Actions/CodeQL、SAST/SCA、Secret scan 和 container scan 已在提交 [`2f73156`](https://github.com/sshiong/frp-panel-platform-v3/commit/2f731567da6933d4fc2ae1db333ad9d61fc2ca19) 全绿。
+6. 生成正式 cosign 签名并完成发布负责人、安全负责人和测试负责人签字；当前 revision [`4b6d265`](https://github.com/sshiong/frp-panel-platform-v3/commit/4b6d2655a0f210028542de08d2840275470bdc75) 的 [`ci run 31375206383`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31375206383) 与 [`CodeQL run 31375206666`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31375206666) 已全绿，SEC-008 正式 tag 签名和 DOD-001 三方签字仍待发布环境。
 7. 完成上述 P0/P1 外部验收前，仓库只能作为开发预览，不得声明生产就绪。
 
 ## 更新规则

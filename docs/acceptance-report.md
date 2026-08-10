@@ -2,6 +2,21 @@
 
 This report records evidence available in the local development environment. It is intentionally not a production-release sign-off: Linux/production FRP deployment matrix, Cloudflare Sandbox, ACME Staging, production TLS termination, formal security scanners and signing still require their external environments.
 
+## Current revision evidence
+
+The current revision is `4b6d2655a0f210028542de08d2840275470bdc75`. Its PR CI run
+[`31375206383`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31375206383)
+and CodeQL run
+[`31375206666`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31375206666)
+passed all required checks, including contract, coverage, Go race/static analysis,
+both panel builds and WCAG checks, fixed Linux FRP E2E, fault injection, fuzz,
+security, container scanning and release metadata. The current local fixed-artifact
+collector report is bound to the same revision and records 10 passed, 0 failed and
+1 blocked step; the blocked step is the intentionally absent reviewed Provider,
+target-environment, signing and owner-approval bundle. The 142-record acceptance
+index is also bound to this revision and remains `blocked` while the matrix has
+incomplete external rows. PR #2 remains open for required human review.
+
 ## Verified locally
 
 - Separate Server and Client Go modules compile and test independently.
