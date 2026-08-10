@@ -488,8 +488,14 @@ func (a *App) verifyCloudflareToken(ctx context.Context, job jobs.Job) error {
 		return nil
 	}
 	provider := a.cloudflareProvider(string(token))
-	capabilities, err := provider.VerifyToken(ctx)
+	guardedCtx := cloudflare.WithRequestGuard(ctx, func(guardCtx context.Context) error {
+		return a.ensurePendingCloudflareToken(guardCtx, userID, version)
+	})
+	capabilities, err := provider.VerifyToken(guardedCtx)
 	if err != nil {
+		if errors.Is(err, ErrCloudflareTokenInactive) {
+			return cloudflareTokenJobError(err)
+		}
 		return err
 	}
 	encoded, _ := json.Marshal(capabilities)
@@ -501,8 +507,11 @@ func (a *App) verifyCloudflareToken(ctx context.Context, job jobs.Job) error {
 	}
 	impacts := []CloudflareDomainImpact{}
 	if status == "verified_pending" {
-		impacts, err = a.cloudflareDomainImpacts(ctx, userID, provider)
+		impacts, err = a.cloudflareDomainImpacts(guardedCtx, userID, provider)
 		if err != nil {
+			if errors.Is(err, ErrCloudflareTokenInactive) {
+				return cloudflareTokenJobError(err)
+			}
 			return err
 		}
 	}
@@ -1018,6 +1027,24 @@ func (a *App) cloudflareTokenRequestContext(ctx context.Context, userID string, 
 func (a *App) ensureActiveCloudflareToken(ctx context.Context, userID string, version int64) error {
 	var present int
 	err := a.DB.QueryRowContext(ctx, `SELECT 1 FROM users u JOIN cloudflare_credentials c ON c.user_id=u.id AND c.token_version=u.active_cloudflare_token_version WHERE u.id=? AND c.token_version=? AND c.status='valid' LIMIT 1`, userID, version).Scan(&present)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrCloudflareTokenInactive
+	}
+	return err
+}
+
+func (a *App) ensurePendingCloudflareToken(ctx context.Context, userID string, version int64) error {
+	var present int
+	err := a.DB.QueryRowContext(ctx, `SELECT 1 FROM cloudflare_credentials WHERE user_id=? AND token_version=? AND status='pending' LIMIT 1`, userID, version).Scan(&present)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrCloudflareTokenInactive
+	}
+	return err
+}
+
+func (a *App) ensureVerifiedPendingCloudflareToken(ctx context.Context, userID string, version int64) error {
+	var present int
+	err := a.DB.QueryRowContext(ctx, `SELECT 1 FROM cloudflare_credentials WHERE user_id=? AND token_version=? AND status='verified_pending' LIMIT 1`, userID, version).Scan(&present)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrCloudflareTokenInactive
 	}

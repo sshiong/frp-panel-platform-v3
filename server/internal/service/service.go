@@ -25,6 +25,7 @@ import (
 	"github.com/ricardo/frp-panel-platform/server/internal/db"
 	"github.com/ricardo/frp-panel-platform/server/internal/id"
 	"github.com/ricardo/frp-panel-platform/server/internal/jobs"
+	"github.com/ricardo/frp-panel-platform/server/internal/providers/cloudflare"
 	"golang.org/x/net/idna"
 )
 
@@ -2008,12 +2009,18 @@ func (a *App) ActivateCloudflareToken(ctx context.Context, ac AuthContext, versi
 		return nil, err
 	}
 	provider := a.cloudflareProvider(string(token))
-	impacts, err := a.cloudflareDomainImpacts(ctx, ac.UserID, provider)
+	guardedCtx := cloudflare.WithRequestGuard(ctx, func(guardCtx context.Context) error {
+		return a.ensureVerifiedPendingCloudflareToken(guardCtx, ac.UserID, version)
+	})
+	impacts, err := a.cloudflareDomainImpacts(guardedCtx, ac.UserID, provider)
 	if err != nil {
 		return nil, err
 	}
+	if err := a.ensureVerifiedPendingCloudflareToken(ctx, ac.UserID, version); err != nil {
+		return nil, err
+	}
 	impactJSON, _ := json.Marshal(impacts)
-	if _, err := a.DB.ExecContext(ctx, `UPDATE cloudflare_credentials SET impact_domains_json=? WHERE id=?`, string(impactJSON), credentialID); err != nil {
+	if _, err := a.DB.ExecContext(ctx, `UPDATE cloudflare_credentials SET impact_domains_json=? WHERE id=? AND status='verified_pending'`, string(impactJSON), credentialID); err != nil {
 		return nil, err
 	}
 	if len(impacts) > 0 && !confirmImpacts {
@@ -2028,8 +2035,14 @@ func (a *App) ActivateCloudflareToken(ctx context.Context, ac AuthContext, versi
 	if _, err := tx.ExecContext(ctx, `UPDATE cloudflare_credentials SET status='retired',retired_at=? WHERE user_id=? AND status='valid' AND token_version <> ?`, now, ac.UserID, version); err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE cloudflare_credentials SET status='valid',activated_at=?,impact_domains_json='[]' WHERE id=? AND status='verified_pending'`, now, credentialID); err != nil {
+	result, err := tx.ExecContext(ctx, `UPDATE cloudflare_credentials SET status='valid',activated_at=?,impact_domains_json='[]' WHERE id=? AND status='verified_pending'`, now, credentialID)
+	if err != nil {
 		return nil, err
+	}
+	if affected, rowsErr := result.RowsAffected(); rowsErr != nil {
+		return nil, rowsErr
+	} else if affected != 1 {
+		return nil, ErrCloudflareTokenInactive
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE users SET active_cloudflare_token_version=?,updated_at=? WHERE id=?`, version, now, ac.UserID); err != nil {
 		return nil, err

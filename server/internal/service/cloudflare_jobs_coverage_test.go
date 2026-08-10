@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -282,6 +283,105 @@ func TestRunJobsSeedsAndStopsOnCancellation(t *testing.T) {
 }
 
 func TestCloudflareJobsBlockWhenTokenIsClearedDuringExternalWork(t *testing.T) {
+	t.Run("token verification", func(t *testing.T) {
+		fixture := newServiceCoverageFixture(t)
+		ctx := context.Background()
+		app := fixture.app
+		app.Config.CloudflareAPIBaseURL = "https://api.example.test/client/v4"
+		var transportCalls int
+		cleared := false
+		app.CloudflareHTTPClient = &http.Client{Transport: cloudflareRoundTripper(func(req *http.Request) (*http.Response, error) {
+			transportCalls++
+			if !cleared {
+				cleared = true
+				if err := app.ClearCloudflareToken(ctx, fixture.client, fixture.password); err != nil {
+					return nil, err
+				}
+			}
+			return (&jobsCoverageProvider{}).RoundTrip(req)
+		})}
+		ticket, _, err := app.IssueReauthTicket(ctx, fixture.client, fixture.password)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := app.SaveCloudflareToken(ctx, fixture.client, "verification-token-abcdefghijklmnopqrstuvwxyz", ticket); err != nil {
+			t.Fatal(err)
+		}
+		job, err := app.Jobs.Claim(ctx)
+		if err != nil || job.Type != "cloudflare_token_verify" {
+			t.Fatalf("Cloudflare token job=%#v err=%v", job, err)
+		}
+		err = app.handleJob(ctx, job)
+		var blocked *jobs.BlockedError
+		if !errors.As(err, &blocked) || !errors.Is(err, ErrCloudflareTokenInactive) {
+			t.Fatalf("token verification was not blocked after clear: err=%v", err)
+		}
+		if transportCalls != 1 {
+			t.Fatalf("stale token verification reached the provider after clear: transport calls=%d", transportCalls)
+		}
+		if err := app.Jobs.Block(ctx, job.ID, blocked); err != nil {
+			t.Fatal(err)
+		}
+		var status string
+		if err := app.DB.QueryRowContext(ctx, `SELECT status FROM cloudflare_credentials WHERE user_id=? ORDER BY token_version DESC LIMIT 1`, fixture.client.UserID).Scan(&status); err != nil {
+			t.Fatal(err)
+		}
+		if status != "retired" {
+			t.Fatalf("cleared verification credential status=%q", status)
+		}
+	})
+
+	t.Run("activation", func(t *testing.T) {
+		fixture := newServiceCoverageFixture(t)
+		ctx := context.Background()
+		app := fixture.app
+		app.Config.CloudflareAPIBaseURL = "https://api.example.test/client/v4"
+		app.CloudflareHTTPClient = &http.Client{Transport: &jobsCoverageProvider{}}
+		ticket, _, err := app.IssueReauthTicket(ctx, fixture.client, fixture.password)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := app.SaveCloudflareToken(ctx, fixture.client, "activation-token-abcdefghijklmnopqrstuvwxyz", ticket); err != nil {
+			t.Fatal(err)
+		}
+		job, err := app.Jobs.Claim(ctx)
+		if err != nil || job.Type != "cloudflare_token_verify" {
+			t.Fatalf("Cloudflare token job=%#v err=%v", job, err)
+		}
+		if err := app.handleJob(ctx, job); err != nil {
+			t.Fatal(err)
+		}
+		if err := app.Jobs.Complete(ctx, job.ID); err != nil {
+			t.Fatal(err)
+		}
+
+		cleared := false
+		transportCalls := 0
+		app.CloudflareHTTPClient = &http.Client{Transport: cloudflareRoundTripper(func(req *http.Request) (*http.Response, error) {
+			transportCalls++
+			if !cleared {
+				cleared = true
+				if err := app.ClearCloudflareToken(ctx, fixture.client, fixture.password); err != nil {
+					return nil, err
+				}
+			}
+			return (&jobsCoverageProvider{}).RoundTrip(req)
+		})}
+		if _, err := app.ActivateCloudflareToken(ctx, fixture.client, 1, false, ticket); !errors.Is(err, ErrCloudflareTokenInactive) {
+			t.Fatalf("activation was not stopped after clear: %v", err)
+		}
+		if transportCalls != 1 {
+			t.Fatalf("stale activation reached the provider after clear: transport calls=%d", transportCalls)
+		}
+		var active sql.NullInt64
+		if err := app.DB.QueryRowContext(ctx, `SELECT active_cloudflare_token_version FROM users WHERE id=?`, fixture.client.UserID).Scan(&active); err != nil {
+			t.Fatal(err)
+		}
+		if active.Valid {
+			t.Fatalf("cleared candidate became active: %v", active.Int64)
+		}
+	})
+
 	t.Run("dns", func(t *testing.T) {
 		fixture := newServiceCoverageFixture(t)
 		ctx := context.Background()

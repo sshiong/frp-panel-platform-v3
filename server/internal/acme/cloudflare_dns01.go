@@ -256,6 +256,9 @@ func (p *CloudflareDNS01Provider) loadOrRegisterAccount(ctx context.Context) (ac
 		return accountMaterial{}, err
 	}
 	client := &acme.Client{Key: key, DirectoryURL: p.config.DirectoryURL, HTTPClient: p.config.HTTPClient, UserAgent: "frp-panel-platform/acme-dns01"}
+	if err := checkRequestGuard(ctx); err != nil {
+		return accountMaterial{}, err
+	}
 	account, err := client.Register(ctx, &acme.Account{Contact: []string{"mailto:" + p.config.Email}}, func(string) bool { return true })
 	if err != nil {
 		return accountMaterial{}, err

@@ -36,6 +36,7 @@
 - [x] Cloudflare Provider HTTP 适配器支持 Verify/ListZones/UpsertDNS/DeleteDNS，并以独立单元测试覆盖请求方法与路径。
 - [x] Cloudflare Token 清除竞态已加固：DNS/Domain delete/ACME Job 绑定具体 `token_version`，每次 Cloudflare HTTP 请求、ACME DNS-01 长流程检查点和本地成功提交前重新验证 active credential；清除/轮换期间 Job 返回 durable `BlockedError`，不会发布旧 DNS 或证书状态，挑战清理也继承同一 guard。
 - [x] Cloudflare/ACME guard 有 provider 级回归：复合 `UpsertDNS` 的内部第二次 HTTP 请求和 ACME DNS-01 发起订单前检查点均在凭证失效时 fail-closed，测试确认不会触发后续网络请求。
+- [x] Cloudflare Token 验证与激活竞态继续收口：Token capability/Zone 评估逐请求绑定 `pending` 或 `verified_pending` 版本；清除/轮换发生在验证或显式激活期间时，后续 Provider 请求和 active-version 提交均被阻断，新增验证与激活清除回归覆盖。
 - [x] Domain DNS 意图支持 A/AAAA/CNAME、TTL 和由 HTTPS 模式派生的 proxied；目标记录先落库再进入可重试 Provider Operation，Client Domain 页面展示记录状态。
 - [x] Cloudflare Job Worker 支持 token pending 验证、Zone 分页、DNS 冲突 adopt/overwrite/cancel、幂等去重、租约接管与可重试 Operation。
 - [x] Cloudflare 401/403 权限错误与网络错误分流；ACME blocked job 重启唤醒、到期前检查、证书/chain 原子文件写入与 managed DNS 删除补偿已接入。
@@ -202,6 +203,7 @@
 | 2026-08-10 | 固定 FRP 本机真实运行态证据补齐 | 已实现并通过真实本机运行；使用官方 FRP v0.68.0 Darwin ARM64 `frps/frpc`（SHA-256 已核对）重新执行真实 TCP 代理、固定 FRPC `verify` 和 FRPS/FRPC Plugin 网络 E2E，三项均通过。`make external-acceptance` 报告绑定 revision [`e40c7e3`](https://github.com/sshiong/frp-panel-platform-v3/commit/e40c7e3f24e20c9d59b14c5316bf9ce94fc69563)，结果从 7/0/4 提升为 10 passed / 0 failed / 1 blocked；e40c7e3 的 [`ci run 31389771137`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31389771137) 与 [`CodeQL run 31389770849`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31389770849) 也全部通过。唯一 blocked 是未配置的 Cloudflare Sandbox、ACME/TLS、目标环境、正式签名和负责人审批证据，未伪造外部通过。 |
 | 2026-08-10 | Cloudflare Token 清除竞态回归 | 本地通过；新增 DNS/ACME 运行中清除 Token 测试，确认旧 `token_version` 在每次 Provider HTTP 请求、ACME DNS-01 检查点和证书提交前均被阻断；DNS 不产生 managed 成功记录，ACME 保持 `pending` 且不留下证书文件。`go test ./internal/service ./internal/acme ./internal/providers/cloudflare` 通过；真实 Cloudflare/ACME Sandbox 证据仍待外部。 |
 | 2026-08-10 | 清除竞态修复托管复核与当前证据刷新 | 通过/按标准阻断；提交 [`77b41db`](https://github.com/sshiong/frp-panel-platform-v3/commit/77b41db566098c8f3f8c0181b0399d489c501b55) 的 [`ci run 31392232994`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31392232994) 与 [`CodeQL run 31392232917`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31392232917) 全部成功，包含 Server/Client race、coverage、contract、security、fuzz、双面板、Linux FRP、fault-injection、target profile、container scan 和 release metadata；当前 revision 的固定 FRP 收集器为 10 passed / 0 failed / 1 blocked，唯一 blocked 是缺少真实 Cloudflare/ACME/TLS/目标环境/正式签名/负责人证据。 |
+| 2026-08-10 | Token 验证/激活竞态收口 | 本地通过；Token 验证链路在每次 Provider 请求前确认候选仍为 `pending`，显式激活在 Zone 影响评估和事务写入前确认候选仍为 `verified_pending`，清除期间不会继续使用旧凭据或将已清除版本设为 active；新增验证与激活竞态回归，并补充 ACME 新账户注册前 guard。真实 Sandbox/ACME 证据仍待外部。 |
 
 ## 未决与发布阻断项
 

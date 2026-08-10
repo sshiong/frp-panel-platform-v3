@@ -131,3 +131,36 @@ func TestIssueDNS01RequestGuardStopsBeforeACMEOrder(t *testing.T) {
 		t.Fatalf("guard/ACME transport calls=%d/%d, want 2/0", guardCalls, transportCalls)
 	}
 }
+
+func TestIssueDNS01RequestGuardStopsBeforeAccountRegistration(t *testing.T) {
+	root := t.TempDir()
+	wrappingKey := []byte("01234567890123456789012345678901")
+	transportCalls := 0
+	provider, err := NewCloudflareDNS01(CloudflareDNS01Config{
+		DirectoryURL:   "https://acme.example.test/directory",
+		Email:          "ops@example.test",
+		AccountKeyPath: filepath.Join(root, "account.key"),
+		HTTPClient: &http.Client{Transport: failingRoundTripper(func(*http.Request) (*http.Response, error) {
+			transportCalls++
+			return nil, errors.New("unexpected ACME request")
+		})},
+	}, wrappingKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guardErr := errors.New("cloudflare credential was cleared")
+	guardCalls := 0
+	ctx := cloudflare.WithRequestGuard(context.Background(), func(context.Context) error {
+		guardCalls++
+		if guardCalls == 1 {
+			return nil
+		}
+		return guardErr
+	})
+	if _, err := provider.IssueDNS01(ctx, "example.com"); !errors.Is(err, guardErr) {
+		t.Fatalf("guard error=%v, want %v", err, guardErr)
+	}
+	if guardCalls != 2 || transportCalls != 0 {
+		t.Fatalf("guard/ACME transport calls=%d/%d, want 2/0", guardCalls, transportCalls)
+	}
+}
