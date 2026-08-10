@@ -13,12 +13,13 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 - `部分通过`：本地实现已有证据，但标准要求的外部/目标环境仍未完成；
 - `待外部`：需要真实 Provider、Linux、Docker、CA、签字或目标硬件。
 
-最近一次文档同步证据：`358563136b92d3cf1352b5cceb7b85acc288cc20` 的 CI
-run `31364719059` 与 CodeQL run `31364719051` 均成功；同 revision 的
+最近一次实现与托管门禁证据：实现 revision `75fb6e6f5fb583beda4dffb9c68c319cc3d0127c` 的 CI
+run `31365422945` 与 CodeQL run `31365422966` 均成功；导航按钮新增
+`aria-current="page"` 语义并由认证态 Playwright 回归验证。该 revision 的
 `make external-acceptance` 报告为 9 passed / 0 failed / 1 blocked。当前
-`output/external-acceptance.json` 的 40 位 commit 字段是当前 revision 的
-权威绑定；阻断项仍严格限于真实 Provider、目标环境、正式签名和负责人
-签字，不改变下方逐项状态的外部证据要求。
+`output/external-acceptance.json` 的 40 位 commit 字段是最终工作树的权威绑定；
+阻断项仍严格限于真实 Provider、目标环境、正式签名和负责人签字，不改变
+下方逐项状态的外部证据要求。
 
 ## 架构、身份和地址
 
