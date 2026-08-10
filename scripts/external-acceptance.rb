@@ -7,6 +7,7 @@ require "time"
 
 ROOT = File.expand_path("..", __dir__)
 REPORT_PATH = File.expand_path(ENV.fetch("EXTERNAL_ACCEPTANCE_REPORT", "output/external-acceptance.json"), ROOT)
+ARTIFACT_DIR = File.expand_path(ENV.fetch("EXTERNAL_ACCEPTANCE_ARTIFACT_DIR", "output/external-acceptance"), ROOT)
 TAIL_LIMIT = 12_000
 
 class AcceptanceCollector
@@ -17,8 +18,10 @@ class AcceptanceCollector
   ].freeze
   EVIDENCE_ARTIFACT_FIELDS = %w[logs screenshots request_ids].freeze
 
-  def initialize
+  def initialize(artifact_dir: ARTIFACT_DIR)
     @steps = []
+    @operator = ENV.fetch("USER", "unknown")
+    @artifact_dir = File.expand_path(artifact_dir, ROOT)
     @secret_values = ENV.values_at(
       "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_E2E_API_TOKEN", "ACME_DNS_API_TOKEN",
       "FRP_ACME_E2E_EMAIL", "COSIGN_KEY",
@@ -30,6 +33,8 @@ class AcceptanceCollector
     started = Time.now.utc
     stdout, stderr, status = Open3.capture3(env, *command, chdir: cwd)
     finished = Time.now.utc
+    artifact_path = write_artifact(id, "STDOUT\n#{stdout}\nSTDERR\n#{stderr}")
+    actual = status.exitstatus.nil? ? "命令未返回退出码" : "命令退出码 #{status.exitstatus}"
     @steps << {
       "id" => id,
       "title" => title,
@@ -43,8 +48,16 @@ class AcceptanceCollector
       "exit_code" => status.exitstatus,
       "stdout_tail" => tail(stdout),
       "stderr_tail" => tail(stderr)
-    }
+    }.merge(evidence_fields(
+      environment: environment_snapshot(cwd, env),
+      steps: [command.map { |part| redact(part.to_s) }.join(" ")],
+      expected: "命令退出码为 0",
+      actual: actual,
+      artifact_path: artifact_path,
+      executed_at: started
+    ))
   rescue Errno::ENOENT => e
+    artifact_path = write_artifact(id, "命令不存在：#{e.message}")
     @steps << {
       "id" => id,
       "title" => title,
@@ -55,21 +68,52 @@ class AcceptanceCollector
       "working_directory" => cwd,
       "exit_code" => nil,
       "stderr_tail" => redact(e.message)
-    }
+    }.merge(evidence_fields(
+      environment: environment_snapshot(cwd, env),
+      steps: [command.map { |part| redact(part.to_s) }.join(" ")],
+      expected: "命令可执行并返回 0",
+      actual: "命令不存在：#{e.message}",
+      artifact_path: artifact_path,
+      executed_at: started
+    ))
   end
 
   def blocked(id, title, requirements, detail = nil)
+    started = Time.now.utc
+    actual = detail || "外部环境尚未提供该验收所需的安全依赖。"
+    artifact_path = write_artifact(id, "BLOCKED\n#{actual}\nREQUIREMENTS\n#{requirements.join("\n")}")
     @steps << {
       "id" => id,
       "title" => title,
       "status" => "blocked",
       "requirements" => requirements,
-      "detail" => detail || "外部环境尚未提供该验收所需的安全依赖。"
-    }
+      "detail" => actual
+    }.merge(evidence_fields(
+      environment: environment_snapshot(ROOT, {}),
+      steps: ["检查外部依赖和机器可读验收证据"],
+      expected: "所有所需外部依赖和证据均可验证",
+      actual: actual,
+      artifact_path: artifact_path,
+      executed_at: started
+    ))
   end
 
   def skipped(id, title, detail)
-    @steps << { "id" => id, "title" => title, "status" => "skipped", "detail" => detail }
+    started = Time.now.utc
+    artifact_path = write_artifact(id, "SKIPPED\n#{detail}")
+    @steps << {
+      "id" => id,
+      "title" => title,
+      "status" => "skipped",
+      "detail" => detail
+    }.merge(evidence_fields(
+      environment: environment_snapshot(ROOT, {}),
+      steps: ["检查调用方是否显式启用该门禁"],
+      expected: "门禁未被跳过",
+      actual: detail,
+      artifact_path: artifact_path,
+      executed_at: started
+    ))
   end
 
   def evidence(path)
@@ -82,13 +126,22 @@ class AcceptanceCollector
     errors = validate_evidence_bundle(document)
 
     if errors.empty?
+      started = Time.now.utc
+      artifact_path = write_artifact("provider-evidence", "REVIEWED EVIDENCE BUNDLE\nSOURCE\n#{path}\nGATES\n#{PROVIDER_GATES.join("\n")}")
       @steps << {
         "id" => "provider-evidence",
         "title" => "Provider、目标环境与发布签字证据",
         "status" => "passed",
         "source" => path,
         "gates" => PROVIDER_GATES
-      }
+      }.merge(evidence_fields(
+        environment: { "evidence_source" => path },
+        steps: ["验证 reviewed evidence bundle 的 schema、仓库和 commit 绑定"],
+        expected: "所有外部 gate 均有当前 revision 的 reviewed evidence",
+        actual: "#{PROVIDER_GATES.length} 个外部 gate 均通过结构校验",
+        artifact_path: artifact_path,
+        executed_at: started
+      ))
     else
       blocked(
         "provider-evidence",
@@ -98,13 +151,22 @@ class AcceptanceCollector
       )
     end
   rescue JSON::ParserError, KeyError => e
+    started = Time.now.utc
+    artifact_path = write_artifact("provider-evidence", "INVALID EVIDENCE BUNDLE\n#{e.message}")
     @steps << {
       "id" => "provider-evidence",
       "title" => "Provider、目标环境与发布签字证据",
       "status" => "failed",
       "source" => path,
       "stderr_tail" => redact("证据文件格式无效：#{e.message}")
-    }
+    }.merge(evidence_fields(
+      environment: { "evidence_source" => path },
+      steps: ["解析 reviewed evidence bundle"],
+      expected: "证据 bundle 为有效 JSON 且符合 v1 schema",
+      actual: "证据文件格式无效：#{e.message}",
+      artifact_path: artifact_path,
+      executed_at: started
+    ))
   end
 
   def validate_evidence_gate(gate_id, gate)
@@ -218,6 +280,39 @@ class AcceptanceCollector
   end
 
   private
+
+  def evidence_fields(environment:, steps:, expected:, actual:, artifact_path:, executed_at:)
+    {
+      "environment" => environment,
+      "steps" => steps,
+      "expected" => expected,
+      "actual" => actual,
+      "artifacts" => {
+        "logs" => [artifact_path],
+        "screenshots" => [],
+        "request_ids" => []
+      },
+      "operator" => @operator,
+      "executed_at" => executed_at.iso8601(6)
+    }
+  end
+
+  def environment_snapshot(cwd, env)
+    {
+      "host_os" => RUBY_PLATFORM,
+      "ci" => ENV.fetch("CI", "false"),
+      "working_directory" => cwd,
+      "provided_variables" => env.keys.sort.to_h { |name| [name, !env[name].to_s.empty?] }
+    }
+  end
+
+  def write_artifact(id, content)
+    FileUtils.mkdir_p(@artifact_dir)
+    path = File.join(@artifact_dir, "#{id}.log")
+    File.open(path, "w", 0o600) { |file| file.write(redact(content.to_s)) }
+    File.chmod(0o600, path)
+    path.start_with?("#{ROOT}/") ? path.delete_prefix("#{ROOT}/") : path
+  end
 
   def git_revision
     stdout, _stderr, status = Open3.capture3("git", "rev-parse", "HEAD", chdir: ROOT)

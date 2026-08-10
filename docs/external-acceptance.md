@@ -14,6 +14,15 @@ writes a redacted, mode `0600` report to
 `output/external-acceptance.json` (or `EXTERNAL_ACCEPTANCE_REPORT`) and prints
 the same JSON to stdout.
 
+Every collector step also records the acceptance evidence fields required by
+the standard: `environment`, `steps`, `expected`, `actual`, `artifacts`,
+`operator`, and `executed_at`. Redacted command output is written as a separate
+mode `0600` log under `output/external-acceptance/` and referenced from the
+step's `artifacts.logs`; set `EXTERNAL_ACCEPTANCE_ARTIFACT_DIR` to place those
+logs in another protected directory. A blocked step records the missing
+requirements and its blocked-state log, but never turns that state into a
+passing gate.
+
 Exit codes are intentionally strict:
 
 - `0`: every scheduled step passed;
