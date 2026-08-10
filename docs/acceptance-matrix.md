@@ -22,6 +22,12 @@ profile 与固定 Linux 2 vCPU/2 GiB 目标基线。该 revision 的
 `output/external-acceptance.json` 的 40 位 commit 字段始终是当前工作树验收报告的权威绑定；
 阻断项仍严格限于真实 Provider、目标环境、正式签名和负责人签字，不改变下方逐项状态的外部证据要求。
 
+发布 workflow 加固 revision [`639a184`](https://github.com/sshiong/frp-panel-platform-v3/commit/639a18483054072b9e273a09323fbaf872b1c0f2)
+已通过 [`ci run 31371628773`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31371628773)
+与 [`CodeQL run 31371628772`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31371628772)；它将固定性能脚本绑定到
+release checkout，并要求该性能门禁先于外部证据与签名。该记录不改变固定性能
+`31370452806` 的历史证据绑定，也不把真实 Provider、目标部署或签字状态改为通过。
+
 ## 架构、身份和地址
 
 | ID | 状态 | 实际结果与证据 |

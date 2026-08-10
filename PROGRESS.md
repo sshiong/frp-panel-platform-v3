@@ -182,6 +182,7 @@
 | 2026-08-10 | 正式发布 workflow 门禁收口 | 已实现并通过本地策略校验；release checkout 在外部证据和 cosign 签名之前重新执行 `make test lint accessibility` 与共享固定 2 vCPU/2 GiB 性能 profile，并自动安装 Staticcheck 与 Chromium；`scripts/release-workflow-policy.rb` 强制质量/当前 revision 性能门禁先于外部证据，避免正式发布依赖历史 PR 状态或过期性能报告。真实 Provider、签名和负责人签字仍待外部。 |
 | 2026-08-10 | 固定 2 vCPU/2 GiB 性能 profile | 已实现并通过 Ubuntu runner 实测；[`performance run 31370452806`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31370452806) 在 Docker 2 vCPU/2 GiB、SQLite WAL profile 下通过 PERF-001/002/003/005/006/007，日志已上传并同步矩阵数值；标准参考基线已满足，生产部署容量/网络签收仍保持独立外部门禁。 |
 | 2026-08-10 | 固定性能 runner PATH 修复 | 已验证；首次 run [`31370268438`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31370268438) 在测试开始前因 `bash -lc` 重置 Go 镜像 PATH 失败，未计入验收；改为非登录 `bash -c` 后 run [`31370452806`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31370452806) 完整通过，policy 已锁定该边界。 |
+| 2026-08-10 | 当前发布链路绑定复核 | 通过/按标准阻断；提交 [`639a184`](https://github.com/sshiong/frp-panel-platform-v3/commit/639a18483054072b9e273a09323fbaf872b1c0f2) 的 [`ci run 31371628773`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31371628773) 与 [`CodeQL run 31371628772`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31371628772) 全部成功；release checkout 现在在外部证据和 cosign 之前调用共享固定性能脚本，`make contract` 当前通过；该 revision 的外部报告为 9 passed / 0 failed / 1 blocked，唯一阻断仍是未提供真实 Provider/目标环境/签名/负责人签字证据。 |
 
 ## 未决与发布阻断项
 
