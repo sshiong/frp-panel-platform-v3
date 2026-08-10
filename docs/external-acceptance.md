@@ -91,7 +91,7 @@ not replace the release environment's full clean-host restore, system-clock, or
 target-disk exercise.
 
 The manual performance workflow now also includes a resource-constrained Linux
-profile with exactly 2 vCPU and 2 GiB RAM, SQLite WAL, and the complete
+profile with exactly 2 vCPU and 2 GiB RAM, SQLite WAL, an explicit warm-up, and the complete
 PERF-001/002/003/005/006/007 test suite; it uploads the fixed-profile log
 separately from the unconstrained hosted comparison. The release workflow
 applies additional hard gates: it runs `make test`,

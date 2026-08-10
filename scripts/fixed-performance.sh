@@ -35,6 +35,14 @@ docker run --rm \
     export GOCACHE=/tmp/frp-go-build GOMODCACHE=/tmp/frp-go-mod
     {
       printf "%s\n" "environment: Ubuntu 24.04 Docker; cpus=2; memory=2GiB; memory_swap=2GiB; sqlite=WAL; image=$HOSTNAME"
+      printf "%s\n" "warm-up: compile and exercise the same profile before thresholded measurement"
+      export FRP_PERF_WARMUP=1
+      cd /workspace/server
+      go test -v -run "^TestPerformance(Baseline|Scale|SessionReplacement)$" -count=1 ./internal/httpapi
+      cd /workspace/client
+      go test -v -run "^TestPerformanceConfigSubmitToClientApply$" -count=1 ./internal/app
+      unset FRP_PERF_WARMUP
+      printf "%s\n" "measured: thresholded steady-state profile"
       cd /workspace/server
       go test -v -run "^TestPerformance(Baseline|Scale|SessionReplacement)$" -count=1 ./internal/httpapi
       cd /workspace/client

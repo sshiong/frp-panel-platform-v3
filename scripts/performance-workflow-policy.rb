@@ -16,6 +16,8 @@ required_fragments = {
   "server performance profile" => "^TestPerformance(Baseline|Scale|SessionReplacement)$",
   "client performance profile" => "^TestPerformanceConfigSubmitToClientApply$",
   "performance scale flag" => "FRP_PERF_SCALE=1",
+  "performance warm-up" => "FRP_PERF_WARMUP=1",
+  "thresholded measurement" => "measured: thresholded steady-state profile",
   "fixed evidence artifact" => "linux-fixed-2vcpu-2g-performance"
 }
 
