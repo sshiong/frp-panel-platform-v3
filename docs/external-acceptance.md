@@ -215,9 +215,14 @@ disposable-zone secrets `CLOUDFLARE_E2E_API_TOKEN` and `FRP_ACME_E2E_EMAIL`, the
 same two runners can be executed from the manual-only
 `.github/workflows/external-acceptance.yml` workflow. It requires the zone and
 fresh DNS names as inputs, uploads only the redacted runner JSON for 14 days,
-and refuses to run automatically on push or pull request. The workflow is a
-preparation aid; the reviewed evidence bundle and separate TLS/target/sign-off
-gates are still required for release.
+and refuses to run automatically on push or pull request. The checkout is
+explicitly pinned to `github.sha`; both runners include the repository and
+exact 40-character commit in their JSON, and
+`scripts/validate-external-runners.rb` rejects failed, malformed, cross-revision,
+or cross-repository evidence before the final workflow gate. Runner files and
+the generated index use mode `0600`; the artifact is still only redacted
+operator evidence. The workflow is a preparation aid; the reviewed evidence
+bundle and separate TLS/target/sign-off gates are still required for release.
 
 The release workflow also refuses manual publication from any ref other than
 protected `main`, and tag-triggered publication must be running on the pushed

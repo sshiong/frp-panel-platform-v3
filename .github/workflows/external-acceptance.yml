@@ -40,6 +40,8 @@ jobs:
       name: external-acceptance
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.x'
@@ -58,12 +60,14 @@ jobs:
           CLOUDFLARE_E2E_EXPECTED_ZONE_NAME: ${{ inputs.expected_zone_name }}
           CLOUDFLARE_E2E_RECORD_NAME: ${{ inputs.record_name }}
           CLOUDFLARE_E2E_CONFIRM: disposable-zone
+          FRP_ACCEPTANCE_EXPECTED_COMMIT: ${{ github.sha }}
         run: |
           set +e
           make cloudflare-e2e > output/external-runners/cloudflare-sandbox-e2e.json 2>&1
           status=$?
           set -e
           echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          chmod 600 output/external-runners/cloudflare-sandbox-e2e.json
           exit "$status"
       - name: Run ACME Staging DNS-01 smoke
         id: acme
@@ -75,9 +79,28 @@ jobs:
           FRP_ACME_E2E_EMAIL: ${{ secrets.FRP_ACME_E2E_EMAIL }}
           FRP_ACME_E2E_DOMAIN: ${{ inputs.acme_domain }}
           FRP_ACME_E2E_CONFIRM: acme-staging
+          FRP_ACCEPTANCE_EXPECTED_COMMIT: ${{ github.sha }}
         run: |
           set +e
           make acme-e2e > output/external-runners/acme-staging-e2e.json 2>&1
+          status=$?
+          set -e
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          chmod 600 output/external-runners/acme-staging-e2e.json
+          exit "$status"
+      - name: Validate exact-revision runner evidence
+        id: validate
+        if: always()
+        continue-on-error: true
+        env:
+          FRP_ACCEPTANCE_EXPECTED_COMMIT: ${{ github.sha }}
+        run: |
+          set +e
+          umask 077
+          ruby scripts/validate-external-runners.rb \
+            --cloudflare output/external-runners/cloudflare-sandbox-e2e.json \
+            --acme output/external-runners/acme-staging-e2e.json \
+            --output output/external-runners/index.json
           status=$?
           set -e
           echo "exit_code=$status" >> "$GITHUB_OUTPUT"
@@ -95,6 +118,8 @@ jobs:
         env:
           CLOUDFLARE_EXIT: ${{ steps.cloudflare.outputs.exit_code }}
           ACME_EXIT: ${{ steps.acme.outputs.exit_code }}
+          VALIDATE_EXIT: ${{ steps.validate.outputs.exit_code }}
         run: |
           test "$CLOUDFLARE_EXIT" = 0
           test "$ACME_EXIT" = 0
+          test "$VALIDATE_EXIT" = 0

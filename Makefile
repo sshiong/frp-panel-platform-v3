@@ -75,6 +75,7 @@ contract:
 	bash -n scripts/fixed-performance.sh
 	bash -n scripts/linux-fault-injection.sh
 	ruby scripts/external-workflow-policy.rb
+	ruby scripts/test-external-runners.rb
 	ruby -c scripts/cloudflare-sandbox-e2e.rb
 	ruby scripts/test-cloudflare-sandbox-e2e.rb
 	cd server && $(GO_ENV) go test ./cmd/acme-e2e

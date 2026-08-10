@@ -24,6 +24,7 @@ class CloudflareSandboxE2E
     @request_ids = []
     @created_id = nil
     @candidate_contents = [INITIAL_CONTENT, UPDATED_CONTENT]
+    @commit = ENV["FRP_ACCEPTANCE_EXPECTED_COMMIT"] || ENV["GITHUB_SHA"]
     validate_inputs
   rescue KeyError => e
     abort("missing required environment variable: #{e.key}")
@@ -77,8 +78,15 @@ class CloudflareSandboxE2E
       raise "CLOUDFLARE_E2E_RECORD_NAME must be a fully-qualified DNS name"
     end
     self.class.validate_api_base_url(@base_url)
+    validate_commit(@commit) if @commit
   rescue URI::InvalidURIError
     raise "CLOUDFLARE_API_BASE_URL is invalid"
+  end
+
+  def validate_commit(commit)
+    return if commit.match?(/\A[0-9a-f]{40}\z/)
+
+    raise "FRP_ACCEPTANCE_EXPECTED_COMMIT must be a 40-character commit SHA"
   end
 
   def self.validate_api_base_url(raw)
@@ -211,6 +219,8 @@ class CloudflareSandboxE2E
     puts JSON.pretty_generate(
       "schema_version" => "v1",
       "status" => status,
+      "repository" => "sshiong/frp-panel-platform-v3",
+      "commit" => @commit,
       "generated_at" => Time.now.utc.iso8601(6),
       "environment" => { "provider" => "Cloudflare Sandbox", "zone_id_present" => true, "record_name" => @record_name },
       "steps" => @steps,
