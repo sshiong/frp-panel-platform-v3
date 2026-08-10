@@ -44,7 +44,7 @@ jobs:
             --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/workspace" \
             --workdir /workspace \
             golang:1.25-bookworm \
-            bash -lc '
+            bash -c '
               set -euo pipefail
               export FRP_PERF=1 FRP_PERF_SCALE=1
               export GOCACHE=/tmp/frp-go-build GOMODCACHE=/tmp/frp-go-mod
