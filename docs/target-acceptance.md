@@ -9,7 +9,7 @@
 目标画像固定为 Ubuntu 24.04/Linux、2 vCPU、2 GiB 内存、2 GiB swap、SQLite
 WAL。固定性能步骤通过 `scripts/fixed-performance.sh` 使用 Docker 的精确
 `--cpus=2 --memory=2g --memory-swap=2g` 限制；随后执行 Linux tmpfs 磁盘满、WAL
-压力和时钟偏差故障注入，再执行固定 FRP v0.68.0 的 `frps/frpc verify`、真实 TCP
+压力、干净临时数据目录的加密备份解码/恢复和时钟偏差故障注入，再执行固定 FRP v0.68.0 的 `frps/frpc verify`、真实 TCP
 网络代理和真实 Plugin 网络 E2E。
 
 ## 本地运行

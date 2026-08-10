@@ -73,6 +73,7 @@ contract:
 	ruby scripts/performance-workflow-policy.rb
 	ruby scripts/target-acceptance-workflow-policy.rb
 	bash -n scripts/fixed-performance.sh
+	bash -n scripts/linux-fault-injection.sh
 	ruby scripts/external-workflow-policy.rb
 	ruby -c scripts/cloudflare-sandbox-e2e.rb
 	ruby scripts/test-cloudflare-sandbox-e2e.rb

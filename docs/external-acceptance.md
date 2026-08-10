@@ -84,10 +84,11 @@ make fault-injection
 
 The command mounts a disposable 32MiB tmpfs, fills it until the kernel returns
 `ENOSPC`, and verifies that a failed Router snapshot write leaves the previous
-`last-good` file unchanged. It also runs the Provider/ACME HTTP `Date` skew
-checks. This is recorded as implementation evidence only; it does not replace
-the release environment's full backup/restore, system-clock, or target-disk
-exercise.
+`last-good` file unchanged. It also performs an encrypted backup decode/restore
+rehearsal in a fresh temporary data directory and runs the Provider/ACME HTTP
+`Date` skew checks. This is recorded as implementation evidence only; it does
+not replace the release environment's full clean-host restore, system-clock, or
+target-disk exercise.
 
 The manual performance workflow now also includes a resource-constrained Linux
 profile with exactly 2 vCPU and 2 GiB RAM, SQLite WAL, and the complete
