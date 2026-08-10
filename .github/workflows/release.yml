@@ -90,6 +90,12 @@ jobs:
         working-directory: web/admin
       - run: npm ci
         working-directory: web/client
+      - name: Install release validation tooling
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          npx playwright install --with-deps chromium
+      - name: Run release quality gates
+        run: make test lint accessibility
       - name: Download fixed FRP dependency
         env:
           GH_TOKEN: ${{ github.token }}

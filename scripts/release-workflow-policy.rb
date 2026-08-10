@@ -6,6 +6,7 @@ errors = []
 
 required_fragments = {
   "revision-bound external evidence" => "EXTERNAL_ACCEPTANCE_EVIDENCE: release-evidence.json",
+  "release quality gates" => "make test lint accessibility",
   "fixed FRP release acceptance" => "make external-acceptance",
   "keyless signing" => "cosign sign-blob",
   "signature verification" => "cosign verify-blob",
@@ -23,6 +24,13 @@ sign_index = workflow.index("cosign sign-blob")
 verify_index = workflow.index("cosign verify-blob")
 publish_index = workflow.index("softprops/action-gh-release@v2")
 evidence_index = workflow.index("EXTERNAL_ACCEPTANCE_EVIDENCE: release-evidence.json")
+quality_index = workflow.index("make test lint accessibility")
+
+if quality_index.nil?
+  errors << "release quality gates must be present before external evidence"
+elsif evidence_index && quality_index > evidence_index
+  errors << "release quality gates must precede external evidence"
+end
 
 if evidence_index && sign_index && evidence_index > sign_index
   errors << "external evidence gate must precede signing"

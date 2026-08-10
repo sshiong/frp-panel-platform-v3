@@ -78,9 +78,11 @@ checks. This is recorded as implementation evidence only; it does not replace
 the release environment's full backup/restore, system-clock, or target-disk
 exercise.
 
-The release workflow applies an additional hard gate: the repository root must
-contain `release-evidence.json`, and that bundle must validate against the
-exact release revision. The release job also runs the fixed FRP v0.68.0 native
+The release workflow applies additional hard gates: it runs `make test`,
+`make lint`, and `make accessibility` on the release checkout before any
+external evidence or signing step; the repository root must also contain
+`release-evidence.json`, and that bundle must validate against the exact
+release revision. The release job also runs the fixed FRP v0.68.0 native
 TCP and Plugin network checks before cosign signing. Missing Cloudflare
 Sandbox, ACME Staging, target-environment, fault-injection, or three-owner
 sign-off evidence stops the release job; a local/mock result cannot bypass it.
