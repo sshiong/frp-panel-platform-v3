@@ -35,6 +35,7 @@
 - [x] Client Panel 提供 Mapping 与 Domain Binding 独立导航，展示 IDNA 标准化结果、HTTPS 模式和 pending/active 状态。
 - [x] Cloudflare Provider HTTP 适配器支持 Verify/ListZones/UpsertDNS/DeleteDNS，并以独立单元测试覆盖请求方法与路径。
 - [x] Cloudflare Token 清除竞态已加固：DNS/Domain delete/ACME Job 绑定具体 `token_version`，每次 Cloudflare HTTP 请求、ACME DNS-01 长流程检查点和本地成功提交前重新验证 active credential；清除/轮换期间 Job 返回 durable `BlockedError`，不会发布旧 DNS 或证书状态，挑战清理也继承同一 guard。
+- [x] Cloudflare/ACME guard 有 provider 级回归：复合 `UpsertDNS` 的内部第二次 HTTP 请求和 ACME DNS-01 发起订单前检查点均在凭证失效时 fail-closed，测试确认不会触发后续网络请求。
 - [x] Domain DNS 意图支持 A/AAAA/CNAME、TTL 和由 HTTPS 模式派生的 proxied；目标记录先落库再进入可重试 Provider Operation，Client Domain 页面展示记录状态。
 - [x] Cloudflare Job Worker 支持 token pending 验证、Zone 分页、DNS 冲突 adopt/overwrite/cancel、幂等去重、租约接管与可重试 Operation。
 - [x] Cloudflare 401/403 权限错误与网络错误分流；ACME blocked job 重启唤醒、到期前检查、证书/chain 原子文件写入与 managed DNS 删除补偿已接入。

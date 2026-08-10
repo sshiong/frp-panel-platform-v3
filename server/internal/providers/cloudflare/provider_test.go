@@ -110,6 +110,35 @@ func TestHTTPProviderPropagatesSandboxTimeout(t *testing.T) {
 	}
 }
 
+func TestHTTPProviderRequestGuardCoversCompoundUpsert(t *testing.T) {
+	provider := New("test-token")
+	provider.BaseURL = "https://api.example.test/client/v4"
+	transportCalls := 0
+	provider.Client = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		transportCalls++
+		if request.Method != http.MethodGet {
+			t.Fatalf("stale compound request reached transport: %s", request.Method)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewBufferString(`{"success":true,"result":[]}`)), Header: make(http.Header), Request: request}, nil
+	})}
+	guardErr := errors.New("cloudflare credential was cleared")
+	guardCalls := 0
+	ctx := WithRequestGuard(context.Background(), func(context.Context) error {
+		guardCalls++
+		if guardCalls == 1 {
+			return nil
+		}
+		return guardErr
+	})
+	_, err := provider.UpsertDNS(ctx, Zone{ID: "zone-1"}, Record{Type: "A", Name: "app.example.com", Content: "192.0.2.10", TTL: 120})
+	if !errors.Is(err, guardErr) {
+		t.Fatalf("guard error=%v, want %v", err, guardErr)
+	}
+	if guardCalls != 2 || transportCalls != 1 {
+		t.Fatalf("guard/transport calls=%d/%d, want 2/1", guardCalls, transportCalls)
+	}
+}
+
 type urlError struct{ message string }
 
 func (e *urlError) Error() string { return e.message }

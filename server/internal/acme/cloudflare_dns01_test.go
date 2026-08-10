@@ -15,6 +15,7 @@ import (
 	"time"
 
 	internalcrypto "github.com/ricardo/frp-panel-platform/server/internal/crypto"
+	"github.com/ricardo/frp-panel-platform/server/internal/providers/cloudflare"
 )
 
 func TestWaitTXTUsesInjectedResolverForPropagation(t *testing.T) {
@@ -74,5 +75,59 @@ func TestIssueDNS01StopsWhenACMEOrderCannotBeCreated(t *testing.T) {
 	}
 	if _, err := provider.IssueDNS01(context.Background(), "example.com"); err == nil {
 		t.Fatal("expected ACME order failure")
+	}
+}
+
+func TestIssueDNS01RequestGuardStopsBeforeACMEOrder(t *testing.T) {
+	root := t.TempDir()
+	accountPath := filepath.Join(root, "account.key")
+	wrappingKey := []byte("01234567890123456789012345678901")
+	accountKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(accountKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(accountState{AccountURI: "https://acme.example.test/acct/1", KeyDER: keyDER})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ciphertext, nonce, err := internalcrypto.EncryptWithKey(wrappingKey, encoded, "acme-account:v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(accountPath, append(nonce, ciphertext...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	transportCalls := 0
+	provider, err := NewCloudflareDNS01(CloudflareDNS01Config{
+		DirectoryURL:   "https://acme.example.test/directory",
+		Email:          "ops@example.test",
+		AccountKeyPath: accountPath,
+		HTTPClient: &http.Client{Transport: failingRoundTripper(func(*http.Request) (*http.Response, error) {
+			transportCalls++
+			return nil, errors.New("unexpected ACME request")
+		})},
+	}, wrappingKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guardErr := errors.New("cloudflare credential was cleared")
+	guardCalls := 0
+	ctx := cloudflare.WithRequestGuard(context.Background(), func(context.Context) error {
+		guardCalls++
+		if guardCalls == 1 {
+			return nil
+		}
+		return guardErr
+	})
+	if _, err := provider.IssueDNS01(ctx, "example.com"); !errors.Is(err, guardErr) {
+		t.Fatalf("guard error=%v, want %v", err, guardErr)
+	}
+	if guardCalls != 2 || transportCalls != 0 {
+		t.Fatalf("guard/ACME transport calls=%d/%d, want 2/0", guardCalls, transportCalls)
 	}
 }
