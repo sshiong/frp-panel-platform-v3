@@ -13,8 +13,8 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 - `部分通过`：本地实现已有证据，但标准要求的外部/目标环境仍未完成；
 - `待外部`：需要真实 Provider、Linux、Docker、CA、签字或目标硬件。
 
-最近一次已验证实现与托管门禁证据：实现 revision `68f8544d6f7d7618edc500748753012bc25930e3` 的 CI
-run `31367651023` 与 CodeQL run `31367651029` 均成功；导航按钮使用
+最近一次已验证实现与托管门禁证据：实现 revision `b444975d7dc6b4ab1935bedf9d9229ac1dfe1c49` 的 CI
+run `31368552030` 与 CodeQL run `31368552064` 均成功；导航按钮使用
 `aria-current="page"`，所有面板按钮显式声明 `type`，性能项也已准确区分开发/Hosted
 profile 与固定 Linux 2 vCPU/2 GiB 目标基线。该 revision 的
 `make external-acceptance` 报告为 9 passed / 0 failed / 1 blocked。
