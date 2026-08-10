@@ -23,3 +23,6 @@ client/frp-panel-client
 output/external-acceptance.json
 output/acceptance-evidence.json
 output/acceptance-evidence/
+output/target-acceptance.json
+output/target-acceptance/
+target-acceptance-performance-fixed-2vcpu-2g.log

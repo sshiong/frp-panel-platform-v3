@@ -69,6 +69,7 @@
 - [x] 无外网字体回退下的移动端边界已补齐：Admin/Client 登录栅格在 390px 视口强制使用 `minmax(0, 1fr)` 与 `min-width: 0`，避免系统字体度量差异造成横向溢出；修正 CSS token policy 按 `:root` 规则识别 token 区域。
 - [x] API 成功响应契约已收紧：Server OpenAPI 为所有成功 JSON 响应声明 schema，统一 `request_id` 元数据，补齐 `/me` 实际会话字段、分页 envelope、异步 Operation、备份、Token、Router 和用户管理响应；`responseMetadata` 现在也覆盖 API GET 响应，契约回归验证通过。
 - [x] 外部验收证据收集器已补齐：`make external-acceptance` 运行本地契约/迁移/安全/许可证/构建门禁，在显式提供固定 FRP 二进制时运行真实网络 E2E，并对 Cloudflare Sandbox、ACME Staging、目标硬件、故障注入和签名证据缺失返回 `blocked`/退出码 2；流程见 [`external-acceptance.md`](docs/external-acceptance.md)。
+- [x] 目标环境验收入口已补齐：`make target-acceptance` 统一执行固定 Linux 2 vCPU/2 GiB SQLite WAL 性能 profile、Linux 故障注入、固定 FRP v0.68.0 verify/真实 TCP/Plugin E2E，并生成 schema 校验、脱敏、`0600` 权限的 `output/target-acceptance.json` 与日志；macOS、缺少固定二进制或缺少隔离配置时严格返回 `blocked`/退出码 2。仅手动触发的 Ubuntu 24.04 workflow 和 policy 已纳入 `make contract`，流程见 [`target-acceptance.md`](docs/target-acceptance.md)。
 
 ## 验证记录
 
@@ -186,6 +187,7 @@
 | 2026-08-10 | 逐项验收证据索引 | 已实现/本地通过；新增 `make acceptance-evidence` 与 contract/CI 门禁，解析标准 141 项和矩阵 142 行，为每项生成环境、步骤、期望、实际、证据日志、执行人和时间字段；索引明确保持 `blocked`，不替代底层测试日志或真实外部验收，CI 将上传当前 checkout 的 14 天 artifact。 |
 | 2026-08-10 | 发布签名与负责人证据 fail-closed | 已实现/本地通过；外部证据 schema 现在强制 `SEC-008` 提供 cosign tool、verified、OIDC identity/issuer 和产物列表，并强制 `DOD-001` 由 release/security/test 三位不同负责人对同一 commit 提供 approval_ref 与签署时间；缺失字段不能绕过发布门禁。 |
 | 2026-08-10 | 最新 revision 最终门禁复核 | 通过/按标准阻断；提交 [`403eeb4`](https://github.com/sshiong/frp-panel-platform-v3/commit/403eeb4ff41bbb7a7d79a9fde324cbd5b067997d) 本地 `make test lint accessibility`、`make contract`、迁移/安全/许可证/构建/性能门禁全部通过；官方 FRP v0.68.0 固定二进制的 TCP、FRPC verify 和 Plugin E2E 通过，外部收集器记录 10 passed / 0 failed / 1 blocked。PR #2 的 [`ci run 31374117884`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31374117884) 与 [`CodeQL run 31374117949`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31374117949) 全部通过；唯一阻断仍是 Cloudflare/ACME/目标环境/正式签名/三方负责人证据，PR 还需要人工 review。 |
+| 2026-08-10 | 目标环境验收入口与手动工作流 | 已实现并通过本地回归；`ruby scripts/test-target-acceptance.rb`、工作流 policy、`make contract` 全部通过；Darwin 本地 `make target-acceptance` 以退出码 2 生成 `blocked` 报告，报告与 4 个步骤日志均为 `0600`。新增 Ubuntu 24.04 `workflow_dispatch` 会固定校验官方 FRP v0.68.0 并上传同 revision 证据；真实目标硬件、Provider/ACME、正式签名和负责人签字仍按标准保持 blocked。 |
 
 ## 未决与发布阻断项
 

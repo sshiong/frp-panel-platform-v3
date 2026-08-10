@@ -26,6 +26,13 @@ profile 与固定 Linux 2 vCPU/2 GiB 目标基线。当前 revision 的
 `output/external-acceptance.json` 的 40 位 commit 字段始终是当前工作树验收报告的权威绑定；
 阻断项仍严格限于真实 Provider、目标环境、正式签名和负责人签字，不改变下方逐项状态的外部证据要求。
 
+目标环境复验现在有独立入口 `make target-acceptance` 和仅手动触发的
+[`target-acceptance.yml`](../.github/workflows/target-acceptance.yml)：它固定
+Ubuntu 24.04、2 vCPU、2 GiB、SQLite WAL，组合固定性能、Linux 故障注入、FRP
+v0.68.0 verify/真实 TCP/Plugin E2E，并上传 `0600` 报告和日志。macOS 或缺少
+固定二进制/隔离配置时只生成 `blocked`，不改变下方 `待外部` 状态；该入口不能替代
+Cloudflare、ACME、生产容量、签名或三方发布签字。
+
 逐项可追溯性索引由 `make acceptance-evidence` 生成：它覆盖 141 个标准条目和
 一个派生的 `DOD-001` 记录，并为每项保存标准要求、矩阵实际结果、环境、步骤、
 证据日志、执行人和时间。索引的 `blocked` 状态只反映当前矩阵仍有外部依赖，

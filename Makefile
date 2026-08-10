@@ -14,7 +14,7 @@ MINIMUM_FRPC_VERSION ?= 0.68.0
 SERVER_LDFLAGS ?= -X github.com/ricardo/frp-panel-platform/server/internal/version.ServerVersion=$(SERVER_VERSION) -X github.com/ricardo/frp-panel-platform/server/internal/version.MinimumClientVersion=$(MINIMUM_CLIENT_VERSION) -X github.com/ricardo/frp-panel-platform/server/internal/version.LatestClientVersion=$(LATEST_CLIENT_VERSION) -X github.com/ricardo/frp-panel-platform/server/internal/version.MinimumFRPCVersion=$(MINIMUM_FRPC_VERSION)
 CLIENT_LDFLAGS ?= -X github.com/ricardo/frp-panel-platform/client/internal/version.ClientVersion=$(CLIENT_VERSION)
 
-.PHONY: install-web build test coverage lint accessibility contract acceptance-evidence migration-check license security fuzz perf fault-injection frpc-verify network-e2e plugin-e2e cloudflare-e2e acme-e2e external-acceptance sbom checksums manifest release-version-check sign release checkpoint key-rotate dev-server dev-client clean
+.PHONY: install-web build test coverage lint accessibility contract acceptance-evidence migration-check license security fuzz perf fault-injection target-acceptance frpc-verify network-e2e plugin-e2e cloudflare-e2e acme-e2e external-acceptance sbom checksums manifest release-version-check sign release checkpoint key-rotate dev-server dev-client clean
 
 install-web:
 	npm ci
@@ -67,9 +67,11 @@ contract:
 	ruby scripts/test-acceptance-evidence.rb
 	ruby scripts/validate-openapi.rb
 	ruby scripts/test-external-acceptance.rb
+	ruby scripts/test-target-acceptance.rb
 	ruby scripts/release-version-policy.rb
 	ruby scripts/release-workflow-policy.rb
 	ruby scripts/performance-workflow-policy.rb
+	ruby scripts/target-acceptance-workflow-policy.rb
 	bash -n scripts/fixed-performance.sh
 	ruby scripts/external-workflow-policy.rb
 	ruby -c scripts/cloudflare-sandbox-e2e.rb
@@ -100,6 +102,9 @@ perf:
 
 fault-injection:
 	./scripts/linux-fault-injection.sh
+
+target-acceptance:
+	ruby scripts/target-acceptance.rb
 
 frpc-verify:
 	@test -n "$(FRPC_VERIFY_BINARY)" || (echo "FRPC_VERIFY_BINARY is required" >&2; exit 1)

@@ -1,0 +1,73 @@
+name: target-acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  target-profile:
+    name: Linux 2 vCPU / 2 GiB target profile
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache-dependency-path: |
+            server/go.sum
+            client/go.sum
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - name: Download and verify fixed FRP v0.68.0
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          archive="frp_0.68.0_linux_amd64.tar.gz"
+          url="https://github.com/fatedier/frp/releases/download/v0.68.0/${archive}"
+          curl --fail --location --silent --show-error "$url" -o "/tmp/${archive}"
+          digest="$(gh api repos/fatedier/frp/releases/tags/v0.68.0 --jq ".assets[] | select(.name == \"${archive}\") | .digest")"
+          test -n "$digest" && test "${digest#sha256:}" != "$digest"
+          printf '%s  %s\n' "${digest#sha256:}" "/tmp/${archive}" | sha256sum --check --status
+          rm -rf /tmp/frp_0.68.0_linux_amd64
+          tar -xzf "/tmp/${archive}" -C /tmp
+          install -Dm755 /tmp/frp_0.68.0_linux_amd64/frps "$GITHUB_WORKSPACE/build/frps"
+          install -Dm755 /tmp/frp_0.68.0_linux_amd64/frpc "$GITHUB_WORKSPACE/build/frpc"
+          echo "FRP_E2E_FRPS_SHA256=$(sha256sum "$GITHUB_WORKSPACE/build/frps" | awk '{print $1}')" >> "$GITHUB_ENV"
+          echo "FRP_E2E_FRPC_SHA256=$(sha256sum "$GITHUB_WORKSPACE/build/frpc" | awk '{print $1}')" >> "$GITHUB_ENV"
+          "$GITHUB_WORKSPACE/build/frps" --version
+          "$GITHUB_WORKSPACE/build/frpc" --version
+      - name: Run target acceptance collector
+        env:
+          FRP_E2E_FRPS_BINARY: ${{ github.workspace }}/build/frps
+          FRP_E2E_FRPS_CONFIG: ${{ github.workspace }}/tests/fixtures/frp/network/frps.toml
+          FRP_E2E_FRPC_BINARY: ${{ github.workspace }}/build/frpc
+          FRP_E2E_FRPC_CONFIG: ${{ github.workspace }}/tests/fixtures/frp/network/frpc.toml
+          FRP_E2E_URL: http://127.0.0.1:17080/
+          FRP_E2E_FRPS_READY_HOST: 127.0.0.1
+          FRP_E2E_FRPS_READY_PORT: '17000'
+          FRP_E2E_READY_WAIT_SECONDS: '15'
+          FRP_E2E_WAIT_SECONDS: '30'
+          FRP_E2E_FIXTURE_DIR: ${{ github.workspace }}/tests/fixtures/frp/network
+          FRP_E2E_FIXTURE_HOST: 127.0.0.1
+          FRP_E2E_FIXTURE_PORT: '17081'
+          FRP_E2E_FIXTURE_WAIT_SECONDS: '15'
+          FRPC_VERIFY_BINARY: ${{ github.workspace }}/build/frpc
+          FRPC_VERIFY_VERSION: 0.68.0
+          ACCEPTANCE_OPERATOR: ${{ github.actor }}
+        run: ruby scripts/target-acceptance.rb
+      - name: Upload target acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: target-acceptance-${{ github.run_id }}
+          path: |
+            output/target-acceptance.json
+            output/target-acceptance/
+            target-acceptance-performance-fixed-2vcpu-2g.log
+          if-no-files-found: error
+          retention-days: 14

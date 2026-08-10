@@ -17,6 +17,15 @@ target-environment, signing and owner-approval bundle. The 142-record acceptance
 index is also bound to this revision and remains `blocked` while the matrix has
 incomplete external rows. PR #2 remains open for required human review.
 
+Target-environment automation is now available through `make target-acceptance` and
+the manual [`target-acceptance.yml`](.github/workflows/target-acceptance.yml). It
+binds the fixed Ubuntu 24.04 / 2 vCPU / 2 GiB / SQLite WAL profile to the shared
+performance script, Linux fault injection, fixed FRP v0.68.0 verification, and
+real TCP/Plugin E2E. The collector writes a schema-checked redacted report and
+mode `0600` logs, returning exit code `2` when the host or fixed artifacts are not
+available. This automation is evidence tooling; it does not claim production
+hardware, Provider/ACME, signing, or owner approval.
+
 ## Verified locally
 
 - Separate Server and Client Go modules compile and test independently.
