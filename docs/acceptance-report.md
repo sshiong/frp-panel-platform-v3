@@ -4,13 +4,17 @@ This report records evidence available in the local development environment. It 
 
 ## Current revision evidence
 
-The current implementation revision is `e5a4ebe71900a0104f14b45608eedacc01f863d9`. Its PR CI run
-[`31382087916`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31382087916)
+The current implementation revision is `fca9d18752a9c7c8d5d4682700d5cbd3a37b448e`. Its PR CI run
+[`31388497849`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31388497849)
 and CodeQL run
-[`31382087541`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31382087541)
+[`31388497663`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31388497663)
 passed all required checks, including contract, coverage, Go race/static analysis,
 both panel builds and WCAG checks, fixed Linux FRP E2E, fault injection, fuzz,
-security, container scanning and release metadata. The current local fixed-artifact
+security, container scanning, release metadata and the fixed Ubuntu 24.04 / 2 vCPU /
+2 GiB target acceptance profile. The measured target profile records PERF-001/002
+read/write p95 46.398/43.768ms, PERF-003 111.702ms, PERF-005 4.444ms, PERF-006
+6.515ms and PERF-007 WebSocket/HTTP/old-FRP invalidation 60.561/0.292/0.305ms. The
+current local fixed-artifact
 collector report is bound to the same revision and records 7 passed, 0 failed and
 4 blocked steps; the blocked steps are the absent local fixed FRP runtime and the
 intentionally absent reviewed Provider, target-environment, signing and owner-
