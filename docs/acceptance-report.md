@@ -13,12 +13,13 @@ both panel builds and WCAG checks, fixed Linux FRP E2E, fault injection, fuzz,
 security, container scanning, release metadata and the fixed Ubuntu 24.04 / 2 vCPU /
 2 GiB target acceptance profile. The measured target profile records PERF-001/002
 read/write p95 46.398/43.768ms, PERF-003 111.702ms, PERF-005 4.444ms, PERF-006
-6.515ms and PERF-007 WebSocket/HTTP/old-FRP invalidation 60.561/0.292/0.305ms. The
-current local fixed-artifact
-collector report is bound to the same revision and records 7 passed, 0 failed and
-4 blocked steps; the blocked steps are the absent local fixed FRP runtime and the
-intentionally absent reviewed Provider, target-environment, signing and owner-
-approval bundle. The 142-record acceptance
+6.515ms and PERF-007 WebSocket/HTTP/old-FRP invalidation 60.561/0.292/0.305ms.
+Using the verified official FRP v0.68.0 Darwin ARM64 binaries, the local collector
+also passed real TCP networking, fixed FRPC `verify`, and FRPS/FRPC Plugin network
+E2E. The current local fixed-artifact collector report is bound to the same
+implementation revision and records 10 passed, 0 failed and 1 blocked steps; the
+only blocked step is the intentionally absent reviewed Provider, target-environment,
+signing and owner-approval bundle. The 142-record acceptance
 index is also bound to this revision and remains `blocked` while the matrix has
 incomplete external rows. PR #2 remains open for required human review.
 
