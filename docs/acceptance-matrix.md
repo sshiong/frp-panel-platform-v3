@@ -13,14 +13,14 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 - `部分通过`：本地实现已有证据，但标准要求的外部/目标环境仍未完成；
 - `待外部`：需要真实 Provider、Linux、Docker、CA、签字或目标硬件。
 
-本次文档快照前的最新托管门禁证据：revision
-`5872396df014e4d27b8032fe77d06359fae34f20` 的 CI run
+当前最新托管门禁证据：revision
+`15be882703dab9ae93a0c9fd4b51a7ecd48f5def` 的 CI run
 `31518526251` 与 CodeQL run `31518525685` 均成功；required checks 还包括
 coverage、固定 FRP Linux E2E、fault injection、security、container scan 和
 release metadata。该 revision 上传的 target-acceptance artifact 在 Ubuntu 24.04
 Docker 2 vCPU/2 GiB profile 下通过 PERF-001/002/003/005/006/007，稳态指标为
-PERF-001/002/003/005/006 = 65.117549/34.255090/91.191733/4.330126/5.749294ms，
-PERF-007 WebSocket/HTTP/old-FRP = 74.984431/0.385668/0.357702ms；导航按钮使用
+PERF-001/002/003/005/006 = 56.251391/32.275303/90.747698/3.560611/8.667360ms，
+PERF-007 WebSocket/HTTP/old-FRP = 54.806504/0.265529/0.276149ms；导航按钮使用
 `aria-current="page"`，所有面板按钮显式声明 `type`，性能项也已准确区分开发/Hosted
 profile 与固定 Linux 2 vCPU/2 GiB 目标基线。当前 revision 的
 `make external-acceptance` 在提供官方 FRP v0.68.0 Darwin ARM64 `frps/frpc`、固定
@@ -177,22 +177,22 @@ release checkout，并要求该性能门禁先于外部证据与签名。该记�
 | API-005 | 本地通过 | Client 发送 `X-FRP-Client-Version`；过旧/非法版本返回 426、`Upgrade-Required` 和 `CLIENT_VERSION_UNSUPPORTED`，兼容版本可登录并显示可升级提示，回归测试通过；Server/Client 发行版本可由独立 `-ldflags` 注入并进入 compatibility API。 |
 | API-006 | 本地通过 | WebSocket 指数退避、抖动、lease heartbeat 测试通过。 |
 | API-007 | 本地通过 | 丢通知触发 full sync，配置 hash/version 收敛测试通过。 |
-| PERF-001 | 本地/CI 通过 | target-acceptance artifact（CI run 31467891623，Ubuntu 24.04 Docker 2 vCPU/2 GiB、SQLite WAL）：100 并发读 p95=55.457712ms、错误率 0；低于 300ms 阈值。该 profile 是标准参考环境证据，不替代生产部署容量签收。 |
-| PERF-002 | 本地/CI 通过 | 同一固定 profile：20 并发写 p95=37.158087ms、错误率 0；低于 800ms 阈值且无永久 lock。该 profile 是标准参考环境证据，不替代生产部署容量签收。 |
-| PERF-003 | 本地/CI 通过 | 同一固定 profile：1000 Mapping + 2000 Domain Router snapshot generate/apply=112.743114ms；低于 5 秒阈值。该 profile 是标准参考环境证据，不替代生产部署容量签收。 |
+| PERF-001 | 本地/CI 通过 | target-acceptance artifact（[CI run 31519061463](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31519061463)，Ubuntu 24.04 Docker 2 vCPU/2 GiB、SQLite WAL）：100 并发读 p95=56.251391ms、错误率 0；低于 300ms 阈值。该 profile 是标准参考环境证据，不替代生产部署容量签收。 |
+| PERF-002 | 本地/CI 通过 | 同一固定 profile：20 并发写 p95=32.275303ms、错误率 0；低于 800ms 阈值且无永久 lock。该 profile 是标准参考环境证据，不替代生产部署容量签收。 |
+| PERF-003 | 本地/CI 通过 | 同一固定 profile：1000 Mapping + 2000 Domain Router snapshot generate/apply=90.747698ms；低于 5 秒阈值。该 profile 是标准参考环境证据，不替代生产部署容量签收。 |
 | PERF-004 | 本地通过 | snapshot reload 不主动中断 in-flight HTTP 流。 |
-| PERF-005 | 本地/CI 通过 | 同一固定 profile：200 Mapping config generate/sign=4.404769ms；低于 2 秒阈值。该 profile 是标准参考环境证据，不替代生产部署容量签收。 |
-| PERF-006 | 本地/CI 通过 | 同一固定 profile：配置提交到 Client apply=7.064798ms；低于 5 秒阈值。该 profile 是标准参考环境证据，不替代生产网络签收。 |
-| PERF-007 | 本地/CI 通过 | 同一固定 profile：WebSocket=61.597603ms、旧 HTTP=0.305122ms、旧 FRP Login=0.381659ms；均低于标准阈值。该 profile 是标准参考环境证据，不替代生产网络签收。 |
+| PERF-005 | 本地/CI 通过 | 同一固定 profile：200 Mapping config generate/sign=3.560611ms；低于 2 秒阈值。该 profile 是标准参考环境证据，不替代生产部署容量签收。 |
+| PERF-006 | 本地/CI 通过 | 同一固定 profile：配置提交到 Client apply=8.667360ms；低于 5 秒阈值。该 profile 是标准参考环境证据，不替代生产网络签收。 |
+| PERF-007 | 本地/CI 通过 | 同一固定 profile：WebSocket=54.806504ms、旧 HTTP=0.265529ms、旧 FRP Login=0.276149ms；均低于标准阈值。该 profile 是标准参考环境证据，不替代生产网络签收。 |
 | REL-001 | 本地通过 | Supervisor 临时配置/last-good/重启恢复测试通过。 |
 | REL-002 | 本地通过 | Port lease/Mapping 事务和 SQLite rollback race 测试通过。 |
 | REL-003 | 本地通过 | Worker lease、ambiguous Provider query 和 malformed payload recovery 测试通过。 |
 | REL-004 | 本地通过 | Router bad snapshot 保留 last-good 测试通过。 |
-| REL-005 | 部分通过 | WAL bytes 指标、checkpoint 命令和 `TestCheckpointUnderWALPressure` 已通过；CI run 31467891623 的 Ubuntu 24.04 `make fault-injection` 在 disposable tmpfs 中验证 WAL 压力、checkpoint 和重启恢复，长时间/生产磁盘演练仍待外部。 |
+| REL-005 | 部分通过 | WAL bytes 指标、checkpoint 命令和 `TestCheckpointUnderWALPressure` 已通过；CI run 31519061463 的 Ubuntu 24.04 `make fault-injection` 在 disposable tmpfs 中验证 WAL 压力、checkpoint 和重启恢复，长时间/生产磁盘演练仍待外部。 |
 | REL-006 | 本地通过 | WebSocket 断线后全量同步/心跳恢复测试通过。 |
-| REL-007 | 部分通过 | CI run 31467891623 的 Ubuntu 24.04 disposable 32MiB tmpfs 真实填满文件系统，验证 Router 原子写失败不覆盖 last-good；本地 backup archive 无 partial output、restore post-install 失败回滚测试通过；目标部署磁盘演练仍待外部。 |
-| REL-008 | 部分通过 | CI run 31467891623 的 Ubuntu 24.04 fault-injection job 验证 Cloudflare/ACME Provider Date 偏差的 fail-safe 路径；真实系统时钟偏差、Session/ACME 长时行为仍待外部。 |
-| SEC-001 | 本地/CI 通过 | 本地 gosec/govulncheck 和 secret scan 清零；最终 revision [`e07cd8f`](https://github.com/sshiong/frp-panel-platform-v3/commit/e07cd8f2fc6b29038664aaa14adbeaae7a156123) 的 [`ci` security job](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31467891623) 与 CodeQL 均成功，双 gosec SARIF 已独立上传。 |
+| REL-007 | 部分通过 | CI run 31519061463 的 Ubuntu 24.04 disposable 32MiB tmpfs 真实填满文件系统，验证 Router 原子写失败不覆盖 last-good；本地 backup archive 无 partial output、restore post-install 失败回滚测试通过；目标部署磁盘演练仍待外部。 |
+| REL-008 | 部分通过 | CI run 31519061463 的 Ubuntu 24.04 fault-injection job 验证 Cloudflare/ACME Provider Date 偏差的 fail-safe 路径；真实系统时钟偏差、Session/ACME 长时行为仍待外部。 |
+| SEC-001 | 本地/CI 通过 | 本地 gosec/govulncheck 和 secret scan 清零；revision `15be882703dab9ae93a0c9fd4b51a7ecd48f5def` 的 [`ci` security job](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31519061463) 与 CodeQL 均成功，双 gosec SARIF 已独立上传。 |
 | SEC-002 | 本地通过 | Auth/domain/port/file path 权限测试和 race 测试通过。 |
 | SEC-003 | 本地通过 | CSRF、CORS、Origin、Host、WebSocket 和 XSS 边界测试通过。 |
 | SEC-004 | 本地通过 | Server URL parser 拒绝危险 Scheme/Userinfo/redirect 绕过。 |
