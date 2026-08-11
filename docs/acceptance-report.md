@@ -4,31 +4,24 @@ This report records evidence available in the local development environment. It 
 
 ## Current revision evidence
 
-The latest hosted verification recorded before this documentation snapshot is
-revision `330cc5284dbb2b7c9b0dbb7bd9ef9c580c7c6654`. Its PR CI run
-[`31515563005`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31515563005)
+The latest hosted verification recorded for the implementation revision is
+`5872396df014e4d27b8032fe77d06359fae34f20`. Its PR CI run
+[`31518526251`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31518526251)
 and CodeQL run
-[`31515562744`](https://github.com/sshiong/frp-panel-platform-v3/runs/31515562744)
+[`31518525685`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31518525685)
 passed all required checks, including contract, coverage, Go race/static analysis,
 both panel builds and WCAG checks, fixed Linux FRP E2E, fault injection, fuzz,
 security, container scanning, release metadata and the fixed Ubuntu 24.04 / 2 vCPU /
-2 GiB target acceptance profile. The measured target profile records PERF-001/002
-read/write p95 65.117549/34.255090ms, PERF-003 91.191733ms, PERF-005 4.330126ms, PERF-006
-5.749294ms and PERF-007 WebSocket/HTTP/old-FRP invalidation 74.984431/0.385668/0.357702ms.
-Those detailed values are the previously published fixed-profile measurements; that
-hosted target artifact also passed the fixed FRP TCP, FRPC `verify`, and
-FRPS/FRPC Plugin network E2E steps. The current local collector report is regenerated
+2 GiB target acceptance profile. The current local collector report is regenerated
 against the exact report checkout using the official FRP v0.68.0 Darwin ARM64 binaries,
 their recorded SHA-256 values, an isolated fixture and real Plugin E2E, and records
 10 passed, 0 failed and 1 blocked step. The remaining blocked step is the absent
 reviewed Provider, target-environment, signing and owner-approval bundle. The 142-record
 acceptance index is also bound to the exact report checkout and remains `blocked` while
 the matrix has incomplete external rows. The machine-readable report and acceptance index remain
-authoritative for the exact current checkout revision; this document-only update does not
-change runtime code. The verified implementation also adds Cloudflare Token clear/rotation
-guards across DNS and ACME Jobs, Token verification, and explicit activation; the
-running-job regression proves stale DNS/ACME results are blocked before local success
-publication and a cleared candidate cannot become active. PR #2 remains open for
+authoritative for the exact current checkout revision. The verified implementation also adds
+fail-closed production startup checks for fixed FRPS/FRPC artifacts, versions and SHA-256
+digests; development mode remains available for UI/protocol tests. PR #2 remains open for
 required human review.
 
 Target-environment automation is now available through `make target-acceptance` and
