@@ -1,6 +1,6 @@
 # FRP Cloudflare Platform v3 进度跟踪
 
-> 最后更新：2026-08-11
+> 最后更新：2026-08-12
 >
 > 本文是实现进度的单一记录入口。每次完成一个可验证的垂直切片，更新状态、证据和未决项；未通过验收的能力不得标记为完成。
 
@@ -216,6 +216,7 @@
 | 2026-08-11 | 验收文档修正托管复核 | 通过/按标准阻断；文档提交 [`08cc4df`](https://github.com/sshiong/frp-panel-platform-v3/commit/08cc4df61c72688de924fdb1f134ee8fc89e33fc) 的 [`ci run 31480219092`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31480219092) 与 [`CodeQL run 31480218900`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31480218900) 全部成功；该提交的本机固定 FRP 外部采集为 10 passed / 0 failed / 1 blocked，唯一阻断仍是缺少真实 Provider、目标部署、正式签名和负责人审批证据。 |
 | 2026-08-12 | 恢复审计与固定 FRP 证据刷新 | 当前工作树重新通过 `make test lint accessibility`、`make contract`；官方 FRP v0.68.0 Darwin ARM64 二进制（固定 SHA-256）真实 TCP、`frpc verify` 和 Plugin 网络 E2E 全部通过，`make external-acceptance` 记录 10 passed / 0 failed / 1 blocked，`make acceptance-evidence` 绑定当前 revision 的 141 个标准条目和 1 个 DOD-001 派生记录。`make target-acceptance` 在本机按标准返回 blocked（Darwin，不冒充 Linux 目标签收）；真实 Cloudflare/ACME/TLS/目标部署/正式签名/负责人审批证据仍待外部。 |
 | 2026-08-12 | 双发行物实际启动复验 | 当前构建的 Server/Client 二进制均真实启动并分别通过 `/healthz`；Server 初始化的 `initial-admin.txt` 与 `frps-transport.secret` 权限均为 `0600`，Client 健康响应包含 `request_id`，临时运行数据与进程退出均隔离验证。 |
+| 2026-08-12 | 当前提交托管门禁最终复核 | 提交 [`6d7bb76`](https://github.com/sshiong/frp-panel-platform-v3/commit/6d7bb76f9195da73e2d5a961ab31f349c8cdeaa3) 的 [`ci run 31516100819`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31516100819) 与 [`CodeQL run 31516100238`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31516100238) 已通过 Go/TypeScript、contract、coverage、fault-injection、固定 FRP Linux E2E、target acceptance、security、container scan 和 release metadata；本地固定 FRP 外部采集保持 10 passed / 0 failed / 1 blocked，142 条证据索引与当前提交绑定，PR #2 仍等待正式 review/审批。 |
 
 ## 未决与发布阻断项
 
