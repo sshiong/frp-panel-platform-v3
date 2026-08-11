@@ -4,10 +4,11 @@ This report records evidence available in the local development environment. It 
 
 ## Current revision evidence
 
-The latest verified repository revision is `b21f3d006322abbdd6d714a7cf9b8448a6389838`. Its PR CI run
-[`31469104966`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31469104966)
+The latest hosted verification before this documentation-only evidence binding is
+revision `27c105df6b674e8e5d09bb4b9aa3c023d34a3aa7`. Its PR CI run
+[`31474836884`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31474836884)
 and CodeQL run
-[`93708460302`](https://github.com/sshiong/frp-panel-platform-v3/runs/93708460302)
+[`31474836712`](https://github.com/sshiong/frp-panel-platform-v3/runs/31474836712)
 passed all required checks, including contract, coverage, Go race/static analysis,
 both panel builds and WCAG checks, fixed Linux FRP E2E, fault injection, fuzz,
 security, container scanning, release metadata and the fixed Ubuntu 24.04 / 2 vCPU /
@@ -21,7 +22,9 @@ their recorded SHA-256 values, an isolated fixture and real Plugin E2E, and reco
 10 passed, 0 failed and 1 blocked step. The remaining blocked step is the absent
 reviewed Provider, target-environment, signing and owner-approval bundle. The 142-record acceptance
 index is also bound to the exact report checkout and remains `blocked` while the matrix has
-incomplete external rows. This revision also adds Cloudflare Token clear/rotation
+incomplete external rows. The machine-readable report and acceptance index remain
+authoritative for the exact current checkout revision; this document-only update does not
+change runtime code. The verified implementation also adds Cloudflare Token clear/rotation
 guards across DNS and ACME Jobs, Token verification, and explicit activation; the
 running-job regression proves stale DNS/ACME results are blocked before local success
 publication and a cleared candidate cannot become active. PR #2 remains open for
