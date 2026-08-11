@@ -27,6 +27,23 @@ jobs:
       - run: ./scripts/check-format.sh
         if: matrix.module == 'server'
 
+  coverage:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache-dependency-path: |
+            server/go.sum
+            client/go.sum
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - run: make coverage
+
   contract:
     runs-on: ubuntu-latest
     steps:
@@ -38,12 +55,48 @@ jobs:
         with:
           go-version: '1.25.x'
           cache-dependency-path: server/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run generate:contracts
+      - run: git diff --exit-code -- contracts/generated/server-api.d.ts contracts/generated/client-api.d.ts
       - run: ruby scripts/validate-openapi.rb
+      - run: ruby scripts/openapi-client-policy.rb
+      - run: ruby scripts/openapi-metadata-policy.rb
+      - run: ruby scripts/acceptance-matrix-policy.rb
+      - run: ruby scripts/acceptance-evidence.rb --check
+      - run: ruby scripts/test-acceptance-evidence.rb
+      - name: Generate acceptance evidence index
+        run: make acceptance-evidence
+      - name: Upload acceptance evidence index
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-evidence-${{ github.sha }}
+          path: |
+            output/acceptance-evidence.json
+            output/acceptance-evidence/
+          if-no-files-found: error
+          retention-days: 14
+      - run: ruby -c scripts/external-acceptance.rb
+      - run: ruby scripts/test-external-acceptance.rb
+      - run: ruby scripts/release-workflow-policy.rb
+      - run: ruby scripts/performance-workflow-policy.rb
+      - run: bash -n scripts/fixed-performance.sh
+      - run: ruby scripts/external-workflow-policy.rb
+      - run: ruby -c scripts/cloudflare-sandbox-e2e.rb
+      - run: ruby scripts/test-cloudflare-sandbox-e2e.rb
+      - run: ruby -c scripts/coverage-policy.rb
+      - run: go test ./cmd/acme-e2e
+        working-directory: server
       - run: go test ./internal/httpapi -run '^TestHTTPContract' -count=1
         working-directory: server
       - run: go test ./internal/db -run '^TestMigration' -count=1
         working-directory: server
       - run: ruby scripts/license-policy.rb
+      - run: ruby scripts/css-token-policy.rb
 
   web:
     runs-on: ubuntu-latest
@@ -67,10 +120,97 @@ jobs:
         working-directory: web/${{ matrix.app }}
       - run: npm run build
         working-directory: web/${{ matrix.app }}
+      - name: Install accessibility tooling
+        if: matrix.app == 'admin'
+        run: npm ci
+      - name: Install Chromium for accessibility audit
+        if: matrix.app == 'admin'
+        run: npx playwright install --with-deps chromium
+      - name: Build Client for accessibility audit
+        if: matrix.app == 'admin'
+        run: |
+          npm ci
+          npm run build
+        working-directory: web/client
+      - name: Run WCAG accessibility audit
+        if: matrix.app == 'admin'
+        run: npm run test:accessibility
+
+  frp-linux-e2e:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache-dependency-path: server/go.sum
+      - name: Download and verify fixed FRP v0.68.0
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          archive="frp_0.68.0_linux_amd64.tar.gz"
+          url="https://github.com/fatedier/frp/releases/download/v0.68.0/${archive}"
+          curl --fail --location --silent --show-error "$url" -o "/tmp/${archive}"
+          digest="$(gh api repos/fatedier/frp/releases/tags/v0.68.0 --jq ".assets[] | select(.name == \"${archive}\") | .digest")"
+          test -n "$digest" && test "${digest#sha256:}" != "$digest"
+          printf '%s  %s\n' "${digest#sha256:}" "/tmp/${archive}" | sha256sum --check --status
+          rm -rf /tmp/frp_0.68.0_linux_amd64
+          tar -xzf "/tmp/${archive}" -C /tmp
+          install -Dm755 /tmp/frp_0.68.0_linux_amd64/frps build/frps
+          install -Dm755 /tmp/frp_0.68.0_linux_amd64/frpc build/frpc
+          ./build/frps --version
+          ./build/frpc --version
+      - name: Verify fixed FRP configuration
+        run: |
+          set -euo pipefail
+          ./build/frps verify -c tests/fixtures/frp/network/frps.toml
+          ./build/frpc verify -c tests/fixtures/frp/network/frpc.toml
+      - name: Run native FRPS/FRPC TCP E2E
+        run: |
+          set -euo pipefail
+          FRP_E2E_FRPS_BINARY="$GITHUB_WORKSPACE/build/frps" \
+          FRP_E2E_FRPS_CONFIG="$GITHUB_WORKSPACE/tests/fixtures/frp/network/frps.toml" \
+          FRP_E2E_FRPC_BINARY="$GITHUB_WORKSPACE/build/frpc" \
+          FRP_E2E_FRPC_CONFIG="$GITHUB_WORKSPACE/tests/fixtures/frp/network/frpc.toml" \
+          FRP_E2E_URL=http://127.0.0.1:17080/ \
+          FRP_E2E_FRPS_READY_HOST=127.0.0.1 \
+          FRP_E2E_FRPS_READY_PORT=17000 \
+          FRP_E2E_FIXTURE_DIR="$GITHUB_WORKSPACE/tests/fixtures/frp/network" \
+          FRP_E2E_FIXTURE_HOST=127.0.0.1 \
+          FRP_E2E_FIXTURE_PORT=17081 \
+          make network-e2e
+      - name: Run real FRPS Plugin network E2E
+        env:
+          FRP_E2E_FRPS_BINARY: ${{ github.workspace }}/build/frps
+          FRP_E2E_FRPC_BINARY: ${{ github.workspace }}/build/frpc
+        run: make plugin-e2e
+
+  fault-injection:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache-dependency-path: server/go.sum
+      - name: Run disposable Linux fault injection
+        run: make fault-injection
+
+  target-acceptance:
+    uses: ./.github/workflows/target-acceptance.yml
+    with:
+      acceptance_ref: ${{ github.event.pull_request.head.sha || github.sha }}
+    permissions:
+      contents: read
 
   release-metadata:
     runs-on: ubuntu-latest
-    needs: [go, web]
+    needs: [go, web, frp-linux-e2e, fault-injection, target-acceptance]
     steps:
       - uses: actions/checkout@v4
       - uses: ruby/setup-ruby@v1
@@ -79,6 +219,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.x'
+          cache-dependency-path: server/go.sum
       - run: ruby scripts/validate-openapi.rb
       - run: ruby scripts/generate-sbom.rb
 
@@ -92,6 +233,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.x'
+          cache-dependency-path: server/go.sum
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
@@ -174,6 +316,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.x'
+          cache-dependency-path: server/go.sum
       - run: go test -run=^$ -fuzz=FuzzNormalizeDomain -fuzztime=30s ./internal/service
         working-directory: server
       - run: go test -run=^$ -fuzz=FuzzSnapshotRoundTrip -fuzztime=30s ./internal/router

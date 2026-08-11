@@ -51,16 +51,34 @@ type App struct {
 }
 
 type ClientSession struct {
-	CSRFToken      string                 `json:"csrf_token"`
-	User           map[string]interface{} `json:"user"`
-	ServerPanelURL string                 `json:"server_panel_url"`
-	ExpiresAt      time.Time              `json:"expires_at"`
+	CSRFToken            string                 `json:"csrf_token"`
+	User                 map[string]interface{} `json:"user"`
+	ServerPanelURL       string                 `json:"server_panel_url"`
+	ExpiresAt            time.Time              `json:"expires_at"`
+	ServerVersion        string                 `json:"server_version,omitempty"`
+	MinimumClientVersion string                 `json:"minimum_client_version,omitempty"`
+	LatestClientVersion  string                 `json:"latest_client_version,omitempty"`
+	UpgradeRequired      bool                   `json:"upgrade_required,omitempty"`
+	UpgradeSuggested     bool                   `json:"upgrade_suggested,omitempty"`
 }
 
 type RemoteError struct {
-	Status int
-	Code   string
-	Detail string
+	Status               int
+	Code                 string
+	Detail               string
+	UpgradeRequired      bool
+	ClientVersion        string
+	MinimumClientVersion string
+	LatestClientVersion  string
+}
+
+type ServerCompatibility struct {
+	ServerVersion        string `json:"server_version"`
+	MinimumClientVersion string `json:"minimum_client_version"`
+	LatestClientVersion  string `json:"latest_client_version"`
+	MinimumFRPCVersion   string `json:"minimum_frpc_version"`
+	ProtocolVersion      string `json:"protocol_version"`
+	ConfigSchemaVersion  string `json:"config_schema_version"`
 }
 
 type wsEnvelope struct {
@@ -124,6 +142,13 @@ func (a *App) LoginWithTrust(ctx context.Context, serverURL, username, password,
 		FRPSecret           string                 `json:"frp_secret"`
 		FRPSTransportSecret string                 `json:"frps_transport_secret"`
 	}
+	var compatibility ServerCompatibility
+	if err := a.serverRequestWithPin(ctx, normalized, trustedSPKI, "GET", "/api/v1/compatibility", nil, "", &compatibility); err != nil {
+		var remote RemoteError
+		if !errors.As(err, &remote) || remote.Status != http.StatusNotFound {
+			return ClientSession{}, err
+		}
+	}
 	if err := a.serverRequestWithPin(ctx, normalized, trustedSPKI, "POST", "/api/v1/auth/client-login", map[string]string{"username": username, "password": password}, "", &response); err != nil {
 		return ClientSession{}, err
 	}
@@ -172,7 +197,9 @@ func (a *App) LoginWithTrust(ctx context.Context, serverURL, username, password,
 		_ = a.applySnapshot(ctx, snapshot)
 	}
 	a.startWebSocket()
-	return ClientSession{CSRFToken: csrf, User: response.User, ServerPanelURL: normalized, ExpiresAt: a.expiresAt}, nil
+	upgradeRequired := compatibility.MinimumClientVersion != "" && !version.IsAtLeast(version.ClientVersion, compatibility.MinimumClientVersion)
+	upgradeSuggested := !upgradeRequired && compatibility.LatestClientVersion != "" && version.CompareVersionStrings(version.ClientVersion, compatibility.LatestClientVersion) < 0
+	return ClientSession{CSRFToken: csrf, User: response.User, ServerPanelURL: normalized, ExpiresAt: a.expiresAt, ServerVersion: compatibility.ServerVersion, MinimumClientVersion: compatibility.MinimumClientVersion, LatestClientVersion: compatibility.LatestClientVersion, UpgradeRequired: upgradeRequired, UpgradeSuggested: upgradeSuggested}, nil
 }
 
 func (a *App) Logout(ctx context.Context) error {
@@ -416,6 +443,7 @@ func (a *App) serverRequestWithPin(ctx context.Context, baseURL, pin, method, pa
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	req.Header.Set("X-FRP-Protocol-Version", "v1")
+	req.Header.Set("X-FRP-Client-Version", version.ClientVersion)
 	req.Header.Set("X-Request-ID", id.New())
 	if method == "POST" || method == "PUT" || method == "DELETE" {
 		idempotencyKey := ""
@@ -442,11 +470,15 @@ func (a *App) serverRequestWithPin(ctx context.Context, baseURL, pin, method, pa
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var p struct {
-			Code   string `json:"code"`
-			Detail string `json:"detail"`
+			Code                 string `json:"code"`
+			Detail               string `json:"detail"`
+			UpgradeRequired      bool   `json:"upgrade_required"`
+			ClientVersion        string `json:"client_version"`
+			MinimumClientVersion string `json:"minimum_client_version"`
+			LatestClientVersion  string `json:"latest_client_version"`
 		}
 		_ = json.Unmarshal(data, &p)
-		return RemoteError{Status: resp.StatusCode, Code: p.Code, Detail: p.Detail}
+		return RemoteError{Status: resp.StatusCode, Code: p.Code, Detail: p.Detail, UpgradeRequired: p.UpgradeRequired, ClientVersion: p.ClientVersion, MinimumClientVersion: p.MinimumClientVersion, LatestClientVersion: p.LatestClientVersion}
 	}
 	if response != nil && len(data) > 0 {
 		return json.Unmarshal(data, response)

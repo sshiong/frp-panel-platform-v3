@@ -13,11 +13,46 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 - `部分通过`：本地实现已有证据，但标准要求的外部/目标环境仍未完成；
 - `待外部`：需要真实 Provider、Linux、Docker、CA、签字或目标硬件。
 
+当前最新托管门禁证据：revision
+`15be882703dab9ae93a0c9fd4b51a7ecd48f5def` 的 CI run
+`31518526251` 与 CodeQL run `31518525685` 均成功；required checks 还包括
+coverage、固定 FRP Linux E2E、fault injection、security、container scan 和
+release metadata。该 revision 上传的 target-acceptance artifact 在 Ubuntu 24.04
+Docker 2 vCPU/2 GiB profile 下通过 PERF-001/002/003/005/006/007，稳态指标为
+PERF-001/002/003/005/006 = 56.251391/32.275303/90.747698/3.560611/8.667360ms，
+PERF-007 WebSocket/HTTP/old-FRP = 54.806504/0.265529/0.276149ms；导航按钮使用
+`aria-current="page"`，所有面板按钮显式声明 `type`，性能项也已准确区分开发/Hosted
+profile 与固定 Linux 2 vCPU/2 GiB 目标基线。当前 revision 的
+`make external-acceptance` 在提供官方 FRP v0.68.0 Darwin ARM64 `frps/frpc`、固定
+SHA-256、隔离 fixture 后报告为 10 passed / 0 failed / 1 blocked（Hosted target
+profile 也已独立通过）；未提供固定 runtime 的默认运行仍会 fail-closed，
+`make acceptance-evidence` 索引为 142 条记录且保持 `blocked`。
+`output/external-acceptance.json` 的 40 位 commit 字段始终是当前工作树验收报告的权威绑定；
+真实 Provider、目标环境、正式签名和负责人签字仍是发布阻断，不改变下方逐项状态的外部证据要求。
+
+目标环境复验现在有独立入口 `make target-acceptance`、可手动触发/由 PR CI 复用的
+[`target-acceptance.yml`](../.github/workflows/target-acceptance.yml)：它固定
+Ubuntu 24.04、2 vCPU、2 GiB、SQLite WAL，组合固定性能、Linux 故障注入、FRP
+v0.68.0 verify/真实 TCP/Plugin E2E，并上传 `0600` 报告和日志。macOS 或缺少
+固定二进制/隔离配置时只生成 `blocked`，不改变下方 `待外部` 状态；该入口不能替代
+Cloudflare、ACME、生产容量、签名或三方发布签字。
+
+逐项可追溯性索引由 `make acceptance-evidence` 生成：它覆盖 141 个标准条目和
+一个派生的 `DOD-001` 记录，并为每项保存标准要求、矩阵实际结果、环境、步骤、
+证据日志、执行人和时间。索引的 `blocked` 状态只反映当前矩阵仍有外部依赖，
+不会把本地结果或索引生成动作当作正式发布通过。
+
+发布 workflow 加固 revision [`639a184`](https://github.com/sshiong/frp-panel-platform-v3/commit/639a18483054072b9e273a09323fbaf872b1c0f2)
+已通过 [`ci run 31371628773`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31371628773)
+与 [`CodeQL run 31371628772`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31371628772)；它将固定性能脚本绑定到
+release checkout，并要求该性能门禁先于外部证据与签名。该记录不把真实 Provider、
+目标部署或签字状态改为通过。
+
 ## 架构、身份和地址
 
 | ID | 状态 | 实际结果与证据 |
 |---|---|---|
-| ARCH-001 | 本地通过 | `make build` 只产出 `build/frp-panel-server` 和 `build/frp-panel-client`。 |
+| ARCH-001 | 本地通过 | `make build` 只产出 `build/frp-panel-server` 和 `build/frp-panel-client`，并将匹配的 Admin/Client 静态资源分别嵌入对应 Go 二进制。 |
 | ARCH-002 | 本地通过 | `server/`、`client/` 为独立 Go module；Client 无管理员 API、SQLite、Router、Plugin 依赖。 |
 | ARCH-003 | 本地通过 | Server/Client 数据目录由各自配置管理；架构说明与代码边界见 [`architecture.md`](architecture.md)。 |
 | ARCH-004 | 本地通过 | 代码与 Secret scan 未发现设备注册、`device_token`、永久 `client_id` 业务流程。 |
@@ -65,7 +100,7 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 | FRPS-006 | 本地通过 | 停用用户不能创建新连接。 |
 | FRPS-007 | 本地通过 | Plugin 超时/未知状态 fail-closed 测试通过。 |
 | FRPS-008 | 本地通过 | FRP 凭证重置使旧 Secret、Session、generation 失效。 |
-| FRPS-009 | 部分通过 | transport secret 与 Plugin 分权/loopback 测试通过；需 Linux 正式 FRPS 矩阵。 |
+| FRPS-009 | 部分通过 | 固定 FRPS/FRPC v0.68.0 的真实 Plugin 网络 E2E、transport secret 与 Plugin 分权/loopback 测试通过；Ubuntu 24.04 CI 已加入官方 release digest、`verify`、原生 TCP 和 Plugin E2E；仍需目标部署环境的正式 FRPS 权限/兼容矩阵签收。 |
 | MAP-001 | 本地通过 | TCP/UDP 端口数字使用 DB 唯一租约约束。 |
 | MAP-002 | 本地通过 | offline/disabled/config_error 不释放租约。 |
 | MAP-003 | 本地通过 | 并发自动端口分配无重复 lease。 |
@@ -95,13 +130,13 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 
 | ID | 状态 | 实际结果与证据 |
 |---|---|---|
-| CF-001 | 本地通过 | Token API 只返回 configured/status/version，不返回明文。 |
+| CF-001 | 本地通过 | Server/Client Token API 只返回 configured/status/version/capabilities/影响域名，不返回明文；Client 代理不缓存 Token。 |
 | CF-002 | 本地通过 | AES-256-GCM、随机 nonce、AAD、key_version 测试通过。 |
 | CF-003 | 本地通过 | 日志/审计/trace 脱敏和 Secret scan 通过。 |
 | CF-004 | 本地通过 | 401/403 权限错误返回缺少 capability 信息。 |
-| CF-005 | 本地通过 | 新 Token pending 验证失败时旧 Token 保持 active。 |
+| CF-005 | 本地通过 | 新 Token 经 `pending → verified_pending` 验证；验证失败或未确认时旧 Token 保持 active，确认后才原子切换 active，并记录失去 Zone 访问的域名。 |
 | CF-006 | 本地通过 | UI 三秒倒计时、reauth ticket 和删除语义测试通过。 |
-| CF-007 | 部分通过 | Job blocked/retry 状态已实现；真实 Provider 停止/阻塞待 Sandbox。 |
+| CF-007 | 部分通过 | 本地 DNS/ACME/Token 验证/显式激活竞态回归已验证：Job 或候选切换运行中清除/轮换 Token 后，Provider 每次 HTTP 请求、ACME 检查点和激活事务均拒绝旧版本，Job 返回 `BlockedError` 或激活失败，不落本地 DNS/证书成功状态，也不将已清除版本设为 active；真实 Provider/ACME Sandbox 停止或阻塞证据仍待外部。 |
 | TLS-001 | 本地通过 | UI、API、服务层、SQLite CHECK/trigger 同时拒绝非法模式。 |
 | TLS-002 | 本地通过 | 未知 SNI 返回错误，不提供其他证书。 |
 | TLS-003 | 本地通过 | 未绑定 Host=404，offline=502。 |
@@ -110,7 +145,7 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 | TLS-006 | 本地通过 | control_routes 与 business_routes 物理分组、不同 target。 |
 | TLS-007 | 本地通过 | Runtime 只读签名 snapshot；坏 DB/快照不影响 last-good。 |
 | TLS-008 | 本地通过 | bad HMAC/schema/version 保留旧路由。 |
-| TLS-009 | 部分通过 | 证书文件原子替换、内存 CertificateStore 热加载已测；真实 SNI 部署待外部。 |
+| TLS-009 | 部分通过 | 证书文件原子替换、数据库 `cert_hash` 与证书文件 SHA-256 完整性校验、内存 CertificateStore 热加载已测；真实 SNI 部署待外部。 |
 | TLS-010 | 待外部 | ACME Staging、DNS TXT propagation/cleanup 和 Retry-After 需真实 CA。 |
 | TLS-011 | 本地通过 | certificate wrapping key 独立于 master/router key，私钥只存密文。 |
 | TLS-012 | 待外部 | Cloudflare Full (strict) 源站证书需真实 Zone/代理环境签收。 |
@@ -124,7 +159,7 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 | KEY-001 | 本地通过 | master、config signing、router、certificate wrapping、backup key 用途分离。 |
 | KEY-002 | 本地通过 | 主密钥文件重启稳定，旧密文可解密。 |
 | KEY-003 | 本地通过 | 主密钥不写普通 DB、不进日志。 |
-| KEY-004 | 部分通过 | key_version 与迁移读取边界已实现；完整轮换演练待发布环境。 |
+| KEY-004 | 部分通过 | 版本化 master/certificate key-ring、旧版本解密、`make key-rotate` 和 FRP/Cloudflare/证书私钥重包裹回归测试已通过；完整生产轮换窗口与回滚演练仍待外部环境。 |
 | BKP-001 | 本地通过 | FPPB1 全包 AES-GCM 加密、manifest SHA-256 校验。 |
 | BKP-002 | 本地通过 | SQLite WAL 下 VACUUM INTO/恢复和 integrity_check 测试通过。 |
 | BKP-003 | 本地通过 | 无密码无法解包读取秘密。 |
@@ -135,36 +170,36 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 
 | ID | 状态 | 实际结果与证据 |
 |---|---|---|
-| API-001 | 本地通过 | OpenAPI 3.1 34 paths/39 operations 与 chi route manifest 对齐；响应契约测试已纳入 CI。 |
+| API-001 | 本地通过 | Server OpenAPI 3.1 35 paths/40 operations 与 chi route manifest 对齐；Client Local API 23 paths/27 operations 也与独立 route manifest 对齐；成功 JSON 响应均声明 schema（含统一 `request_id` 元数据），`/me` 的实际会话字段已纳入契约；`contracts/generated/server-api.d.ts`、`contracts/generated/client-api.d.ts`、响应契约测试和生成文件漂移检查已纳入 CI；两个面板现在只能通过强类型 `api(method, schemaPath, { params, body })` 调用，`openapi-client-policy.rb` 防止泛型响应、动态 URL 和 `JSON.stringify` 请求体回归；新增 `openapi-metadata-policy.rb` 强制公开/认证边界、非公开写操作幂等键、路径参数和 Problem Details 错误响应，且已接入本地与 GitHub contract job；验收矩阵策略同时校验当前契约数量，防止文档漂移。 |
 | API-002 | 本地通过 | Problem Details、稳定 code、request_id 和错误测试通过。 |
 | API-003 | 本地通过 | 权限中间件分离，越权拒绝不暴露资源存在性。 |
 | API-004 | 本地通过 | 不支持 HTTP/WS protocol 返回 426。 |
-| API-005 | 部分通过 | compatibility 包含 panel/version/schema 元数据；完整旧 Client 升级 UI 矩阵待外部。 |
+| API-005 | 本地通过 | Client 发送 `X-FRP-Client-Version`；过旧/非法版本返回 426、`Upgrade-Required` 和 `CLIENT_VERSION_UNSUPPORTED`，兼容版本可登录并显示可升级提示，回归测试通过；Server/Client 发行版本可由独立 `-ldflags` 注入并进入 compatibility API。 |
 | API-006 | 本地通过 | WebSocket 指数退避、抖动、lease heartbeat 测试通过。 |
 | API-007 | 本地通过 | 丢通知触发 full sync，配置 hash/version 收敛测试通过。 |
-| PERF-001 | 本地通过 | 本机 100 并发读 profile 通过；Linux 2 vCPU/2 GiB p95 基线待外部。 |
-| PERF-002 | 本地通过 | 本机 20 并发写/SQLite WAL profile 通过；目标机基线待外部。 |
-| PERF-003 | 待外部 | Router 目标规模测试已存在；1000/2000 目标硬件结果尚未签收。 |
+| PERF-001 | 本地/CI 通过 | target-acceptance artifact（[CI run 31519061463](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31519061463)，Ubuntu 24.04 Docker 2 vCPU/2 GiB、SQLite WAL）：100 并发读 p95=56.251391ms、错误率 0；低于 300ms 阈值。该 profile 是标准参考环境证据，不替代生产部署容量签收。 |
+| PERF-002 | 本地/CI 通过 | 同一固定 profile：20 并发写 p95=32.275303ms、错误率 0；低于 800ms 阈值且无永久 lock。该 profile 是标准参考环境证据，不替代生产部署容量签收。 |
+| PERF-003 | 本地/CI 通过 | 同一固定 profile：1000 Mapping + 2000 Domain Router snapshot generate/apply=90.747698ms；低于 5 秒阈值。该 profile 是标准参考环境证据，不替代生产部署容量签收。 |
 | PERF-004 | 本地通过 | snapshot reload 不主动中断 in-flight HTTP 流。 |
-| PERF-005 | 本地通过 | 本机 200 Mapping 签名/验签 profile 通过；目标机结果待外部。 |
-| PERF-006 | 本地通过 | 本机配置提交到 Client apply profile 通过；目标网络矩阵待外部。 |
-| PERF-007 | 本地通过 | 旧 HTTP/WS/FRP Plugin 会话替换失效 profile 通过；生产延迟基线待外部。 |
+| PERF-005 | 本地/CI 通过 | 同一固定 profile：200 Mapping config generate/sign=3.560611ms；低于 2 秒阈值。该 profile 是标准参考环境证据，不替代生产部署容量签收。 |
+| PERF-006 | 本地/CI 通过 | 同一固定 profile：配置提交到 Client apply=8.667360ms；低于 5 秒阈值。该 profile 是标准参考环境证据，不替代生产网络签收。 |
+| PERF-007 | 本地/CI 通过 | 同一固定 profile：WebSocket=54.806504ms、旧 HTTP=0.265529ms、旧 FRP Login=0.276149ms；均低于标准阈值。该 profile 是标准参考环境证据，不替代生产网络签收。 |
 | REL-001 | 本地通过 | Supervisor 临时配置/last-good/重启恢复测试通过。 |
 | REL-002 | 本地通过 | Port lease/Mapping 事务和 SQLite rollback race 测试通过。 |
 | REL-003 | 本地通过 | Worker lease、ambiguous Provider query 和 malformed payload recovery 测试通过。 |
 | REL-004 | 本地通过 | Router bad snapshot 保留 last-good 测试通过。 |
-| REL-005 | 部分通过 | WAL bytes 指标和 checkpoint 命令存在；长时间/磁盘压力演练待外部。 |
+| REL-005 | 部分通过 | WAL bytes 指标、checkpoint 命令和 `TestCheckpointUnderWALPressure` 已通过；CI run 31519061463 的 Ubuntu 24.04 `make fault-injection` 在 disposable tmpfs 中验证 WAL 压力、checkpoint 和重启恢复，长时间/生产磁盘演练仍待外部。 |
 | REL-006 | 本地通过 | WebSocket 断线后全量同步/心跳恢复测试通过。 |
-| REL-007 | 待外部 | 原子写入和错误路径单测通过；真实 disk-full 注入待外部。 |
-| REL-008 | 待外部 | Provider Date/clock skew 检测已有单测；系统时钟偏差/ACME 实验待外部。 |
-| SEC-001 | 本地/CI 通过 | 本地 gosec/govulncheck 和 secret scan 清零；最终提交 [`2f73156`](https://github.com/sshiong/frp-panel-platform-v3/commit/2f731567da6933d4fc2ae1db333ad9d61fc2ca19) 的 [`ci` security job](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/30745496136) 与 CodeQL 均成功，双 gosec SARIF 已独立上传。 |
+| REL-007 | 部分通过 | CI run 31519061463 的 Ubuntu 24.04 disposable 32MiB tmpfs 真实填满文件系统，验证 Router 原子写失败不覆盖 last-good；本地 backup archive 无 partial output、restore post-install 失败回滚测试通过；目标部署磁盘演练仍待外部。 |
+| REL-008 | 部分通过 | CI run 31519061463 的 Ubuntu 24.04 fault-injection job 验证 Cloudflare/ACME Provider Date 偏差的 fail-safe 路径；真实系统时钟偏差、Session/ACME 长时行为仍待外部。 |
+| SEC-001 | 本地/CI 通过 | 本地 gosec/govulncheck 和 secret scan 清零；revision `15be882703dab9ae93a0c9fd4b51a7ecd48f5def` 的 [`ci` security job](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31519061463) 与 CodeQL 均成功，双 gosec SARIF 已独立上传。 |
 | SEC-002 | 本地通过 | Auth/domain/port/file path 权限测试和 race 测试通过。 |
 | SEC-003 | 本地通过 | CSRF、CORS、Origin、Host、WebSocket 和 XSS 边界测试通过。 |
 | SEC-004 | 本地通过 | Server URL parser 拒绝危险 Scheme/Userinfo/redirect 绕过。 |
 | SEC-005 | 本地通过 | Secret scan 与日志脱敏测试未发现密码、Token、Cookie、私钥。 |
 | SEC-006 | 本地通过 | Plugin provider unavailable/timeout fail-closed 测试通过。 |
 | SEC-007 | 本地通过 | Domain、URL、IDNA、Snapshot、JSON fuzz seed/短时 fuzz 已纳入 CI。 |
-| SEC-008 | 部分通过 | SPDX SBOM、SHA-256、manifest 和 release cosign workflow 存在；正式签名结果待 tag 发布。 |
+| SEC-008 | 部分通过 | SPDX SBOM、SHA-256、manifest 和 release cosign workflow 存在；正式 release checkout 现在会在外部证据/签名之前重新执行 `make test lint accessibility`，签名后会校验 GitHub Actions OIDC issuer 与当前 workflow/ref；外部证据校验还强制 `cosign` identity/issuer、verified 状态和已验证产物列表，正式 tag 签名结果仍待发布环境。 |
 
 ## UI、DoD 和发布结论
 
@@ -173,18 +208,17 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 | UI-001 | 本地通过 | Admin/Client 登录字段、路由和组件完全独立；390×844 Playwright 检查通过。 |
 | UI-002 | 本地通过 | 删除、Token 清除、凭证重置、DNS 冲突均有统一确认、reauth/倒计时和防重复提交。 |
 | UI-003 | 本地通过 | reserved/pending/running/offline/error 文案和状态色分离。 |
-| UI-004 | 本地通过 | Cloudflare capability missing 列表在 Admin UI 展示。 |
+| UI-004 | 本地通过 | Cloudflare capability missing 列表在 Admin/Client UI 展示，普通用户可查看自己的 Token 状态。 |
 | UI-005 | 本地通过 | DNS adopt/overwrite/cancel 与 managed/adopted 文案一致。 |
-| UI-006 | 本地通过 | Token 页面只显示 configured/status/version/verified_at。 |
-| UI-007 | 部分通过 | 关键标签、触控尺寸、对比度和 reduced-motion 已检查；完整 WCAG 2.1 AA 自动化待 CI。 |
+| UI-006 | 本地通过 | Client Token 页面只显示 configured/status/version/verified_at/capabilities/影响域名，上传、激活、清除均需在线和 reauth。 |
+| UI-007 | 本地/CI 通过 | Admin/Client 构建后运行 axe WCAG 2.1 AA、表单标签、键盘 Tab/reduced-motion、390px 无横向溢出检查均通过；导航按钮有唯一 `aria-current="page"`，所有按钮显式声明 `type`；PR #2 的 `web (admin)` 与 `web (client)` 门禁通过。 |
 | UI-008 | 本地通过 | Operations 展示阶段、步骤、失败原因、residue 和 retry。 |
 | DOD-001 | 待外部 | 所有 P0/P1 尚未完成真实 Cloudflare、ACME、Linux/FRP、灾备和签字，因此当前版本不是 Release Candidate。 |
 
 ## 发布前剩余动作
 
 1. 已完成最终提交的 `ci`、CodeQL、container scan 和 release metadata 全绿，并把 run URL/commit 写入 [`PROGRESS.md`](../PROGRESS.md)。
-2. 配置公开仓库 `main` 分支保护、PR 至少一名评审和 CODEOWNERS；安全/数据库/
-   加密变更需要两名评审。
+2. 已完成仓库治理：仓库保持公开，`main` 启用保护、线性历史、禁止强推/删除、CODEOWNERS、两次审批和必需 CI/CodeQL 检查；正式安全/数据库/加密变更仍需在 CODEOWNERS 中补入指定的第二位专业评审者。
 3. 在 Linux 目标机完成 FRPS/FRPC Plugin、PERF、disk-full/clock、clean-host
    restore；在 Cloudflare Sandbox 与 ACME Staging 完成 DNS/证书链路。
 4. 以 tag 发布双发行物，验证签名、SBOM、SHA-256、migration、升级/回滚文档，

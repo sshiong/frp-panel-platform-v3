@@ -17,7 +17,7 @@ func TestNormalizeServerURL(t *testing.T) {
 			t.Fatalf("%q => %q, %v; want %q", input, actual, err, expected)
 		}
 	}
-	for _, input := range []string{"https://user:pass@host", "https://host/path", "file://host", "http://host"} {
+	for _, input := range []string{"https://user:pass@host", "https://host/path", "https://%", "file://host", "http://host"} {
 		if _, err := NormalizeServerURL(input, false); err == nil {
 			t.Fatalf("expected rejection for %q", input)
 		}

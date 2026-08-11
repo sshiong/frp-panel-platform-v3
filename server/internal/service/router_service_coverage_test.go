@@ -11,6 +11,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,6 +66,22 @@ func TestRouterServiceCertificateMaterialAndFailureEdges(t *testing.T) {
 	if _, ok := certificates[domain.Normalized]; !ok {
 		t.Fatalf("certificate hostname was not normalized into the runtime set: %#v", certificates)
 	}
+	certificateDigest := certificateHash(certPEM)
+	if _, err := app.DB.ExecContext(ctx, `UPDATE certificates SET cert_hash=? WHERE domain_binding_id=?`, certificateDigest, domain.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.RouterCertificates(ctx); err != nil {
+		t.Fatalf("certificate with matching stored hash was rejected: %v", err)
+	}
+	if _, err := app.DB.ExecContext(ctx, `UPDATE certificates SET cert_hash=? WHERE domain_binding_id=?`, strings.Repeat("0", 64), domain.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.RouterCertificates(ctx); err == nil {
+		t.Fatal("certificate with mismatched stored hash was accepted")
+	}
+	if _, err := app.DB.ExecContext(ctx, `UPDATE certificates SET cert_hash=? WHERE domain_binding_id=?`, certificateDigest, domain.ID); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := app.DB.ExecContext(ctx, `UPDATE certificates SET cert_path=? WHERE domain_binding_id=?`, filepath.Join(os.TempDir(), "outside-cert.pem"), domain.ID); err != nil {
 		t.Fatal(err)
@@ -102,13 +119,12 @@ func TestRouterServiceCertificateMaterialAndFailureEdges(t *testing.T) {
 		t.Fatalf("router status after snapshot: %#v %v", status, err)
 	}
 
-	broken := *app.Crypto
-	broken.RouterKey = nil
-	withoutRouterKey := *app
-	withoutRouterKey.Crypto = &broken
-	if _, err := withoutRouterKey.BuildRouterSnapshot(ctx); err == nil {
+	originalRouterKey := app.Crypto.RouterKey
+	app.Crypto.RouterKey = nil
+	if _, err := app.BuildRouterSnapshot(ctx); err == nil {
 		t.Fatal("router snapshot was built without a router key")
 	}
+	app.Crypto.RouterKey = originalRouterKey
 	if err := app.finalizeDomainRouterStates(ctx, []routeSource{{domainID: domain.ID, domainStatus: "pending_dns"}}, 1); err != nil {
 		t.Fatal(err)
 	}

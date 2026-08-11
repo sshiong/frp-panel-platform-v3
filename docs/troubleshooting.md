@@ -6,7 +6,7 @@ Check Client Panel `Local Runtime` for Supervisor state, `desired_config_version
 
 ## Domain is `pending_dns`
 
-This means the local binding and desired config are reserved, but the Cloudflare Provider has not completed DNS ownership/permission work. Configure and verify a Server-side Cloudflare Token; never paste it into the Client Panel.
+This means the local binding and desired config are reserved, but the Cloudflare Provider has not completed DNS ownership/permission work. Configure and verify a Cloudflare Token from the Client Panel; the Client forwards it over HTTPS to the Server and never persists it. If the status is `verified_pending`, review the listed domain impacts and explicitly activate the candidate before retrying DNS.
 
 ## Client cannot connect to an IP
 

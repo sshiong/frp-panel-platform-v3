@@ -3,8 +3,11 @@ package backup
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -105,6 +108,112 @@ func TestBackupPathAndArchiveValidationEdges(t *testing.T) {
 	if got := migrationVersion(context.Background(), mustOpenBackupDB(t)); got != 0 {
 		t.Fatalf("migration version without schema=%d", got)
 	}
+}
+
+func TestRestoreFailureRollsBackInstalledDatabase(t *testing.T) {
+	root := t.TempDir()
+	sourcePath := filepath.Join(root, "source.db")
+	source, err := sql.Open("sqlite", sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := source.Exec(`CREATE TABLE smoke(value TEXT); INSERT INTO smoke(value) VALUES('new')`); err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(root, "backup.fppb")
+	if err := Create(t.Context(), source, archive, "backup-password-2026!"); err != nil {
+		t.Fatal(err)
+	}
+	_ = source.Close()
+
+	target := filepath.Join(root, "target.db")
+	old, err := sql.Open("sqlite", target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.Exec(`CREATE TABLE smoke(value TEXT); INSERT INTO smoke(value) VALUES('old')`); err != nil {
+		t.Fatal(err)
+	}
+	_ = old.Close()
+	blockedDataDir := filepath.Join(root, "blocked-data")
+	if err := os.WriteFile(blockedDataDir, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := RestoreWithOptions(archive, "backup-password-2026!", target, Options{DataDir: blockedDataDir}); err == nil {
+		t.Fatal("restore unexpectedly succeeded with an unavailable data directory")
+	}
+	rolledBack, err := sql.Open("sqlite", target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rolledBack.Close()
+	var value string
+	if err := rolledBack.QueryRow(`SELECT value FROM smoke`).Scan(&value); err != nil || value != "old" {
+		t.Fatalf("database was not rolled back: value=%q err=%v", value, err)
+	}
+	previous, err := filepath.Glob(target + ".before-restore-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(previous) != 0 {
+		t.Fatalf("rollback left an orphaned previous database: %v", previous)
+	}
+}
+
+func TestCreateDiskFullLeavesNoPartialArchive(t *testing.T) {
+	root := os.Getenv("FRP_DISK_FULL_DIR")
+	if root == "" {
+		t.Skip("set FRP_DISK_FULL_DIR to a disposable full filesystem")
+	}
+	source, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "source.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer source.Close()
+	if _, err := source.Exec(`CREATE TABLE smoke(value TEXT); INSERT INTO smoke(value) VALUES('stable')`); err != nil {
+		t.Fatal(err)
+	}
+	fillUntilNoSpace(t, root)
+	output := filepath.Join(root, "backup.fppb")
+	if err := Create(t.Context(), source, output, "backup-password-2026!"); err == nil {
+		t.Fatal("backup unexpectedly succeeded on a full filesystem")
+	}
+	if _, err := os.Stat(output); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("full-disk backup left an archive: stat err=%v", err)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name() == "backup.fppb" || strings.HasPrefix(entry.Name(), ".backup-tmp-") {
+			t.Fatalf("full-disk backup left a candidate file: %s", entry.Name())
+		}
+	}
+}
+
+func fillUntilNoSpace(t *testing.T, root string) {
+	t.Helper()
+	fillPath := filepath.Join(root, "fill.bin")
+	fill, err := os.OpenFile(fillPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = fill.Close()
+		_ = os.Remove(fillPath)
+	})
+	chunk := make([]byte, 1024*1024)
+	for {
+		if _, err := fill.Write(chunk); err != nil {
+			if !errors.Is(err, syscall.ENOSPC) {
+				t.Fatalf("filling disposable filesystem failed with %v, want ENOSPC", err)
+			}
+			break
+		}
+	}
+	_ = fill.Close()
 }
 
 func mustOpenBackupDB(t *testing.T) *sql.DB {

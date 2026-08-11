@@ -2,15 +2,16 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
-	internalcrypto "github.com/ricardo/frp-panel-platform/server/internal/crypto"
 	"github.com/ricardo/frp-panel-platform/server/internal/router"
 )
 
@@ -57,18 +58,20 @@ func (a *App) RouterStatus(ctx context.Context) (RouterStatus, error) {
 // key. A failed load leaves callers free to retain their previous in-memory
 // certificate set.
 func (a *App) RouterCertificates(ctx context.Context) (map[string]tls.Certificate, error) {
-	rows, err := a.DB.QueryContext(ctx, `SELECT d.id,d.normalized_domain,COALESCE(c.cert_path,''),c.private_key_ciphertext,c.private_key_nonce FROM certificates c JOIN domain_bindings d ON d.id=c.domain_binding_id WHERE c.provider='acme' AND c.status='valid' AND d.status NOT IN ('deleted','deleting')`)
+	rows, err := a.DB.QueryContext(ctx, `SELECT d.id,d.normalized_domain,COALESCE(c.cert_path,''),c.private_key_ciphertext,c.private_key_nonce,COALESCE(c.wrapping_key_version,0),COALESCE(c.cert_hash,'') FROM certificates c JOIN domain_bindings d ON d.id=c.domain_binding_id WHERE c.provider='acme' AND c.status='valid' AND d.status NOT IN ('deleted','deleting')`)
 	if err != nil {
 		return nil, err
 	}
 	type certificateRow struct {
 		domainID, hostname, path string
 		ciphertext, nonce        []byte
+		keyVersion               int64
+		certificateHash          string
 	}
 	rowsData := make([]certificateRow, 0)
 	for rows.Next() {
 		var item certificateRow
-		if err := rows.Scan(&item.domainID, &item.hostname, &item.path, &item.ciphertext, &item.nonce); err != nil {
+		if err := rows.Scan(&item.domainID, &item.hostname, &item.path, &item.ciphertext, &item.nonce, &item.keyVersion, &item.certificateHash); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -101,7 +104,10 @@ func (a *App) RouterCertificates(ctx context.Context) (map[string]tls.Certificat
 		if err != nil {
 			return nil, err
 		}
-		privatePEM, err := internalcrypto.DecryptWithKey(a.Crypto.CertificateKey, item.ciphertext, item.nonce, "domain:"+item.domainID+":certificate_private_key:v1")
+		if item.certificateHash != "" && item.certificateHash != certificateHash(certPEM) {
+			return nil, fmt.Errorf("certificate file hash does not match stored hash for %s", item.hostname)
+		}
+		privatePEM, err := a.Crypto.DecryptCertificate(item.keyVersion, item.ciphertext, item.nonce, "domain:"+item.domainID+":certificate_private_key:v1")
 		if err != nil {
 			return nil, fmt.Errorf("decrypt certificate key for %s: %w", item.hostname, err)
 		}
@@ -112,6 +118,11 @@ func (a *App) RouterCertificates(ctx context.Context) (map[string]tls.Certificat
 		certificates[strings.ToLower(strings.TrimSuffix(strings.TrimSpace(item.hostname), "."))] = pair
 	}
 	return certificates, nil
+}
+
+func certificateHash(value []byte) string {
+	sum := sha256.Sum256(value)
+	return hex.EncodeToString(sum[:])
 }
 
 type routeSource struct {
@@ -212,6 +223,11 @@ func (a *App) routerSnapshotDir() string {
 
 func (a *App) finalizeDomainRouterStates(ctx context.Context, sources []routeSource, version int64) error {
 	now := nowString()
+	tx, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
 	for _, source := range sources {
 		if source.domainStatus == "pending_dns" {
 			continue
@@ -226,7 +242,7 @@ func (a *App) finalizeDomainRouterStates(ctx context.Context, sources []routeSou
 				domainStatus, operationStatus, phase, step = "active", "succeeded", "router", "applied"
 			} else {
 				var certificateStatus string
-				err := a.DB.QueryRowContext(ctx, `SELECT status FROM certificates WHERE domain_binding_id=? AND provider='acme'`, source.domainID).Scan(&certificateStatus)
+				err := tx.QueryRowContext(ctx, `SELECT status FROM certificates WHERE domain_binding_id=? AND provider='acme'`, source.domainID).Scan(&certificateStatus)
 				if err == nil && certificateStatus == "valid" {
 					domainStatus, operationStatus, phase, step = "active", "succeeded", "router", "applied"
 				} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -238,12 +254,15 @@ func (a *App) finalizeDomainRouterStates(ctx context.Context, sources []routeSou
 				}
 			}
 		}
-		if _, err := a.DB.ExecContext(ctx, `UPDATE domain_bindings SET status=?,updated_at=? WHERE id=?`, domainStatus, now, source.domainID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE domain_bindings SET status=?,updated_at=? WHERE id=?`, domainStatus, now, source.domainID); err != nil {
 			return err
 		}
-		if _, err := a.DB.ExecContext(ctx, `UPDATE operations SET status=?,phase=?,step=?,updated_at=?,completed_at=CASE WHEN ?='succeeded' THEN ? ELSE completed_at END WHERE resource_type='domain' AND resource_id=? AND status IN ('pending','running')`, operationStatus, phase, step, now, operationStatus, now, source.domainID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE operations SET status=?,phase=?,step=?,updated_at=?,completed_at=CASE WHEN ?='succeeded' THEN ? ELSE completed_at END WHERE resource_type='domain' AND resource_id=? AND status IN ('pending','running')`, operationStatus, phase, step, now, operationStatus, now, source.domainID); err != nil {
 			return err
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
 	}
 	_ = version
 	return nil

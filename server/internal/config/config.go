@@ -118,6 +118,19 @@ func (c Config) ValidateTransportSecurity() error {
 		if strings.TrimSpace(c.TLSCertFile) == "" || strings.TrimSpace(c.TLSKeyFile) == "" {
 			return fmt.Errorf("production Server Panel requires SERVER_TLS_CERT_FILE and SERVER_TLS_KEY_FILE")
 		}
+		if strings.TrimSpace(c.FRPSBinary) == "" || strings.TrimSpace(c.FRPSBinarySHA256) == "" || strings.TrimSpace(c.FRPSConfigPath) == "" {
+			return fmt.Errorf("production Server Panel requires FRPS_BINARY, FRPS_BINARY_SHA256 and FRPS_CONFIG_PATH")
+		}
+		if value := strings.TrimSpace(c.CloudflareAPIBaseURL); value != "" {
+			if err := validateHTTPSServiceURL(value, "Cloudflare API URL"); err != nil {
+				return err
+			}
+		}
+		if value := strings.TrimSpace(c.ACMEDirectoryURL); value != "" {
+			if err := validateHTTPSServiceURL(value, "ACME directory URL"); err != nil {
+				return err
+			}
+		}
 		if len(c.AllowedOrigins) == 0 {
 			return fmt.Errorf("production Server Panel requires explicit FRP_ALLOWED_ORIGINS")
 		}
@@ -130,6 +143,14 @@ func (c Config) ValidateTransportSecurity() error {
 		if strings.TrimSpace(c.RouterListenAddr) != "" && !routerListenerIsLoopback(c.RouterListenAddr) && !c.RouterTLSEnabled {
 			return fmt.Errorf("production Router listener requires FRP_ROUTER_TLS_ENABLED=true")
 		}
+	}
+	return nil
+}
+
+func validateHTTPSServiceURL(value, label string) error {
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("production %s must be an https service URL without credentials or query data: %q", label, value)
 	}
 	return nil
 }

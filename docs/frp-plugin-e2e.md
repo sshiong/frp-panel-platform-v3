@@ -58,6 +58,12 @@ go test -race ./internal/httpapi -run TestFRPPluginNetworkE2E -count=1 -v
 
 该测试不伪造 Cloudflare、ACME 或生产 TLS；Linux release matrix 仍应使用同一入口重复验证。
 
+仓库 CI 的 `frp-linux-e2e` job 在 Ubuntu 24.04 上从官方 FRP v0.68.0
+release asset 下载并校验 GitHub release digest，然后执行 `frps/frpc verify`、
+原生 TCP 代理 E2E 和真实 FRPS/FRPC + loopback Plugin 网络 E2E。该 job 只证明
+固定 Linux runner 的兼容性，不替代目标部署机、Cloudflare Sandbox、ACME
+Staging 或发布签字证据。
+
 如果本机有固定 `frpc` 二进制，可验证 Client 生成配置：
 
 ```bash
@@ -77,6 +83,9 @@ FRP_E2E_URL=http://127.0.0.1:18080/ \
 FRP_E2E_FRPS_READY_PORT=7000 \
 FRP_E2E_FRPS_SHA256='<release-manifest-sha256>' \
 FRP_E2E_FRPC_SHA256='<release-manifest-sha256>' \
+FRP_E2E_FIXTURE_DIR="$PWD/tests/fixtures/frp/network" \
+FRP_E2E_FIXTURE_HOST=127.0.0.1 \
+FRP_E2E_FIXTURE_PORT=17081 \
 make network-e2e
 ```
 

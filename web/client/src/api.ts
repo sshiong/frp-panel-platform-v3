@@ -1,3 +1,27 @@
+import createClient from 'openapi-fetch'
+import type { MaybeOptionalInit } from 'openapi-fetch'
+import type { HttpMethod, PathsWithMethod, RequiredKeysOf } from 'openapi-typescript-helpers'
+import type { components, paths } from '../../../contracts/generated/client-api'
+
+export type UserSummary = components['schemas']['UserSummary']
+export type Mapping = components['schemas']['Mapping']
+export type Domain = components['schemas']['Domain']
+export type FRPCredentialStatus = components['schemas']['FRPCredentialStatus']
+export type Dashboard = components['schemas']['Dashboard']
+export type Operation = components['schemas']['Operation']
+export type Problem = Partial<components['schemas']['Problem']>
+
+export type CertificateInfo = components['schemas']['CertificateInfo']
+export type LocalLoginRequest = components['schemas']['LocalLoginRequest']
+export type MappingRequest = components['schemas']['MappingRequest']
+export type DomainRequest = components['schemas']['DomainRequest']
+export type SupervisorStatus = components['schemas']['SupervisorStatus']
+export type CloudflareStatus = components['schemas']['CloudflareStatus']
+export type CloudflareCapabilities = components['schemas']['CloudflareCapabilities']
+export type CloudflareZone = components['schemas']['CloudflareZone']
+export type CloudflarePendingActivation = components['schemas']['CloudflarePendingActivation']
+export type CloudflareDomainImpact = components['schemas']['CloudflareDomainImpact']
+
 function requestID(): string {
   const bytes = new Uint8Array(16)
   crypto.getRandomValues(bytes)
@@ -16,15 +40,58 @@ function requestID(): string {
 // is the non-sensitive last Server Panel URL.
 let inMemoryCSRF = ''
 
+export const clientAPI = createClient<paths>({ baseUrl: '' })
+
+clientAPI.use({
+  onRequest({ request }) {
+    const headers = new Headers(request.headers)
+    headers.set('X-FRP-Protocol-Version', 'v1')
+    if (inMemoryCSRF) headers.set('X-CSRF-Token', inMemoryCSRF)
+    if (['POST', 'PUT', 'DELETE'].includes(request.method) && !headers.has('Idempotency-Key')) headers.set('Idempotency-Key', requestID())
+    return new Request(request, { headers })
+  },
+})
+
+export class PanelAPIError extends Error {
+  status: number
+  code: string
+  upgradeRequired: boolean
+  clientVersion?: string
+  minimumClientVersion?: string
+  latestClientVersion?: string
+
+  constructor(problem: { detail?: string; code?: string; status?: number; upgrade_required?: boolean; client_version?: string; minimum_client_version?: string; latest_client_version?: string }, fallbackStatus: number) {
+    super(problem.detail || problem.code || `HTTP ${fallbackStatus}`)
+    this.name = 'PanelAPIError'
+    this.status = problem.status ?? fallbackStatus
+    this.code = problem.code || ''
+    this.upgradeRequired = problem.upgrade_required === true
+    this.clientVersion = problem.client_version
+    this.minimumClientVersion = problem.minimum_client_version
+    this.latestClientVersion = problem.latest_client_version
+  }
+}
+
 export function setCSRFToken(value: string) {
   inMemoryCSRF = value
 }
 
-export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const csrf = inMemoryCSRF
-  const headers = new Headers({ 'Content-Type': 'application/json', 'X-FRP-Protocol-Version': 'v1', ...(csrf ? { 'X-CSRF-Token': csrf } : {}), ...(init.headers ?? {}) })
-  if (['POST', 'PUT', 'DELETE'].includes((init.method ?? 'GET').toUpperCase()) && !headers.has('Idempotency-Key')) headers.set('Idempotency-Key', requestID())
-  const response = await fetch(path, { credentials: 'include', ...init, headers })
-  if (!response.ok) { const problem = await response.json().catch(() => ({})) as { detail?: string; code?: string }; throw new Error(problem.detail || problem.code || `HTTP ${response.status}`) }
-  return response.json() as Promise<T>
+type RelaxedParams<Params> = Params extends { header: infer Header } ? Omit<Params, 'header'> & { header?: Header } : Params
+type RelaxedParamsOption<Params> = RequiredKeysOf<Omit<Params, 'header'>> extends never ? { params?: RelaxedParams<Params> } : { params: RelaxedParams<Params> }
+type RelaxedInit<Init> = Init extends { params: infer Params }
+  ? Omit<Init, 'params'> & RelaxedParamsOption<Params>
+  : Init
+type InitParam<Init> = RequiredKeysOf<RelaxedInit<Init>> extends never ? [init?: RelaxedInit<Init>] : [init: RelaxedInit<Init>]
+
+export async function api<
+  Method extends HttpMethod,
+  Path extends PathsWithMethod<paths, Method>,
+  Init extends MaybeOptionalInit<paths[Path], Method>,
+>(method: Method, path: Path, ...init: InitParam<Init>) {
+  const result = await clientAPI.request(method, path, ...(init as never))
+  if (!result.response.ok) {
+    const problem = result.error as Problem & { upgrade_required?: boolean; client_version?: string; minimum_client_version?: string; latest_client_version?: string } | undefined
+    throw new PanelAPIError(problem ?? {}, result.response.status)
+  }
+  return result.data as NonNullable<typeof result.data>
 }

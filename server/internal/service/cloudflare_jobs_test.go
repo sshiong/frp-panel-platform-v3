@@ -3,7 +3,9 @@ package service
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -75,8 +77,12 @@ func TestCloudflareTokenAndDomainJobs(t *testing.T) {
 		case req.Method == http.MethodGet && req.URL.Path == "/client/v4/user/tokens/verify":
 			payload = map[string]interface{}{"success": true}
 		case req.Method == http.MethodGet && req.URL.Path == "/client/v4/zones":
-			payload = map[string]interface{}{"success": true, "result": []map[string]string{{"id": "zone-1", "name": "example.com"}}, "result_info": map[string]int{"page": 1, "total_pages": 1}}
-		case req.Method == http.MethodGet && req.URL.Path == "/client/v4/zones/zone-1/dns_records":
+			zone := map[string]string{"id": "zone-1", "name": "example.com"}
+			if req.Header.Get("Authorization") == "Bearer cf-token-2-with-enough-length" {
+				zone = map[string]string{"id": "zone-2", "name": "other.example"}
+			}
+			payload = map[string]interface{}{"success": true, "result": []map[string]string{zone}, "result_info": map[string]int{"page": 1, "total_pages": 1}}
+		case req.Method == http.MethodGet && (req.URL.Path == "/client/v4/zones/zone-1/dns_records" || req.URL.Path == "/client/v4/zones/zone-2/dns_records"):
 			payload = map[string]interface{}{"success": true, "result": []interface{}{}}
 		case req.Method == http.MethodPost && req.URL.Path == "/client/v4/zones/zone-1/dns_records":
 			createdRecord = true
@@ -109,8 +115,14 @@ func TestCloudflareTokenAndDomainJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	var tokenStatus string
-	if err := database.QueryRow(`SELECT status FROM cloudflare_credentials WHERE user_id=?`, user.ID).Scan(&tokenStatus); err != nil || tokenStatus != "valid" {
+	if err := database.QueryRow(`SELECT status FROM cloudflare_credentials WHERE user_id=?`, user.ID).Scan(&tokenStatus); err != nil || tokenStatus != "verified_pending" {
 		t.Fatalf("token status: %q %v", tokenStatus, err)
+	}
+	if _, err := app.ActivateCloudflareToken(context.Background(), userContext, 1, false, reauthTicket); err != nil {
+		t.Fatalf("token activation: %v", err)
+	}
+	if err := database.QueryRow(`SELECT status FROM cloudflare_credentials WHERE user_id=?`, user.ID).Scan(&tokenStatus); err != nil || tokenStatus != "valid" {
+		t.Fatalf("active token status: %q %v", tokenStatus, err)
 	}
 
 	mapping, err := app.CreateMapping(context.Background(), userContext, MappingRequest{Name: "web", ProxyType: "http", LocalIP: "127.0.0.1", LocalPort: 8080}, "idempotency-web")
@@ -137,6 +149,17 @@ func TestCloudflareTokenAndDomainJobs(t *testing.T) {
 	}
 	if !createdRecord {
 		t.Fatal("expected DNS create request")
+	}
+	var capabilitiesJSON string
+	if err := database.QueryRow(`SELECT capabilities_json FROM cloudflare_credentials WHERE user_id=? AND token_version=1`, user.ID).Scan(&capabilitiesJSON); err != nil {
+		t.Fatal(err)
+	}
+	var capabilities map[string]interface{}
+	if err := json.Unmarshal([]byte(capabilitiesJSON), &capabilities); err != nil {
+		t.Fatal(err)
+	}
+	if capabilities["dns_write"] != true || capabilities["dns_write_checked"] != true {
+		t.Fatalf("successful DNS write was not recorded: %#v", capabilities)
 	}
 	if createdPayload["type"] != "A" || createdPayload["content"] != "192.0.2.10" || int(createdPayload["ttl"].(float64)) != 120 || createdPayload["proxied"] != false {
 		t.Fatalf("unexpected DNS payload: %#v", createdPayload)
@@ -173,6 +196,34 @@ func TestCloudflareTokenAndDomainJobs(t *testing.T) {
 	}
 	if err := database.QueryRow(`SELECT status FROM domain_bindings WHERE id=?`, domain.ID).Scan(&status); err != nil || status != "active" {
 		t.Fatalf("domain status after client apply: %q %v", status, err)
+	}
+
+	if err := app.SaveCloudflareToken(context.Background(), userContext, "cf-token-2-with-enough-length", reauthTicket); err != nil {
+		t.Fatal(err)
+	}
+	tokenJob, err = app.Jobs.Claim(context.Background())
+	if err != nil || tokenJob.Type != "cloudflare_token_verify" {
+		t.Fatalf("replacement token job: %#v %v", tokenJob, err)
+	}
+	if err := app.handleJob(context.Background(), tokenJob); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.Jobs.Complete(context.Background(), tokenJob.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.ActivateCloudflareToken(context.Background(), userContext, 2, false, reauthTicket); err == nil {
+		t.Fatal("activation switched a token with an inaccessible existing domain")
+	} else {
+		var conflict *CloudflareActivationConflict
+		if !errors.As(err, &conflict) || len(conflict.Impacts) != 1 || conflict.Impacts[0].Hostname != "APP.Example.com." {
+			t.Fatalf("unexpected activation conflict: %#v", err)
+		}
+	}
+	if _, err := app.ActivateCloudflareToken(context.Background(), userContext, 2, true, reauthTicket); err != nil {
+		t.Fatalf("confirmed token activation: %v", err)
+	}
+	if err := database.QueryRow(`SELECT status FROM cloudflare_credentials WHERE user_id=? AND token_version=1`, user.ID).Scan(&tokenStatus); err != nil || tokenStatus != "retired" {
+		t.Fatalf("old active token was not retired: %q %v", tokenStatus, err)
 	}
 
 	deleteOperation, err := app.DeleteMapping(context.Background(), userContext, mapping.ID, false)
@@ -244,6 +295,13 @@ func TestCloudflareTokenAndDomainJobs(t *testing.T) {
 	if err != nil || firstDelete != secondDelete {
 		t.Fatalf("delete idempotency failed: first=%q second=%q err=%v", firstDelete, secondDelete, err)
 	}
+	if err := app.SaveCloudflareToken(context.Background(), userContext, "cf-token-3-with-enough-length", reauthTicket); err != nil {
+		t.Fatalf("pending replacement token: %v", err)
+	}
+	var pendingVerifyJobs int
+	if err := database.QueryRow(`SELECT COUNT(1) FROM jobs WHERE type='cloudflare_token_verify' AND resource_id=? AND status IN ('pending','retry_wait')`, user.ID).Scan(&pendingVerifyJobs); err != nil || pendingVerifyJobs != 1 {
+		t.Fatalf("pending token verification job count: %d %v", pendingVerifyJobs, err)
+	}
 	if err := app.ClearCloudflareToken(context.Background(), userContext, "wrong-password"); err != ErrInvalidCredentials {
 		t.Fatalf("cloudflare clear accepted an invalid re-authentication: %v", err)
 	}
@@ -252,5 +310,20 @@ func TestCloudflareTokenAndDomainJobs(t *testing.T) {
 	}
 	if status, err := app.CloudflareStatus(context.Background(), user.ID); err != nil || status["configured"] != false {
 		t.Fatalf("cloudflare status remained configured after clear: %#v %v", status, err)
+	}
+	var activeVersion sql.NullInt64
+	if err := database.QueryRow(`SELECT active_cloudflare_token_version FROM users WHERE id=?`, user.ID).Scan(&activeVersion); err != nil || activeVersion.Valid {
+		t.Fatalf("active Cloudflare token version was not cleared: %#v %v", activeVersion, err)
+	}
+	var ciphertext, nonce []byte
+	if err := database.QueryRow(`SELECT ciphertext,nonce FROM cloudflare_credentials WHERE user_id=? AND token_version=3`, user.ID).Scan(&ciphertext, &nonce); err != nil {
+		t.Fatal(err)
+	}
+	if len(ciphertext) != 0 || len(nonce) != 0 {
+		t.Fatalf("cleared Cloudflare ciphertext/nonce remained: ciphertext=%d nonce=%d", len(ciphertext), len(nonce))
+	}
+	var canceledVerifyJobs int
+	if err := database.QueryRow(`SELECT COUNT(1) FROM jobs WHERE type='cloudflare_token_verify' AND resource_id=? AND status='canceled' AND last_error='CLOUDFLARE_TOKEN_CLEARED'`, user.ID).Scan(&canceledVerifyJobs); err != nil || canceledVerifyJobs != 1 {
+		t.Fatalf("pending Cloudflare verification job was not canceled: %d %v", canceledVerifyJobs, err)
 	}
 }

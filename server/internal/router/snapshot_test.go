@@ -2,8 +2,10 @@ package router
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 )
 
@@ -85,5 +87,76 @@ func TestAtomicWriteFailureLeavesLastGoodSnapshotUntouched(t *testing.T) {
 	}
 	if !bytes.Equal(before, after) {
 		t.Fatal("failed atomic write changed the last-good snapshot")
+	}
+}
+
+func TestAtomicWriteDiskFullLeavesLastGoodSnapshotUntouched(t *testing.T) {
+	root := os.Getenv("FRP_DISK_FULL_DIR")
+	if root == "" {
+		t.Skip("set FRP_DISK_FULL_DIR to a disposable full filesystem")
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("FRP_DISK_FULL_DIR is not a directory: %s", root)
+	}
+
+	lastGoodPath := filepath.Join(root, "last-good.json")
+	snapshot, err := Build(1, nil, []Route{{Hostname: "stable.example.com", Status: "active"}}, []byte("disk-full-key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := AtomicWrite(lastGoodPath, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(lastGoodPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fillPath := filepath.Join(root, "fill.bin")
+	fill, err := os.OpenFile(fillPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = fill.Close()
+		_ = os.Remove(fillPath)
+	})
+	chunk := bytes.Repeat([]byte("f"), 1024*1024)
+	for {
+		if _, err := fill.Write(chunk); err != nil {
+			if !errors.Is(err, syscall.ENOSPC) {
+				t.Fatalf("filling disposable filesystem failed with %v, want ENOSPC", err)
+			}
+			break
+		}
+	}
+	_ = fill.Close()
+
+	next, err := Build(2, nil, []Route{{Hostname: "new.example.com", Status: "active"}}, []byte("disk-full-key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := AtomicWrite(filepath.Join(root, "next.json"), next); err == nil {
+		t.Fatal("atomic write unexpectedly succeeded on a full filesystem")
+	}
+	after, err := os.ReadFile(lastGoodPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("disk-full atomic write changed the last-good snapshot")
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if filepath.Ext(entry.Name()) == ".json" && entry.Name() != "last-good.json" {
+			t.Fatalf("failed disk-full write left a candidate snapshot: %s", entry.Name())
+		}
 	}
 }

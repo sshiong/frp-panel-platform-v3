@@ -5,13 +5,41 @@ on:
 
 jobs:
   baseline:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.x'
-      - run: make perf
+          cache-dependency-path: |
+            server/go.sum
+            client/go.sum
+      - name: Run target-scale performance profile
+        run: make perf 2>&1 | tee performance.log
         env:
           FRP_PERF: '1'
           FRP_PERF_SCALE: '1'
+      - name: Upload performance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-target-scale-performance
+          path: performance.log
+          if-no-files-found: error
+
+  fixed-2vcpu-2g:
+    name: fixed Linux 2 vCPU / 2 GiB profile
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run resource-constrained SQLite WAL profile
+        run: ./scripts/fixed-performance.sh
+      - name: Upload fixed resource performance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-fixed-2vcpu-2g-performance
+          path: performance-fixed-2vcpu-2g.log
+          if-no-files-found: error

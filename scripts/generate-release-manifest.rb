@@ -32,6 +32,11 @@ manifest = {
     "frps" => { "version" => ENV.fetch("FRPS_VERSION", "0.68.0"), "sha256" => sha256(frps_path) },
     "frpc" => { "version" => ENV.fetch("FRPC_VERSION", "0.68.0"), "sha256" => sha256(frpc_path) }
   },
+  "compatibility" => {
+    "minimum_client_version" => ENV.fetch("MINIMUM_CLIENT_VERSION", "0.1.0"),
+    "latest_client_version" => ENV.fetch("LATEST_CLIENT_VERSION", ENV.fetch("CLIENT_VERSION", "0.1.0")),
+    "minimum_frpc_version" => ENV.fetch("MINIMUM_FRPC_VERSION", "0.68.0")
+  },
   "panel_versions" => {
     "server" => ENV.fetch("SERVER_VERSION", "0.1.0"),
     "client" => ENV.fetch("CLIENT_VERSION", "0.1.0")

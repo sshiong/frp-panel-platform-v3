@@ -102,6 +102,85 @@ func TestLoadRejectsInvalidPersistedKeyLength(t *testing.T) {
 	}
 }
 
+func TestVersionedKeyRingsRetainLegacyCiphertextAcrossRotationAndRestart(t *testing.T) {
+	dataDir := t.TempDir()
+	masterPath := filepath.Join(dataDir, "master.key")
+	signingPath := filepath.Join(dataDir, "signing.key")
+	manager, err := Load(dataDir, masterPath, signingPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyMasterVersion := manager.CurrentMasterKeyVersion()
+	legacyMasterCiphertext, legacyMasterNonce, err := manager.Encrypt([]byte("legacy-master"), "rotation:master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyCertificateVersion := manager.CurrentCertificateKeyVersion()
+	legacyCertificateCiphertext, legacyCertificateNonce, err := manager.EncryptCertificate([]byte("legacy-certificate"), "rotation:certificate")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	masterVersion, err := manager.RotateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if masterVersion != legacyMasterVersion+1 || manager.CurrentMasterKeyVersion() != masterVersion {
+		t.Fatalf("unexpected master key version: got %d after %d", masterVersion, legacyMasterVersion)
+	}
+	rotatedMasterCiphertext, rotatedMasterNonce, err := manager.Encrypt([]byte("rotated-master"), "rotation:master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(rotatedMasterCiphertext) == string(legacyMasterCiphertext) {
+		t.Fatal("rotated master key produced identical ciphertext")
+	}
+	if plaintext, err := manager.DecryptVersioned(legacyMasterVersion, legacyMasterCiphertext, legacyMasterNonce, "rotation:master"); err != nil || string(plaintext) != "legacy-master" {
+		t.Fatalf("explicit legacy master decrypt failed: %q %v", plaintext, err)
+	}
+	if plaintext, err := manager.Decrypt(rotatedMasterCiphertext, rotatedMasterNonce, "rotation:master"); err != nil || string(plaintext) != "rotated-master" {
+		t.Fatalf("rotated master decrypt failed: %q %v", plaintext, err)
+	}
+
+	certificateVersion, err := manager.RotateCertificateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if certificateVersion != legacyCertificateVersion+1 || manager.CurrentCertificateKeyVersion() != certificateVersion {
+		t.Fatalf("unexpected certificate key version: got %d after %d", certificateVersion, legacyCertificateVersion)
+	}
+	rotatedCertificateCiphertext, rotatedCertificateNonce, err := manager.EncryptCertificate([]byte("rotated-certificate"), "rotation:certificate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plaintext, err := manager.DecryptCertificate(legacyCertificateVersion, legacyCertificateCiphertext, legacyCertificateNonce, "rotation:certificate"); err != nil || string(plaintext) != "legacy-certificate" {
+		t.Fatalf("explicit legacy certificate decrypt failed: %q %v", plaintext, err)
+	}
+	if plaintext, err := manager.DecryptCertificate(certificateVersion, rotatedCertificateCiphertext, rotatedCertificateNonce, "rotation:certificate"); err != nil || string(plaintext) != "rotated-certificate" {
+		t.Fatalf("rotated certificate decrypt failed: %q %v", plaintext, err)
+	}
+
+	reloaded, err := Load(dataDir, masterPath, signingPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.CurrentMasterKeyVersion() != masterVersion || reloaded.CurrentCertificateKeyVersion() != certificateVersion {
+		t.Fatalf("key versions were not persisted: master=%d certificate=%d", reloaded.CurrentMasterKeyVersion(), reloaded.CurrentCertificateKeyVersion())
+	}
+	if plaintext, err := reloaded.DecryptVersioned(legacyMasterVersion, legacyMasterCiphertext, legacyMasterNonce, "rotation:master"); err != nil || string(plaintext) != "legacy-master" {
+		t.Fatalf("restarted legacy master decrypt failed: %q %v", plaintext, err)
+	}
+	if plaintext, err := reloaded.Decrypt(rotatedMasterCiphertext, rotatedMasterNonce, "rotation:master"); err != nil || string(plaintext) != "rotated-master" {
+		t.Fatalf("restarted rotated master decrypt failed: %q %v", plaintext, err)
+	}
+	if plaintext, err := reloaded.DecryptCertificate(legacyCertificateVersion, legacyCertificateCiphertext, legacyCertificateNonce, "rotation:certificate"); err != nil || string(plaintext) != "legacy-certificate" {
+		t.Fatalf("restarted legacy certificate decrypt failed: %q %v", plaintext, err)
+	}
+	if len(reloaded.MasterKeyRing()) != 2 {
+		t.Fatalf("expected two retained master keys, got %d", len(reloaded.MasterKeyRing()))
+	}
+}
+
 func TestPurposeKeyValidationAndSignature(t *testing.T) {
 	key := []byte("01234567890123456789012345678901")
 	ciphertext, nonce, err := EncryptWithKey(key, []byte("certificate"), "certificate:v1")
@@ -130,6 +209,118 @@ func TestPurposeKeyValidationAndSignature(t *testing.T) {
 	signature, err := base64.RawURLEncoding.DecodeString(manager.Sign([]byte("snapshot")))
 	if err != nil || !ed25519.Verify(manager.SignKey.Public().(ed25519.PublicKey), []byte("snapshot"), signature) {
 		t.Fatalf("signature verification failed: %v", err)
+	}
+}
+
+func TestVersionedDecryptBoundaries(t *testing.T) {
+	key := []byte("01234567890123456789012345678901")
+	ciphertext, nonce, err := EncryptWithKey(key, []byte("legacy"), "versioned")
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := &Manager{MasterKey: key}
+	plaintext, err := legacy.DecryptVersioned(0, ciphertext, nonce, "versioned")
+	if err != nil || string(plaintext) != "legacy" {
+		t.Fatalf("zero version fallback failed: %q %v", plaintext, err)
+	}
+	if _, err := legacy.DecryptVersioned(2, ciphertext, nonce, "versioned"); err == nil || !strings.Contains(err.Error(), "version 2") {
+		t.Fatalf("unknown key version was accepted: %v", err)
+	}
+	versionFallback := &Manager{MasterKey: key}
+	if plaintext, err := versionFallback.DecryptVersioned(1, ciphertext, nonce, "versioned"); err != nil || string(plaintext) != "legacy" {
+		t.Fatalf("implicit version-one fallback failed: %q %v", plaintext, err)
+	}
+	if versionFallback.CurrentMasterKeyVersion() != 1 || (&Manager{}).CurrentMasterKeyVersion() != 1 {
+		t.Fatal("zero master key version did not fall back to version one")
+	}
+	if _, err := (&Manager{}).Decrypt(ciphertext, nonce, "versioned"); err == nil || !strings.Contains(err.Error(), "master key") {
+		t.Fatalf("missing master key was accepted: %v", err)
+	}
+}
+
+func TestCertificateDecryptBoundaries(t *testing.T) {
+	key := []byte("01234567890123456789012345678901")
+	ciphertext, nonce, err := EncryptWithKey(key, []byte("certificate"), "certificate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := &Manager{CertificateKey: key}
+	plaintext, err := legacy.DecryptCertificate(1, ciphertext, nonce, "certificate")
+	if err != nil || string(plaintext) != "certificate" {
+		t.Fatalf("legacy certificate decrypt failed: %q %v", plaintext, err)
+	}
+	if _, err := legacy.DecryptCertificate(2, ciphertext, nonce, "certificate"); err == nil || !strings.Contains(err.Error(), "version 2") {
+		t.Fatalf("unknown certificate key version was accepted: %v", err)
+	}
+	current := &Manager{CertificateKey: key, CertificateKeyVersion: 2}
+	if plaintext, err := current.DecryptCertificate(2, ciphertext, nonce, "certificate"); err != nil || string(plaintext) != "certificate" {
+		t.Fatalf("implicit current certificate key fallback failed: %q %v", plaintext, err)
+	}
+	if current.CurrentCertificateKeyVersion() != 2 || (&Manager{}).CurrentCertificateKeyVersion() != 1 {
+		t.Fatal("certificate key version fallback is incorrect")
+	}
+	if _, err := legacy.DecryptCertificate(0, []byte("bad"), nonce, "certificate"); err == nil {
+		t.Fatal("invalid certificate ciphertext was accepted")
+	}
+	if _, err := (&Manager{}).DecryptCertificate(0, ciphertext, nonce, "certificate"); err == nil || !strings.Contains(err.Error(), "certificate wrapping key") {
+		t.Fatalf("missing certificate key was accepted: %v", err)
+	}
+}
+
+func TestRotateKeysRequireConfiguredPathsAndProtectExistingFiles(t *testing.T) {
+	if _, err := (&Manager{}).RotateMasterKey(); err == nil || !strings.Contains(err.Error(), "master key path") {
+		t.Fatalf("missing master path was accepted: %v", err)
+	}
+	if _, err := (&Manager{}).RotateCertificateKey(); err == nil || !strings.Contains(err.Error(), "certificate wrapping key path") {
+		t.Fatalf("missing certificate path was accepted: %v", err)
+	}
+	dataDir := t.TempDir()
+	masterPath := filepath.Join(dataDir, "master.key")
+	if err := os.WriteFile(masterPath+".v2", make([]byte, 32), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	master := &Manager{MasterKey: make([]byte, 32), MasterKeyVersion: 1, masterPath: masterPath, masterKeys: map[int64][]byte{1: make([]byte, 32)}}
+	if _, err := master.RotateMasterKey(); err == nil {
+		t.Fatal("master rotation overwrote an existing versioned key")
+	}
+	certificatePath := filepath.Join(dataDir, "certificate.key")
+	if err := os.WriteFile(certificatePath+".v2", make([]byte, 32), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	certificate := &Manager{CertificateKey: make([]byte, 32), CertificateKeyVersion: 1, certificatePath: certificatePath, certificateKeys: map[int64][]byte{1: make([]byte, 32)}}
+	if _, err := certificate.RotateCertificateKey(); err == nil {
+		t.Fatal("certificate rotation overwrote an existing versioned key")
+	}
+	masterFresh := &Manager{masterPath: filepath.Join(dataDir, "fresh-master.key")}
+	if version, err := masterFresh.RotateMasterKey(); err != nil || version != 2 || masterFresh.MasterKeyVersion != 2 {
+		t.Fatalf("fresh master rotation failed: version=%d err=%v", version, err)
+	}
+	certificateFresh := &Manager{certificatePath: filepath.Join(dataDir, "fresh-certificate.key")}
+	if version, err := certificateFresh.RotateCertificateKey(); err != nil || version != 2 || certificateFresh.CertificateKeyVersion != 2 {
+		t.Fatalf("fresh certificate rotation failed: version=%d err=%v", version, err)
+	}
+}
+
+func TestLoadKeyRingSkipsMalformedNamesAndRejectsBadVersionedKey(t *testing.T) {
+	dataDir := t.TempDir()
+	path := filepath.Join(dataDir, "master.key")
+	if err := os.WriteFile(path, make([]byte, 32), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path+".v1", []byte("ignored"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path+".vnot-a-number", []byte("ignored"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := loadKeyRing(path, 32); err != nil {
+		t.Fatalf("malformed sidecar name should be ignored: %v", err)
+	}
+	if err := os.WriteFile(path+".v2", []byte("short"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := loadKeyRing(path, 32); err == nil || !strings.Contains(err.Error(), "master.key.v2") {
+		t.Fatalf("invalid versioned key was accepted: %v", err)
 	}
 }
 

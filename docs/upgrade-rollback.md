@@ -9,6 +9,21 @@
 4. 先升级 Server，再升级 Client；确认 `/api/v1/compatibility` 与兼容矩阵
    后再应用 Client 配置。
 
+## 密钥轮换维护窗口
+
+1. 停止或排空 Server 写入与后台 Worker，确认最近的 FPPB1 备份可恢复。
+2. 执行 `make key-rotate`（使用与 Server 相同的 `FRP_SERVER_DATA_DIR`、
+   `FRP_SERVER_DB` 和 `FRP_SERVER_MASTER_KEY_FILE` 环境变量）。命令会创建
+   新的版本化 master/certificate-wrapping key，并在一个 SQLite 事务中重加密
+   FRP 凭据、Cloudflare Token 和证书私钥。
+3. 记录命令输出的 key version/row counts，启动 Server，验证 Client 登录、DNS
+   Job、Router TLS 与 ACME 账户恢复，再保留旧 key 版本至少一个发布回滚周期。
+
+如果事务失败，旧版本 key 仍保留，数据库事务回滚；修复根因后可重复执行。
+key 文件已经生成而数据库事务失败时也不会丢失旧密文，下一次轮换会继续使用
+新的当前版本并重新包裹全部记录。生产发布仍需完成真实停机窗口、备份恢复和
+签字，不得把本地测试结果当作外部演练结果。
+
 Migration 只向前编号，启动时只执行未记录的 migration，不自动删除列或表。
 升级前的备份副本会在当前版本打开并记录最新 migration 后才视为可用。
 

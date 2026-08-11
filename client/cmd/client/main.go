@@ -7,12 +7,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/ricardo/frp-panel-platform/client/internal/app"
 	"github.com/ricardo/frp-panel-platform/client/internal/config"
 	"github.com/ricardo/frp-panel-platform/client/internal/httpapi"
+	"github.com/ricardo/frp-panel-platform/client/internal/supervisor"
 )
 
 func main() {
@@ -25,6 +27,12 @@ func main() {
 	if err := cfg.ValidateListenSecurity(); err != nil {
 		logger.Error("client_listener_security", "error", err)
 		os.Exit(1)
+	}
+	if strings.EqualFold(strings.TrimSpace(cfg.Environment), "production") {
+		if err := supervisor.VerifyBinary(cfg.FRPCBinary, cfg.FRPCBinarySHA256); err != nil {
+			logger.Error("frpc_binary", "error", err)
+			os.Exit(1)
+		}
 	}
 	client := app.New(cfg)
 	recoveryCtx, recoveryCancel := context.WithTimeout(context.Background(), 5*time.Second)

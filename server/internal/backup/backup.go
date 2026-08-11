@@ -330,10 +330,16 @@ func RestoreWithOptions(input, password, target string, options Options) (string
 		}
 		return "", err
 	}
+	rollback := func(cause error) (string, error) {
+		if rollbackErr := rollbackInstalledDatabase(target, previous); rollbackErr != nil {
+			return "", errors.Join(cause, fmt.Errorf("restore rollback failed: %w", rollbackErr))
+		}
+		return "", cause
+	}
 	// A restored database must never resurrect a live browser/FRP session.
 	restored, err := sql.Open("sqlite", target)
 	if err != nil {
-		return "", err
+		return rollback(err)
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if tableExists(restored, "sessions") {
@@ -347,17 +353,29 @@ func RestoreWithOptions(input, password, target string, options Options) (string
 	}
 	closeErr := restored.Close()
 	if err != nil {
-		return "", err
+		return rollback(err)
 	}
 	if closeErr != nil {
-		return "", closeErr
+		return rollback(closeErr)
 	}
 	if options.DataDir != "" {
 		if err := restoreDataFiles(options.DataDir, files); err != nil {
-			return "", err
+			return rollback(err)
 		}
 	}
 	return previous, nil
+}
+
+func rollbackInstalledDatabase(target, previous string) error {
+	if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if previous != "" {
+		if err := os.Rename(previous, target); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func collectDataFiles(dataDir, output string) (map[string][]byte, error) {

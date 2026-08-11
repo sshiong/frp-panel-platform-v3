@@ -1,0 +1,442 @@
+#!/usr/bin/env ruby
+
+require "fileutils"
+require "json"
+require "open3"
+require "time"
+
+ROOT = File.expand_path("..", __dir__)
+REPORT_PATH = File.expand_path(ENV.fetch("EXTERNAL_ACCEPTANCE_REPORT", "output/external-acceptance.json"), ROOT)
+ARTIFACT_DIR = File.expand_path(ENV.fetch("EXTERNAL_ACCEPTANCE_ARTIFACT_DIR", "output/external-acceptance"), ROOT)
+TAIL_LIMIT = 12_000
+
+class AcceptanceCollector
+  REPOSITORY = "sshiong/frp-panel-platform-v3".freeze
+  PROVIDER_GATES = %w[
+    FRPS-009 DNS-012 DNS-013 CF-007 TLS-009 TLS-010 TLS-012 KEY-004
+    PERF-003 REL-005 REL-007 REL-008 SEC-008 DOD-001
+  ].freeze
+  OWNER_SIGNOFF_ROLES = %w[release security test].freeze
+  EVIDENCE_ARTIFACT_FIELDS = %w[logs screenshots request_ids].freeze
+
+  def initialize(artifact_dir: ARTIFACT_DIR)
+    @steps = []
+    @operator = ENV.fetch("USER", "unknown")
+    @artifact_dir = File.expand_path(artifact_dir, ROOT)
+    @secret_values = ENV.values_at(
+      "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_E2E_API_TOKEN", "ACME_DNS_API_TOKEN",
+      "FRP_ACME_E2E_EMAIL", "COSIGN_KEY",
+      "FRP_E2E_FRPS_SHA256", "FRP_E2E_FRPC_SHA256"
+    ).compact.reject(&:empty?)
+  end
+
+  def run(id, title, command, cwd: ROOT, env: {})
+    started = Time.now.utc
+    stdout, stderr, status = Open3.capture3(env, *command, chdir: cwd)
+    finished = Time.now.utc
+    artifact_path = write_artifact(id, "STDOUT\n#{stdout}\nSTDERR\n#{stderr}")
+    actual = status.exitstatus.nil? ? "命令未返回退出码" : "命令退出码 #{status.exitstatus}"
+    @steps << {
+      "id" => id,
+      "title" => title,
+      "status" => status.success? ? "passed" : "failed",
+      "started_at" => started.iso8601(6),
+      "finished_at" => finished.iso8601(6),
+      "duration_ms" => ((finished - started) * 1000).round,
+      "command" => command.map { |part| redact(part.to_s) },
+      "working_directory" => cwd,
+      "environment_presence" => env.keys.sort.to_h { |name| [name, !env[name].to_s.empty?] },
+      "exit_code" => status.exitstatus,
+      "stdout_tail" => tail(stdout),
+      "stderr_tail" => tail(stderr)
+    }.merge(evidence_fields(
+      environment: environment_snapshot(cwd, env),
+      steps: [command.map { |part| redact(part.to_s) }.join(" ")],
+      expected: "命令退出码为 0",
+      actual: actual,
+      artifact_path: artifact_path,
+      executed_at: started
+    ))
+  rescue Errno::ENOENT => e
+    artifact_path = write_artifact(id, "命令不存在：#{e.message}")
+    @steps << {
+      "id" => id,
+      "title" => title,
+      "status" => "failed",
+      "started_at" => started.iso8601(6),
+      "finished_at" => Time.now.utc.iso8601(6),
+      "command" => command.map { |part| redact(part.to_s) },
+      "working_directory" => cwd,
+      "exit_code" => nil,
+      "stderr_tail" => redact(e.message)
+    }.merge(evidence_fields(
+      environment: environment_snapshot(cwd, env),
+      steps: [command.map { |part| redact(part.to_s) }.join(" ")],
+      expected: "命令可执行并返回 0",
+      actual: "命令不存在：#{e.message}",
+      artifact_path: artifact_path,
+      executed_at: started
+    ))
+  end
+
+  def blocked(id, title, requirements, detail = nil)
+    started = Time.now.utc
+    actual = detail || "外部环境尚未提供该验收所需的安全依赖。"
+    artifact_path = write_artifact(id, "BLOCKED\n#{actual}\nREQUIREMENTS\n#{requirements.join("\n")}")
+    @steps << {
+      "id" => id,
+      "title" => title,
+      "status" => "blocked",
+      "requirements" => requirements,
+      "detail" => actual
+    }.merge(evidence_fields(
+      environment: environment_snapshot(ROOT, {}),
+      steps: ["检查外部依赖和机器可读验收证据"],
+      expected: "所有所需外部依赖和证据均可验证",
+      actual: actual,
+      artifact_path: artifact_path,
+      executed_at: started
+    ))
+  end
+
+  def skipped(id, title, detail)
+    started = Time.now.utc
+    artifact_path = write_artifact(id, "SKIPPED\n#{detail}")
+    @steps << {
+      "id" => id,
+      "title" => title,
+      "status" => "skipped",
+      "detail" => detail
+    }.merge(evidence_fields(
+      environment: environment_snapshot(ROOT, {}),
+      steps: ["检查调用方是否显式启用该门禁"],
+      expected: "门禁未被跳过",
+      actual: detail,
+      artifact_path: artifact_path,
+      executed_at: started
+    ))
+  end
+
+  def evidence(path)
+    unless File.file?(path)
+      blocked("provider-evidence", "Provider、目标环境与发布签字证据", [path], "证据文件不存在。")
+      return
+    end
+
+    document = JSON.parse(File.read(path))
+    errors = validate_evidence_bundle(document)
+
+    if errors.empty?
+      started = Time.now.utc
+      artifact_path = write_artifact("provider-evidence", "REVIEWED EVIDENCE BUNDLE\nSOURCE\n#{path}\nGATES\n#{PROVIDER_GATES.join("\n")}")
+      @steps << {
+        "id" => "provider-evidence",
+        "title" => "Provider、目标环境与发布签字证据",
+        "status" => "passed",
+        "source" => path,
+        "gates" => PROVIDER_GATES
+      }.merge(evidence_fields(
+        environment: { "evidence_source" => path },
+        steps: ["验证 reviewed evidence bundle 的 schema、仓库和 commit 绑定"],
+        expected: "所有外部 gate 均有当前 revision 的 reviewed evidence",
+        actual: "#{PROVIDER_GATES.length} 个外部 gate 均通过结构校验",
+        artifact_path: artifact_path,
+        executed_at: started
+      ))
+    else
+      blocked(
+        "provider-evidence",
+        "Provider、目标环境与发布签字证据",
+        [path],
+        "证据包不符合 v1 结构：#{errors.join('；')}"
+      )
+    end
+  rescue JSON::ParserError, KeyError => e
+    started = Time.now.utc
+    artifact_path = write_artifact("provider-evidence", "INVALID EVIDENCE BUNDLE\n#{e.message}")
+    @steps << {
+      "id" => "provider-evidence",
+      "title" => "Provider、目标环境与发布签字证据",
+      "status" => "failed",
+      "source" => path,
+      "stderr_tail" => redact("证据文件格式无效：#{e.message}")
+    }.merge(evidence_fields(
+      environment: { "evidence_source" => path },
+      steps: ["解析 reviewed evidence bundle"],
+      expected: "证据 bundle 为有效 JSON 且符合 v1 schema",
+      actual: "证据文件格式无效：#{e.message}",
+      artifact_path: artifact_path,
+      executed_at: started
+    ))
+  end
+
+  def validate_evidence_gate(gate_id, gate)
+    return ["#{gate_id} 必须是对象"] unless gate.is_a?(Hash)
+
+    errors = []
+    errors << "#{gate_id}.status 必须为 passed" unless gate["status"] == "passed"
+    {
+      "environment" => "对象或非空字符串",
+      "steps" => "非空数组",
+      "expected" => "非空字符串",
+      "actual" => "非空字符串",
+      "operator" => "非空字符串",
+      "executed_at" => "ISO-8601 时间"
+    }.each do |field, description|
+      value = gate[field]
+      type_valid = case field
+      when "environment"
+        value.is_a?(Hash) || value.is_a?(String)
+      when "steps"
+        value.is_a?(Array)
+      else
+        value.is_a?(String)
+      end
+      next if type_valid && nonempty_value?(value)
+
+      errors << "#{gate_id}.#{field} 必须是#{description}"
+    end
+
+    artifacts = gate["artifacts"]
+    if !artifacts.is_a?(Hash)
+      errors << "#{gate_id}.artifacts 必须是对象"
+    elsif !EVIDENCE_ARTIFACT_FIELDS.any? { |field| nonempty_value?(artifacts[field]) }
+      errors << "#{gate_id}.artifacts 至少包含一项 logs、screenshots 或 request_ids"
+    end
+
+    begin
+      Time.iso8601(gate["executed_at"].to_s)
+    rescue ArgumentError
+      errors << "#{gate_id}.executed_at 不是有效的 ISO-8601 时间"
+    end unless gate["executed_at"].nil?
+
+    errors
+  end
+
+  def validate_evidence_bundle(document)
+    return ["证据根节点必须是对象"] unless document.is_a?(Hash)
+
+    errors = []
+    errors << "schema_version 必须为 v1" unless document["schema_version"] == "v1"
+    errors << "bundle status 必须为 passed" unless document["status"] == "passed"
+    errors << "repository 必须为 #{REPOSITORY}" unless document["repository"] == REPOSITORY
+    current_commit = git_revision
+    evidence_commit = document["commit"].to_s
+    unless evidence_commit.match?(/\A[0-9a-f]{40}\z/) && evidence_commit == current_commit
+      errors << "commit 必须为当前仓库 HEAD（#{current_commit}）"
+    end
+    gates = document["gates"]
+    unless gates.is_a?(Hash)
+      errors << "gates 必须是对象"
+      return errors
+    end
+
+    missing = PROVIDER_GATES.reject { |gate| gates[gate].is_a?(Hash) && gates[gate]["status"] == "passed" }
+    errors << "缺少或未通过：#{missing.join(', ')}" unless missing.empty?
+    PROVIDER_GATES.each do |gate_id|
+      errors.concat(validate_evidence_gate(gate_id, gates[gate_id]))
+    end
+    errors.concat(validate_signature_metadata(gates["SEC-008"]))
+    errors.concat(validate_owner_signoff(gates["DOD-001"], current_commit))
+    errors
+  end
+
+  def validate_signature_metadata(gate)
+    signature = gate.is_a?(Hash) ? gate["signature"] : nil
+    return ["SEC-008.signature 必须是对象"] unless signature.is_a?(Hash)
+
+    errors = []
+    errors << "SEC-008.signature.tool 必须为 cosign" unless signature["tool"] == "cosign"
+    errors << "SEC-008.signature.verified 必须为 true" unless signature["verified"] == true
+    %w[identity issuer].each do |field|
+      errors << "SEC-008.signature.#{field} 必须为非空字符串" unless signature[field].is_a?(String) && !signature[field].strip.empty?
+    end
+    artifacts = signature["artifacts_verified"]
+    errors << "SEC-008.signature.artifacts_verified 必须为非空数组" unless artifacts.is_a?(Array) && artifacts.any? { |item| item.is_a?(String) && !item.strip.empty? }
+    errors
+  end
+
+  def validate_owner_signoff(gate, current_commit)
+    approvals = gate.is_a?(Hash) ? gate["approvals"] : nil
+    return ["DOD-001.approvals 必须为包含三位负责人的数组"] unless approvals.is_a?(Array)
+
+    errors = []
+    roles = approvals.map { |approval| approval.is_a?(Hash) ? approval["role"] : nil }.compact
+    errors << "DOD-001.approvals 必须恰好包含 release、security、test 三种角色" unless roles.sort == OWNER_SIGNOFF_ROLES
+    names = []
+    approvals.each_with_index do |approval, index|
+      unless approval.is_a?(Hash)
+        errors << "DOD-001.approvals[#{index}] 必须是对象"
+        next
+      end
+      role = approval["role"].to_s
+      errors << "DOD-001.approvals[#{index}].role 无效" unless OWNER_SIGNOFF_ROLES.include?(role)
+      name = approval["name"]
+      if !name.is_a?(String) || name.strip.empty?
+        errors << "DOD-001.approvals[#{index}].name 必须为非空字符串"
+      else
+        names << name
+      end
+      errors << "DOD-001.approvals[#{index}].commit 必须绑定当前 revision" unless approval["commit"] == current_commit
+      errors << "DOD-001.approvals[#{index}].approval_ref 必须为非空字符串" unless approval["approval_ref"].is_a?(String) && !approval["approval_ref"].strip.empty?
+      begin
+        Time.iso8601(approval["signed_at"].to_s)
+      rescue ArgumentError
+        errors << "DOD-001.approvals[#{index}].signed_at 必须为 ISO-8601 时间"
+      end
+    end
+    errors << "DOD-001.approvals 的负责人必须互不相同" unless names.uniq.length == names.length
+    errors
+  end
+
+  def nonempty_value?(value)
+    case value
+    when String
+      !value.strip.empty?
+    when Array
+      value.any? { |item| nonempty_value?(item) }
+    when Hash
+      !value.empty?
+    else
+      !value.nil?
+    end
+  end
+
+  def report
+    statuses = @steps.map { |step| step["status"] }
+    overall = if statuses.include?("failed")
+      "failed"
+    elsif statuses.include?("blocked")
+      "blocked"
+    elsif statuses.empty? || statuses.all? { |status| status == "skipped" }
+      "blocked"
+    else
+      "passed"
+    end
+
+    {
+      "schema_version" => "v1",
+      "status" => overall,
+      "generated_at" => Time.now.utc.iso8601(6),
+      "repository" => "sshiong/frp-panel-platform-v3",
+      "commit" => git_revision,
+      "operator" => ENV.fetch("USER", "unknown"),
+      "rules" => {
+        "blocked_is_not_passed" => true,
+        "provider_mutations_are_not_started_without_explicit_external_evidence" => true,
+        "secrets_are_never_written_to_this_report" => true
+      },
+      "steps" => @steps
+    }
+  end
+
+  private
+
+  def evidence_fields(environment:, steps:, expected:, actual:, artifact_path:, executed_at:)
+    {
+      "environment" => environment,
+      "steps" => steps,
+      "expected" => expected,
+      "actual" => actual,
+      "artifacts" => {
+        "logs" => [artifact_path],
+        "screenshots" => [],
+        "request_ids" => []
+      },
+      "operator" => @operator,
+      "executed_at" => executed_at.iso8601(6)
+    }
+  end
+
+  def environment_snapshot(cwd, env)
+    {
+      "host_os" => RUBY_PLATFORM,
+      "ci" => ENV.fetch("CI", "false"),
+      "working_directory" => cwd,
+      "provided_variables" => env.keys.sort.to_h { |name| [name, !env[name].to_s.empty?] }
+    }
+  end
+
+  def write_artifact(id, content)
+    FileUtils.mkdir_p(@artifact_dir)
+    path = File.join(@artifact_dir, "#{id}.log")
+    File.open(path, "w", 0o600) { |file| file.write(redact(content.to_s)) }
+    File.chmod(0o600, path)
+    path.start_with?("#{ROOT}/") ? path.delete_prefix("#{ROOT}/") : path
+  end
+
+  def git_revision
+    stdout, _stderr, status = Open3.capture3("git", "rev-parse", "HEAD", chdir: ROOT)
+    status.success? ? stdout.strip : "unknown"
+  end
+
+  def tail(value)
+    redact(value.to_s[-TAIL_LIMIT, TAIL_LIMIT] || "")
+  end
+
+  def redact(value)
+    output = value.to_s
+    @secret_values.each { |secret| output = output.gsub(secret, "[REDACTED]") }
+    output.gsub!(/(?i)(authorization\s*:\s*bearer\s+|(?:token|password|secret|private[_-]?key)\s*[:=]\s*)\S+/, '\\1[REDACTED]')
+    output
+  end
+end
+
+def run_external_acceptance
+  collector = AcceptanceCollector.new
+
+if ENV.fetch("EXTERNAL_ACCEPTANCE_LOCAL", "1") != "0"
+  collector.run("local-contract", "完整本地契约与实现门禁", ["make", "contract"])
+  collector.run("acceptance-evidence", "141 项标准验收证据索引", ["make", "acceptance-evidence"])
+  collector.run("local-migration", "空库与上一稳定版 Migration", ["make", "migration-check"])
+  collector.run("local-security", "Secret 扫描与安全策略", ["make", "security"])
+  collector.run("local-license", "依赖 SPDX 许可证策略", ["make", "license"])
+  collector.run("local-build", "Server/Client 双发行物构建", ["make", "build"])
+  collector.run("local-performance", "本地性能基线", ["make", "perf"])
+else
+  collector.skipped("local-gates", "本地仓库门禁", "EXTERNAL_ACCEPTANCE_LOCAL=0，已由调用方显式跳过。")
+end
+
+network_required = %w[
+  FRP_E2E_FRPS_BINARY FRP_E2E_FRPS_CONFIG FRP_E2E_FRPC_BINARY
+  FRP_E2E_FRPC_CONFIG FRP_E2E_URL
+]
+missing_network = network_required.reject { |name| !ENV.fetch(name, "").empty? }
+if missing_network.empty?
+  network_env = ENV.slice(*network_required, "FRP_E2E_FRPS_READY_PORT", "FRP_E2E_FRPS_READY_HOST", "FRP_E2E_READY_WAIT_SECONDS", "FRP_E2E_WAIT_SECONDS", "FRP_E2E_FRPS_SHA256", "FRP_E2E_FRPC_SHA256", "FRP_E2E_FIXTURE_DIR", "FRP_E2E_FIXTURE_HOST", "FRP_E2E_FIXTURE_PORT", "FRP_E2E_FIXTURE_WAIT_SECONDS")
+  collector.run("frp-network-e2e", "固定 FRPS/FRPC 真实网络代理 E2E", ["./scripts/frp-network-e2e.sh"], env: network_env)
+else
+  collector.blocked("frp-network-e2e", "固定 FRPS/FRPC 真实网络代理 E2E", missing_network, "需要固定版本二进制、配置和隔离代理 URL；缺少项不会被模拟。")
+end
+
+if ENV.fetch("FRPC_VERIFY_BINARY", "").empty?
+  collector.blocked("frpc-verify", "固定版本 FRPC 配置 verify", ["FRPC_VERIFY_BINARY"], "没有固定 FRPC 二进制时不接受仅凭配置渲染的结论。")
+else
+  collector.run("frpc-verify", "固定版本 FRPC 配置 verify", ["make", "frpc-verify"], env: ENV.slice("FRPC_VERIFY_BINARY", "FRPC_VERIFY_VERSION"))
+end
+
+plugin_required = %w[FRP_E2E_FRPS_BINARY FRP_E2E_FRPC_BINARY]
+missing_plugin = plugin_required.reject { |name| !ENV.fetch(name, "").empty? }
+if missing_plugin.empty?
+  collector.run("frp-plugin-network-e2e", "真实 FRPS Plugin 网络 E2E", ["make", "plugin-e2e"], env: ENV.slice(*plugin_required, "FRP_E2E_FRPS_SHA256", "FRP_E2E_FRPC_SHA256"))
+else
+  collector.blocked("frp-plugin-network-e2e", "真实 FRPS Plugin 网络 E2E", missing_plugin, "需要 Linux/固定 FRP 二进制；协议单测不能替代真实 Plugin E2E。")
+end
+
+evidence_path = ENV.fetch("EXTERNAL_ACCEPTANCE_EVIDENCE", "")
+if evidence_path.empty?
+  collector.blocked("provider-evidence", "Provider、目标环境与发布签字证据", ["EXTERNAL_ACCEPTANCE_EVIDENCE"], "需要 Cloudflare Sandbox、ACME Staging、TLS、目标硬件、故障注入、签名和负责人签字的机器可读证据。")
+else
+  collector.evidence(File.expand_path(evidence_path, ROOT))
+end
+
+report = collector.report
+FileUtils.mkdir_p(File.dirname(REPORT_PATH))
+File.open(REPORT_PATH, "w", 0o600) { |file| file.write(JSON.pretty_generate(report) + "\n") }
+File.chmod(0o600, REPORT_PATH)
+puts JSON.pretty_generate(report)
+warn "external acceptance report: #{REPORT_PATH} (status=#{report["status"]})"
+  exit(report["status"] == "passed" ? 0 : report["status"] == "blocked" ? 2 : 1)
+end
+
+run_external_acceptance if $PROGRAM_NAME == __FILE__

@@ -34,6 +34,28 @@ func TestVerifySnapshot(t *testing.T) {
 	}
 }
 
+func TestVerifyBinaryChecksExecutableHash(t *testing.T) {
+	root := t.TempDir()
+	binary := filepath.Join(root, "frpc")
+	payload := []byte("fixed-frpc-binary")
+	if err := os.WriteFile(binary, payload, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(payload)
+	if err := VerifyBinary(binary, hex.EncodeToString(digest[:])); err != nil {
+		t.Fatalf("valid fixed binary was rejected: %v", err)
+	}
+	if err := VerifyBinary(binary, strings.Repeat("0", sha256.Size*2)); err == nil {
+		t.Fatal("hash mismatch was accepted")
+	}
+	if err := os.Chmod(binary, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyBinary(binary, hex.EncodeToString(digest[:])); err == nil {
+		t.Fatal("non-executable binary was accepted")
+	}
+}
+
 func TestApplyRejectsUnsupportedFRPCVersion(t *testing.T) {
 	s := NewWithBinaryHashAndVersion(t.TempDir(), "", "", "0.63.0")
 	snapshot := Snapshot{SchemaVersion: "v1", ConfigVersion: 1, UserID: "user-1", SessionGeneration: 1, Payload: map[string]interface{}{"frps_public_host": "frp.example.com", "frps_public_port": 7000, "frp_secret": "secret", "frp_username": "user-1", "runtime_credential": "runtime", "mappings": []interface{}{}}}

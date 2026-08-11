@@ -12,7 +12,7 @@ export function domainStatusClass(status: string): string {
 }
 
 export function isDangerousClientAction(action: string): boolean {
-  return new Set(['delete_mapping', 'delete_domain', 'overwrite_dns', 'reset_frp_credential']).has(action)
+  return new Set(['delete_mapping', 'delete_domain', 'overwrite_dns', 'reset_frp_credential', 'upload_cloudflare_token', 'activate_cloudflare_token', 'clear_cloudflare_token']).has(action)
 }
 
 export function canCreateDomain(httpMappingCount: number): boolean {

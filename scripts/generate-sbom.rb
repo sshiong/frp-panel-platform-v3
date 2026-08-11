@@ -12,8 +12,8 @@ packages = []
   end
 end
 
-%w[admin client].each do |app_name|
-  lock_path = File.join(root, "web", app_name, "package-lock.json")
+[["root", "package-lock.json"], ["admin", File.join("web", "admin", "package-lock.json")], ["client", File.join("web", "client", "package-lock.json")]].each do |app_name, relative_lock_path|
+  lock_path = File.join(root, relative_lock_path)
   next unless File.file?(lock_path)
   lock = JSON.parse(File.read(lock_path))
   (lock["packages"] || {}).each do |location, item|

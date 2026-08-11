@@ -72,7 +72,7 @@ func run(cfg config.Config, signals <-chan os.Signal) error {
 		logger.Info("frps_started", "pid", frpsProcess.PID())
 	}
 	if cfg.ACMEEnabled {
-		provider, providerErr := acme.NewCloudflareDNS01(acme.CloudflareDNS01Config{DirectoryURL: cfg.ACMEDirectoryURL, Email: cfg.ACMEEmail, AccountKeyPath: cfg.DataDir + "/acme/account.key", CloudflareURL: cfg.CloudflareAPIBaseURL}, secrets.MasterKey)
+		provider, providerErr := acme.NewCloudflareDNS01WithKeys(acme.CloudflareDNS01Config{DirectoryURL: cfg.ACMEDirectoryURL, Email: cfg.ACMEEmail, AccountKeyPath: cfg.DataDir + "/acme/account.key", CloudflareURL: cfg.CloudflareAPIBaseURL}, secrets.MasterKeyRing())
 		if providerErr != nil {
 			logger.Error("acme_provider", "error", providerErr)
 		} else {

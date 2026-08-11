@@ -12,7 +12,7 @@
 | Client Panel ↔ Server Panel | Server 地址、短期 opaque Session、签名配置 | HTTPS 生产强制；拒绝重定向；Bearer 仅内存；Ed25519 全量配置验签 |
 | Server ↔ FRPS Plugin | FRP 原生 Token、用户 Secret、Runtime Credential | transport token 文件化；Plugin loopback-only；每个操作重新校验用户/Session/generation/Revision/端口/域名 |
 | Server ↔ Cloudflare/ACME | Token、DNS 记录、ACME 账户、证书私钥 | Token/账户/证书分用途加密；外部调用超时；权限失败不重试；Operation/Job 补偿 |
-| Control ↔ Router | 路由快照、证书集合 | HMAC/hash、原子写、last-good、DB-free Router、未知 SNI fail-closed |
+| Control ↔ Router | 路由快照、证书集合 | HMAC/hash、证书 `cert_hash` 完整性校验、原子写、last-good、DB-free Router、未知 SNI fail-closed |
 
 ## 攻击者能力
 
