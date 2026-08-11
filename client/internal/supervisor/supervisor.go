@@ -702,7 +702,7 @@ func VerifyBinary(path, expectedSHA256 string) error {
 	if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
 		return fmt.Errorf("FRPC binary is not an executable regular file")
 	}
-	file, err := os.Open(path)
+	file, err := os.Open(path) // #nosec G304 -- path is the operator-configured fixed FRPC artifact, verified before use
 	if err != nil {
 		return err
 	}
