@@ -1,6 +1,8 @@
 #!/usr/bin/env ruby
 
 require_relative "cloudflare-sandbox-e2e"
+require "open3"
+require "rbconfig"
 
 valid = [
   "https://api.cloudflare.com/client/v4",
@@ -43,3 +45,16 @@ zone_cases.each do |(hostname, zone_name), expected|
 end
 
 puts "Cloudflare sandbox API endpoint policy valid"
+
+env = {
+  "CLOUDFLARE_E2E_API_TOKEN" => "redacted-test-token",
+  "CLOUDFLARE_E2E_ZONE_ID" => "0123456789abcdef",
+  "CLOUDFLARE_E2E_RECORD_NAME" => "frp-e2e.example.com",
+  "CLOUDFLARE_E2E_CONFIRM" => "disposable-zone"
+}
+command = [RbConfig.ruby, File.expand_path("cloudflare-sandbox-e2e.rb", __dir__)]
+_stdout, stderr, status = Open3.capture3(env, *command, chdir: File.expand_path("..", __dir__))
+abort "direct Cloudflare runner accepted missing expected Zone name" if status.success?
+abort "direct Cloudflare runner did not require expected Zone name" unless stderr.include?("CLOUDFLARE_E2E_EXPECTED_ZONE_NAME")
+
+puts "Cloudflare sandbox runner requires an expected Zone name"

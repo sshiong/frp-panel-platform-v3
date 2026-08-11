@@ -18,6 +18,7 @@ class CloudflareSandboxE2E
   def initialize
     @token = ENV.fetch("CLOUDFLARE_E2E_API_TOKEN")
     @zone_id = ENV.fetch("CLOUDFLARE_E2E_ZONE_ID")
+    @expected_zone_name = ENV.fetch("CLOUDFLARE_E2E_EXPECTED_ZONE_NAME")
     @record_name = ENV.fetch("CLOUDFLARE_E2E_RECORD_NAME")
     @base_url = ENV.fetch("CLOUDFLARE_API_BASE_URL", "https://api.cloudflare.com/client/v4").sub(%r{/\z}, "")
     @steps = []
@@ -41,9 +42,8 @@ class CloudflareSandboxE2E
       response = request(:get, "/zones/#{path_escape(@zone_id)}")
       zone = response.fetch("result")
       zone_name = zone.fetch("name").to_s
-      expected = ENV["CLOUDFLARE_E2E_EXPECTED_ZONE_NAME"]
-      if expected && self.class.normalize_hostname(zone_name) != self.class.normalize_hostname(expected)
-        raise "selected zone name #{zone_name} does not match expected #{expected}"
+      if self.class.normalize_hostname(zone_name) != self.class.normalize_hostname(@expected_zone_name)
+        raise "selected zone name #{zone_name} does not match expected #{@expected_zone_name}"
       end
       unless self.class.hostname_in_zone?(@record_name, zone_name)
         raise "record name #{@record_name} is outside selected zone #{zone_name}"
@@ -77,6 +77,9 @@ class CloudflareSandboxE2E
     raise "CLOUDFLARE_E2E_API_TOKEN must not be empty" if @token.strip.empty?
     unless @zone_id.match?(/\A[a-zA-Z0-9_-]{8,128}\z/)
       raise "CLOUDFLARE_E2E_ZONE_ID has an invalid format"
+    end
+    unless @expected_zone_name.match?(/\A(?=.{1,254}\z)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}\.?\z/)
+      raise "CLOUDFLARE_E2E_EXPECTED_ZONE_NAME must be a fully-qualified DNS name"
     end
     unless @record_name.match?(/\A(?=.{1,253}\z)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}\z/)
       raise "CLOUDFLARE_E2E_RECORD_NAME must be a fully-qualified DNS name"

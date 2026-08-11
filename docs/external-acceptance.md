@@ -165,8 +165,10 @@ The collector requires every gate listed above and requires the bundle-level
 `status` to be `passed`. It records the source path and gate IDs, but does not
 copy the evidence contents or any credential into the repository report.
 
-For the real Cloudflare DNS smoke path, use a disposable Sandbox zone and a
-fresh record name. The command refuses to write unless the explicit
+For the real Cloudflare DNS smoke path, use a disposable Sandbox zone, its
+exact expected Zone name, and a fresh record name. The runner itself requires
+the expected Zone name even when invoked outside GitHub Actions. The command
+refuses to write unless the explicit
 confirmation is present, refuses to touch an existing record, verifies the
 create/update/readback lifecycle, and removes the record in an `ensure` path:
 

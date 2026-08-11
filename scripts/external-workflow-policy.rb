@@ -8,6 +8,7 @@ required = {
   "Cloudflare secret" => "CLOUDFLARE_E2E_API_TOKEN: ${{ secrets.CLOUDFLARE_E2E_API_TOKEN }}",
   "ACME email secret" => "FRP_ACME_E2E_EMAIL: ${{ secrets.FRP_ACME_E2E_EMAIL }}",
   "Cloudflare write confirmation" => "CLOUDFLARE_E2E_CONFIRM: disposable-zone",
+  "Cloudflare expected Zone binding" => "CLOUDFLARE_E2E_EXPECTED_ZONE_NAME: ${{ inputs.expected_zone_name }}",
   "ACME staging confirmation" => "FRP_ACME_E2E_CONFIRM: acme-staging",
   "ACME Zone binding" => "FRP_ACME_E2E_EXPECTED_ZONE_NAME: ${{ inputs.expected_zone_name }}",
   "redacted artifact upload" => "actions/upload-artifact@v4",
