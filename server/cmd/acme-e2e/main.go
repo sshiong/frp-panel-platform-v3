@@ -33,8 +33,17 @@ type result struct {
 	Commit        string                 `json:"commit,omitempty"`
 	GeneratedAt   string                 `json:"generated_at"`
 	Environment   map[string]interface{} `json:"environment"`
+	Steps         []runnerStep           `json:"steps"`
+	RequestIDs    []string               `json:"request_ids"`
 	Certificate   map[string]interface{} `json:"certificate,omitempty"`
 	Error         string                 `json:"error,omitempty"`
+}
+
+type runnerStep struct {
+	ID         string `json:"id"`
+	Title      string `json:"title"`
+	Status     string `json:"status"`
+	ExecutedAt string `json:"executed_at"`
 }
 
 func main() {
@@ -124,17 +133,24 @@ func run() (int, result) {
 	if len(certificate.CertPEM) == 0 || certificate.NotAfter.IsZero() {
 		return failureWithCommit(commit, errors.New("ACME provider returned incomplete certificate metadata"))
 	}
+	executedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	return 0, result{
 		SchemaVersion: "v1",
 		Status:        "passed",
 		Repository:    "sshiong/frp-panel-platform-v3",
 		Commit:        commit,
-		GeneratedAt:   time.Now().UTC().Format(time.RFC3339Nano),
+		GeneratedAt:   executedAt,
 		Environment: map[string]interface{}{
 			"ca":     "ACME Staging",
 			"domain": domain,
 			"zone":   expectedZone,
 		},
+		Steps: []runnerStep{
+			{ID: "input-validation", Title: "Validate the official ACME Staging and disposable Zone inputs", Status: "passed", ExecutedAt: executedAt},
+			{ID: "dns01-order", Title: "Issue one ACME Staging DNS-01 certificate", Status: "passed", ExecutedAt: executedAt},
+			{ID: "certificate-validation", Title: "Validate returned certificate metadata", Status: "passed", ExecutedAt: executedAt},
+		},
+		RequestIDs: []string{},
 		Certificate: map[string]interface{}{
 			"not_before":  certificate.NotBefore.UTC().Format(time.RFC3339Nano),
 			"not_after":   certificate.NotAfter.UTC().Format(time.RFC3339Nano),
@@ -181,6 +197,8 @@ func failureWithCommit(commit string, err error) (int, result) {
 		Repository:    "sshiong/frp-panel-platform-v3",
 		Commit:        commit,
 		GeneratedAt:   time.Now().UTC().Format(time.RFC3339Nano),
+		Steps:         []runnerStep{},
+		RequestIDs:    []string{},
 		Error:         redactError(err.Error()),
 	}
 }

@@ -23,12 +23,22 @@ base = {
   "repository" => "sshiong/frp-panel-platform-v3",
   "commit" => commit,
   "generated_at" => "2026-08-10T00:00:00Z",
-  "steps" => [{ "id" => "smoke", "status" => "passed" }]
+  "steps" => [{ "id" => "smoke", "title" => "Smoke", "status" => "passed", "executed_at" => "2026-08-10T00:00:00Z" }],
+  "request_ids" => []
 }
 
 Dir.mktmpdir("external-runners-test") do |dir|
-  cloudflare = base.merge("environment" => { "provider" => "Cloudflare Sandbox" })
-  acme = base.merge("environment" => { "ca" => "ACME Staging" })
+  cloudflare = base.merge("environment" => {
+    "provider" => "Cloudflare Sandbox",
+    "zone_id_present" => true,
+    "zone_name" => "example.test",
+    "record_name" => "frp-e2e.example.test"
+  }, "request_ids" => ["cf-ray-test"])
+  acme = base.merge("environment" => {
+    "ca" => "ACME Staging",
+    "domain" => "frp-e2e.example.test",
+    "zone" => "example.test"
+  })
   cloudflare_path = File.join(dir, "cloudflare.json")
   acme_path = File.join(dir, "acme.json")
   output_path = File.join(dir, "index.json")
@@ -47,6 +57,17 @@ Dir.mktmpdir("external-runners-test") do |dir|
   write_json(acme_path, stale)
   _stdout, _stderr, status = Open3.capture3(env, *command, chdir: ROOT)
   abort("stale runner evidence was accepted") if status.success?
+
+  malformed_steps = cloudflare.merge("steps" => [{ "id" => "smoke", "status" => "failed", "executed_at" => "2026-08-10T00:00:00Z" }])
+  write_json(cloudflare_path, malformed_steps)
+  write_json(acme_path, acme)
+  _stdout, _stderr, status = Open3.capture3(env, *command, chdir: ROOT)
+  abort("failed runner step was accepted") if status.success?
+
+  missing_zone = cloudflare.merge("environment" => cloudflare["environment"].reject { |key, _value| key == "zone_name" })
+  write_json(cloudflare_path, missing_zone)
+  _stdout, _stderr, status = Open3.capture3(env, *command, chdir: ROOT)
+  abort("incomplete Cloudflare environment was accepted") if status.success?
 end
 
 puts "external runner evidence validation checks passed"

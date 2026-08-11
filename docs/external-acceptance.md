@@ -225,10 +225,15 @@ and refuses to run automatically on push or pull request. The checkout is
 explicitly pinned to `github.sha`; both runners include the repository and
 exact 40-character commit in their JSON, and
 `scripts/validate-external-runners.rb` rejects failed, malformed, cross-revision,
-or cross-repository evidence before the final workflow gate. Runner files and
-the generated index use mode `0600`; the artifact is still only redacted
-operator evidence. The workflow is a preparation aid; the reviewed evidence
-bundle and separate TLS/target/sign-off gates are still required for release.
+or cross-repository evidence before the final workflow gate. It also requires
+an ISO-8601 `generated_at`, a non-empty environment bound to the selected Zone
+or ACME domain, an array of passed timestamped steps, an array of request IDs,
+and no runner or cleanup error. The ACME runner emits the same step-oriented
+schema as the Cloudflare runner, while retaining an empty request-ID array when
+the ACME client does not expose provider request IDs. Runner files and the
+generated index use mode `0600`; the artifact is still only redacted operator
+evidence. The workflow is a preparation aid; the reviewed evidence bundle and
+separate TLS/target/sign-off gates are still required for release.
 
 The release workflow also refuses manual publication from any ref other than
 protected `main`, and tag-triggered publication must be running on the pushed
