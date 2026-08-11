@@ -215,6 +215,7 @@
 | 2026-08-11 | 验收文档 revision 漂移修复 | 已修复 `docs/acceptance-report.md` 与 `docs/acceptance-matrix.md` 顶部仍引用历史 `b21f3d` 的问题，改为引用最新已托管复核的 `27c105d`；本次仅更新证据说明，不改变运行时代码，随后重新运行契约、证据索引和外部采集并以当前提交重新绑定报告。 |
 | 2026-08-11 | 验收文档修正托管复核 | 通过/按标准阻断；文档提交 [`08cc4df`](https://github.com/sshiong/frp-panel-platform-v3/commit/08cc4df61c72688de924fdb1f134ee8fc89e33fc) 的 [`ci run 31480219092`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31480219092) 与 [`CodeQL run 31480218900`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31480218900) 全部成功；该提交的本机固定 FRP 外部采集为 10 passed / 0 failed / 1 blocked，唯一阻断仍是缺少真实 Provider、目标部署、正式签名和负责人审批证据。 |
 | 2026-08-12 | 恢复审计与固定 FRP 证据刷新 | 当前工作树重新通过 `make test lint accessibility`、`make contract`；官方 FRP v0.68.0 Darwin ARM64 二进制（固定 SHA-256）真实 TCP、`frpc verify` 和 Plugin 网络 E2E 全部通过，`make external-acceptance` 记录 10 passed / 0 failed / 1 blocked，`make acceptance-evidence` 绑定当前 revision 的 141 个标准条目和 1 个 DOD-001 派生记录。`make target-acceptance` 在本机按标准返回 blocked（Darwin，不冒充 Linux 目标签收）；真实 Cloudflare/ACME/TLS/目标部署/正式签名/负责人审批证据仍待外部。 |
+| 2026-08-12 | 双发行物实际启动复验 | 当前构建的 Server/Client 二进制均真实启动并分别通过 `/healthz`；Server 初始化的 `initial-admin.txt` 与 `frps-transport.secret` 权限均为 `0600`，Client 健康响应包含 `request_id`，临时运行数据与进程退出均隔离验证。 |
 
 ## 未决与发布阻断项
 
