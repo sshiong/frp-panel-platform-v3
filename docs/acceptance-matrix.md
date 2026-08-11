@@ -13,9 +13,9 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 - `部分通过`：本地实现已有证据，但标准要求的外部/目标环境仍未完成；
 - `待外部`：需要真实 Provider、Linux、Docker、CA、签字或目标硬件。
 
-当前 checkout 的最新托管门禁证据：revision
-`0dd1246052e29c46ad45fa75a7c0c3d177f66618` 的 CI run
-`31514377589` 与 CodeQL run `31514377339` 均成功；required checks 还包括
+本次文档快照前的最新托管门禁证据：revision
+`330cc5284dbb2b7c9b0dbb7bd9ef9c580c7c6654` 的 CI run
+`31515563005` 与 CodeQL run `31515562744` 均成功；required checks 还包括
 coverage、固定 FRP Linux E2E、fault injection、security、container scan 和
 release metadata。该 revision 上传的 target-acceptance artifact 在 Ubuntu 24.04
 Docker 2 vCPU/2 GiB profile 下通过 PERF-001/002/003/005/006/007，稳态指标为
