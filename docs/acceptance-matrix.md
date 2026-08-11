@@ -23,12 +23,12 @@ PERF-001/002/003/005/006 = 65.117549/34.255090/91.191733/4.330126/5.749294ms，
 PERF-007 WebSocket/HTTP/old-FRP = 74.984431/0.385668/0.357702ms；导航按钮使用
 `aria-current="page"`，所有面板按钮显式声明 `type`，性能项也已准确区分开发/Hosted
 profile 与固定 Linux 2 vCPU/2 GiB 目标基线。当前 revision 的
-`make external-acceptance` 报告为 7 passed / 0 failed / 4 blocked（本机当前未配置固定
-FRP runtime，Hosted target profile 已独立通过），
+`make external-acceptance` 在提供官方 FRP v0.68.0 Darwin ARM64 `frps/frpc`、固定
+SHA-256、隔离 fixture 后报告为 10 passed / 0 failed / 1 blocked（Hosted target
+profile 也已独立通过）；未提供固定 runtime 的默认运行仍会 fail-closed，
 `make acceptance-evidence` 索引为 142 条记录且保持 `blocked`。
 `output/external-acceptance.json` 的 40 位 commit 字段始终是当前工作树验收报告的权威绑定；
-本机报告额外记录未配置固定 FRP runtime，真实 Provider、目标环境、正式签名和负责人签字仍是
-发布阻断，不改变下方逐项状态的外部证据要求。
+真实 Provider、目标环境、正式签名和负责人签字仍是发布阻断，不改变下方逐项状态的外部证据要求。
 
 目标环境复验现在有独立入口 `make target-acceptance`、可手动触发/由 PR CI 复用的
 [`target-acceptance.yml`](../.github/workflows/target-acceptance.yml)：它固定

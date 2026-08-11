@@ -16,10 +16,10 @@ read/write p95 65.117549/34.255090ms, PERF-003 91.191733ms, PERF-005 4.330126ms,
 5.749294ms and PERF-007 WebSocket/HTTP/old-FRP invalidation 74.984431/0.385668/0.357702ms.
 The hosted target artifact also passed the fixed FRP TCP, FRPC `verify`, and
 FRPS/FRPC Plugin network E2E steps. The current local collector report is regenerated
-against the exact report checkout and records 7 passed, 0 failed and 4 blocked steps;
-the three additional blocked steps are the intentionally unconfigured local fixed-FRP
-runtime, while the reviewed Provider, target-environment, signing and owner-approval
-bundle remains absent. The 142-record acceptance
+against the exact report checkout using the official FRP v0.68.0 Darwin ARM64 binaries,
+their recorded SHA-256 values, an isolated fixture and real Plugin E2E, and records
+10 passed, 0 failed and 1 blocked step. The remaining blocked step is the absent
+reviewed Provider, target-environment, signing and owner-approval bundle. The 142-record acceptance
 index is also bound to the exact report checkout and remains `blocked` while the matrix has
 incomplete external rows. This revision also adds Cloudflare Token clear/rotation
 guards across DNS and ACME Jobs, Token verification, and explicit activation; the
