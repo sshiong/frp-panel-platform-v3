@@ -14,11 +14,13 @@ CI；执行人为 Codex，外部发布签字人尚未指定。`本地通过` 只
 - `待外部`：需要真实 Provider、Linux、Docker、CA、签字或目标硬件。
 
 最近一次已验证实现与托管门禁证据：最终证据 revision
-`e07cd8f2fc6b29038664aaa14adbeaae7a156123` 的 CI run
-`31467891623` 与 CodeQL run `93704705991` 均成功；required checks 还包括
+`b21f3d006322abbdd6d714a7cf9b8448a6389838` 的 CI run
+`31469104966` 与 CodeQL run `93708460302` 均成功；required checks 还包括
 coverage、固定 FRP Linux E2E、fault injection、security、container scan 和
 release metadata。该 revision 上传的 target-acceptance artifact 在 Ubuntu 24.04
-Docker 2 vCPU/2 GiB profile 下通过 PERF-001/002/003/005/006/007；导航按钮使用
+Docker 2 vCPU/2 GiB profile 下通过 PERF-001/002/003/005/006/007，稳态指标为
+PERF-001/002/003/005/006 = 65.117549/34.255090/91.191733/4.330126/5.749294ms，
+PERF-007 WebSocket/HTTP/old-FRP = 74.984431/0.385668/0.357702ms；导航按钮使用
 `aria-current="page"`，所有面板按钮显式声明 `type`，性能项也已准确区分开发/Hosted
 profile 与固定 Linux 2 vCPU/2 GiB 目标基线。当前 revision 的
 `make external-acceptance` 报告为 7 passed / 0 failed / 4 blocked（本机当前未配置固定

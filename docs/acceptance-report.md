@@ -4,16 +4,16 @@ This report records evidence available in the local development environment. It 
 
 ## Current revision evidence
 
-The latest verified implementation revision is `e07cd8f2fc6b29038664aaa14adbeaae7a156123`. Its PR CI run
-[`31467891623`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31467891623)
+The latest verified repository revision is `b21f3d006322abbdd6d714a7cf9b8448a6389838`. Its PR CI run
+[`31469104966`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31469104966)
 and CodeQL run
-[`93704705991`](https://github.com/sshiong/frp-panel-platform-v3/runs/93704705991)
+[`93708460302`](https://github.com/sshiong/frp-panel-platform-v3/runs/93708460302)
 passed all required checks, including contract, coverage, Go race/static analysis,
 both panel builds and WCAG checks, fixed Linux FRP E2E, fault injection, fuzz,
 security, container scanning, release metadata and the fixed Ubuntu 24.04 / 2 vCPU /
 2 GiB target acceptance profile. The measured target profile records PERF-001/002
-read/write p95 55.457712/37.158087ms, PERF-003 112.743114ms, PERF-005 4.404769ms, PERF-006
-7.064798ms and PERF-007 WebSocket/HTTP/old-FRP invalidation 61.597603/0.305122/0.381659ms.
+read/write p95 65.117549/34.255090ms, PERF-003 91.191733ms, PERF-005 4.330126ms, PERF-006
+5.749294ms and PERF-007 WebSocket/HTTP/old-FRP invalidation 74.984431/0.385668/0.357702ms.
 The hosted target artifact also passed the fixed FRP TCP, FRPC `verify`, and
 FRPS/FRPC Plugin network E2E steps. The current local collector report is regenerated
 against the exact report checkout and records 7 passed, 0 failed and 4 blocked steps;
