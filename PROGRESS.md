@@ -1,6 +1,6 @@
 # FRP Cloudflare Platform v3 进度跟踪
 
-> 最后更新：2026-08-10
+> 最后更新：2026-08-11
 >
 > 本文是实现进度的单一记录入口。每次完成一个可验证的垂直切片，更新状态、证据和未决项；未通过验收的能力不得标记为完成。
 
@@ -16,7 +16,7 @@
 | 阶段 3：TCP/UDP Mapping | 本地实现完成，平台矩阵待执行 | Mapping/Revision/Port Lease/幂等 API、真实 FRP Plugin envelope 与固定 v0.68.0 FRPS/FRPC + loopback Plugin metadata 网络 E2E 已通过 |
 | 阶段 4：域名和 Cloudflare | 本地实现完成，外部 Sandbox 待执行 | Domain/DNS/Token 加密模型、权限分流、冲突语义、补偿 Job 和重定向隔离已实现；真实测试 Zone/Token 尚未配置 |
 | 阶段 5：Router 和证书 | 本地实现完成，ACME/TLS 待执行 | Router Snapshot control/business 分离、HMAC/last-good、DB-free Host runtime 与 ACME DNS-01 Provider 已实现；真实 ACME Staging、TLS/SNI 热切换仍需外部部署验收 |
-| 阶段 6：任务、删除、备份和发布 | 本地与 CI 门禁完成，发布签署待执行 | Job/Audit、pending 配额、删除补偿、全数据加密备份 Decode/Restore、OpenAPI 34/39 路由与显式成功响应 schema、上一稳定版 migration 演练、ESLint、许可证策略、SPDX SBOM、SHA-256 清单和 `make external-acceptance` 证据收集器已通过；GitHub Actions `ci` 与 CodeQL 已在最终修复提交上全绿，仍需正式签名、外部环境和发布签字 |
+| 阶段 6：任务、删除、备份和发布 | 本地与 CI 门禁完成，发布签署待执行 | Job/Audit、pending 配额、删除补偿、全数据加密备份 Decode/Restore、Server 35/40 与 Client 23/27 OpenAPI 路由及显式成功响应 schema、上一稳定版 migration 演练、ESLint、许可证策略、SPDX SBOM、SHA-256 清单和 `make external-acceptance` 证据收集器已通过；GitHub Actions `ci` 与 CodeQL 已在最终修复提交上全绿，仍需正式签名、外部环境和发布签字 |
 
 ## 已实现
 
@@ -210,6 +210,7 @@
 | 2026-08-10 | Zone 归属变更托管复核与性能证据刷新 | 实现 revision [`147ca6e`](https://github.com/sshiong/frp-panel-platform-v3/commit/147ca6e4fd75ee8dc4b320ba5d02fb4378a3ca48) 的 [`ci run 31398358887`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31398358887) 与 [`CodeQL run 93487110569`](https://github.com/sshiong/frp-panel-platform-v3/runs/93487110569) 全部成功，包含 target profile、container scan、release metadata；target artifact 稳态 PERF-001/002/003/005/006/007 为 66.522693/36.610917/92.741088/5.247152/6.636147/75.888859ms（PERF-007 HTTP/FRP Login 0.372194/0.350301ms），均低于阈值。最新本机外部收集器 10 passed / 0 failed / 1 blocked，真实 Provider/ACME/TLS/目标环境/签名/负责人证据仍待外部。 |
 | 2026-08-11 | 外部 runner 证据 schema 托管复核 | 已实现并通过本地 `make contract`、`make test`、`make lint`、`make build` 及托管 CI/CodeQL；revision [`24e96dc`](https://github.com/sshiong/frp-panel-platform-v3/commit/24e96dc2b4a71ce36f9bad0607a9ec1522e6f921) 的 [`ci run 31465399597`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31465399597) 与 [`CodeQL run 93697336244`](https://github.com/sshiong/frp-panel-platform-v3/runs/93697336244) 全部成功。ACME runner 成功输出现在包含时间戳步骤和 `request_ids`，validator 统一校验生成时间、Zone/域名绑定、每一步 `passed`、请求 ID 数组及错误/清理失败；新增失败步骤和缺失 Zone 字段回归。Hosted target profile PERF-001/002/003/005/006/007 稳态值为 48.533585/42.634953/112.852942/4.6158/7.339587/59.254767ms（PERF-007 HTTP/FRP Login 0.336686/0.329843ms）。当前本地外部收集器为 7 passed / 0 failed / 4 blocked，额外 blocked 来自本机未配置固定 FRP runtime；真实 Cloudflare/ACME/TLS/生产目标环境/签名/负责人证据仍保持 blocked。 |
 | 2026-08-11 | Cloudflare runner 直接调用安全边界托管复核 | 已实现并通过本地 `make contract`、`make test`、`make lint`、`make build` 及托管 CI/CodeQL；revision [`e07cd8f`](https://github.com/sshiong/frp-panel-platform-v3/commit/e07cd8f2fc6b29038664aaa14adbeaae7a156123) 的 [`ci run 31467891623`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31467891623) 与 [`CodeQL run 93704705991`](https://github.com/sshiong/frp-panel-platform-v3/runs/93704705991) 全部成功。Cloudflare Sandbox runner 自身现在强制要求并校验 `CLOUDFLARE_E2E_EXPECTED_ZONE_NAME`，不再允许仅凭 Zone ID 直接执行写入；新增缺少 expected Zone 的拒绝测试，并同步 external workflow policy/runbook。Hosted target profile PERF-001/002/003/005/006/007 稳态值为 55.457712/37.158087/112.743114/4.404769/7.064798/61.597603ms（PERF-007 HTTP/FRP Login 0.305122/0.381659ms）。当前本地外部收集器仍为 7 passed / 0 failed / 4 blocked；真实 Sandbox/ACME/TLS/目标环境/签名/负责人证据仍保持 blocked。 |
+| 2026-08-11 | OpenAPI 当前数量文档漂移收口 | 已实现；修正验收矩阵、验收报告和阶段摘要中的旧路由数量（Server 35 paths/40 operations、Client 23 paths/27 operations），并将契约数量比对接入 `scripts/acceptance-matrix-policy.rb`，由 `make contract` 和 GitHub contract job 持续校验；历史进度记录保留原始时间点数据。 |
 
 ## 未决与发布阻断项
 
