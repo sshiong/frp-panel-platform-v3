@@ -688,11 +688,21 @@ func (s *Supervisor) removePIDIf(pid int) error {
 	return nil
 }
 
-func (s *Supervisor) verifyBinary() error {
-	if s.binary == "" || s.binarySHA256 == "" {
-		return nil
+// VerifyBinary checks the fixed FRPC artifact before a production Client
+// Panel starts. Development mode may intentionally omit a binary for UI and
+// protocol tests, but a configured production binary must be hash-verified.
+func VerifyBinary(path, expectedSHA256 string) error {
+	if strings.TrimSpace(path) == "" || strings.TrimSpace(expectedSHA256) == "" {
+		return errors.New("FRPC binary and SHA-256 are required")
 	}
-	file, err := os.Open(s.binary)
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+		return fmt.Errorf("FRPC binary is not an executable regular file")
+	}
+	file, err := os.Open(path)
 	if err != nil {
 		return err
 	}
@@ -702,10 +712,17 @@ func (s *Supervisor) verifyBinary() error {
 		return err
 	}
 	actual := hex.EncodeToString(hash.Sum(nil))
-	if actual != s.binarySHA256 {
-		return fmt.Errorf("frpc binary sha256 mismatch")
+	if !strings.EqualFold(actual, strings.TrimSpace(expectedSHA256)) {
+		return fmt.Errorf("FRPC binary sha256 mismatch")
 	}
 	return nil
+}
+
+func (s *Supervisor) verifyBinary() error {
+	if s.binary == "" || s.binarySHA256 == "" {
+		return nil
+	}
+	return VerifyBinary(s.binary, s.binarySHA256)
 }
 
 func (s *Supervisor) fail(message string) error {

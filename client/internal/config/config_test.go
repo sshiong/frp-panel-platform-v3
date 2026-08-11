@@ -28,6 +28,31 @@ func TestValidateListenSecurity(t *testing.T) {
 	}
 }
 
+func TestProductionRequiresFixedFRPC(t *testing.T) {
+	base := Config{
+		Environment:      "production",
+		ListenAddr:       "127.0.0.1:7410",
+		AllowedCIDRs:     []string{"127.0.0.0/8"},
+		FRPCBinary:       "/opt/frpc",
+		FRPCBinarySHA256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		FRPCVersion:      "0.68.0",
+	}
+	if err := base.ValidateListenSecurity(); err != nil {
+		t.Fatalf("complete production FRPC configuration was rejected: %v", err)
+	}
+	for name, invalid := range map[string]Config{
+		"missing binary":  func() Config { c := base; c.FRPCBinary = ""; return c }(),
+		"missing hash":    func() Config { c := base; c.FRPCBinarySHA256 = ""; return c }(),
+		"missing version": func() Config { c := base; c.FRPCVersion = ""; return c }(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := invalid.ValidateListenSecurity(); err == nil {
+				t.Fatal("production Client Panel accepted an incomplete fixed FRPC configuration")
+			}
+		})
+	}
+}
+
 func TestLoadReadsEnvironmentAndEnsureDirs(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "client-data")
 	t.Setenv("FRP_CLIENT_DATA_DIR", dataDir)

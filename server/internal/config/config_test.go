@@ -3,11 +3,12 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
 func TestValidateTransportSecurity(t *testing.T) {
-	base := Config{Environment: "production", TLSCertFile: "/etc/panel/cert.pem", TLSKeyFile: "/etc/panel/key.pem", AllowedOrigins: []string{"https://panel.example.com"}}
+	base := Config{Environment: "production", TLSCertFile: "/etc/panel/cert.pem", TLSKeyFile: "/etc/panel/key.pem", AllowedOrigins: []string{"https://panel.example.com"}, FRPSBinary: "/opt/frps", FRPSBinarySHA256: strings.Repeat("0", 64), FRPSConfigPath: "/etc/frps.toml"}
 	if err := base.ValidateTransportSecurity(); err != nil {
 		t.Fatal(err)
 	}
@@ -25,10 +26,10 @@ func TestValidateTransportSecurity(t *testing.T) {
 	if err := (Config{Environment: "development", AllowedOrigins: []string{"http://127.0.0.1:5173"}}).ValidateTransportSecurity(); err != nil {
 		t.Fatal(err)
 	}
-	if err := (Config{Environment: "production", TLSCertFile: "/etc/panel/cert.pem", TLSKeyFile: "/etc/panel/key.pem", AllowedOrigins: []string{"https://panel.example.com"}, RouterListenAddr: "0.0.0.0:7443", RouterTLSEnabled: true}).ValidateTransportSecurity(); err != nil {
+	if err := (Config{Environment: "production", TLSCertFile: "/etc/panel/cert.pem", TLSKeyFile: "/etc/panel/key.pem", AllowedOrigins: []string{"https://panel.example.com"}, FRPSBinary: "/opt/frps", FRPSBinarySHA256: strings.Repeat("0", 64), FRPSConfigPath: "/etc/frps.toml", RouterListenAddr: "0.0.0.0:7443", RouterTLSEnabled: true}).ValidateTransportSecurity(); err != nil {
 		t.Fatal(err)
 	}
-	if err := (Config{Environment: "production", TLSCertFile: "/etc/panel/cert.pem", TLSKeyFile: "/etc/panel/key.pem", AllowedOrigins: []string{"https://panel.example.com"}, RouterListenAddr: "127.0.0.1:7443"}).ValidateTransportSecurity(); err != nil {
+	if err := (Config{Environment: "production", TLSCertFile: "/etc/panel/cert.pem", TLSKeyFile: "/etc/panel/key.pem", AllowedOrigins: []string{"https://panel.example.com"}, FRPSBinary: "/opt/frps", FRPSBinarySHA256: strings.Repeat("0", 64), FRPSConfigPath: "/etc/frps.toml", RouterListenAddr: "127.0.0.1:7443"}).ValidateTransportSecurity(); err != nil {
 		t.Fatal(err)
 	}
 	for name, invalid := range map[string]Config{

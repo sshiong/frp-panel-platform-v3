@@ -118,6 +118,9 @@ func (c Config) ValidateTransportSecurity() error {
 		if strings.TrimSpace(c.TLSCertFile) == "" || strings.TrimSpace(c.TLSKeyFile) == "" {
 			return fmt.Errorf("production Server Panel requires SERVER_TLS_CERT_FILE and SERVER_TLS_KEY_FILE")
 		}
+		if strings.TrimSpace(c.FRPSBinary) == "" || strings.TrimSpace(c.FRPSBinarySHA256) == "" || strings.TrimSpace(c.FRPSConfigPath) == "" {
+			return fmt.Errorf("production Server Panel requires FRPS_BINARY, FRPS_BINARY_SHA256 and FRPS_CONFIG_PATH")
+		}
 		if value := strings.TrimSpace(c.CloudflareAPIBaseURL); value != "" {
 			if err := validateHTTPSServiceURL(value, "Cloudflare API URL"); err != nil {
 				return err

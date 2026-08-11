@@ -32,7 +32,7 @@ export FRP_PANEL_ENV=production
 ./build/frp-panel-server
 ```
 
-When `FRPS_BINARY`, `FRPS_BINARY_SHA256`, and `FRPS_CONFIG_PATH` are all set, Server verifies the fixed FRPS artifact before starting it and stops it with the control process. Server creates or validates `FRPS_TRANSPORT_SECRET_FILE` with mode 0600; the same file must be referenced by FRPS `auth.tokenSource.file.path`. Configure the FRPS HTTP plugin for the loopback-only `POST /internal/frp/plugin` endpoint; the plugin remains fail-closed when the Server is unavailable. See [FRP Plugin E2E](frp-plugin-e2e.md) for the exact `httpPlugins` block and fixed-version checks.
+In production, `FRPS_BINARY`, `FRPS_BINARY_SHA256`, and `FRPS_CONFIG_PATH` are required as a group. Server verifies the fixed FRPS artifact before starting it and stops it with the control process; missing values fail closed. Server creates or validates `FRPS_TRANSPORT_SECRET_FILE` with mode 0600; the same file must be referenced by FRPS `auth.tokenSource.file.path`. Configure the FRPS HTTP plugin for the loopback-only `POST /internal/frp/plugin` endpoint; the plugin remains fail-closed when the Server is unavailable. See [FRP Plugin E2E](frp-plugin-e2e.md) for the exact `httpPlugins` block and fixed-version checks.
 
 The Client Panel keeps its Server bearer session in memory and maintains `/api/v1/ws` with an allowed local Origin. It sends heartbeats, reconnects with bounded exponential backoff and jitter, and performs a signed full sync after a missed-notification recovery event. Session replacement, logout, or user disable stops FRPC and removes runtime secret files.
 
@@ -63,5 +63,10 @@ The release build embeds the matching Admin or Client Panel assets into the
 Go binary. `FRP_ADMIN_WEB_DIR` and `FRP_CLIENT_WEB_DIR` are optional overrides
 for development or a controlled static-asset rollout; production does not
 need an external web directory.
+
+Production Client Panel startup requires `FRPC_BINARY`,
+`FRPC_BINARY_SHA256`, and `FRPC_VERSION`. The binary is checked for executable
+file type and SHA-256 before the process opens its listener; development mode
+may omit the binary for local UI and protocol testing.
 
 For LAN access, bind a specific LAN address (never `0.0.0.0`/`::`), set `CLIENT_ALLOW_LAN=true`, configure `CLIENT_ALLOWED_CIDRS` and `CLIENT_ALLOWED_HOST`, and provide `CLIENT_TLS_CERT_FILE`/`CLIENT_TLS_KEY_FILE`. The Client process refuses to start when those conditions are incomplete. Never expose the development HTTP listener to the public internet.

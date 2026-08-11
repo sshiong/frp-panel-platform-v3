@@ -64,6 +64,14 @@ func (c Config) ValidateListenSecurity() error {
 			return fmt.Errorf("client allowed CIDR %q is invalid: %w", raw, err)
 		}
 	}
+	if strings.EqualFold(strings.TrimSpace(c.Environment), "production") {
+		if strings.TrimSpace(c.FRPCBinary) == "" || strings.TrimSpace(c.FRPCBinarySHA256) == "" {
+			return fmt.Errorf("production Client Panel requires FRPC_BINARY and FRPC_BINARY_SHA256")
+		}
+		if strings.TrimSpace(c.FRPCVersion) == "" {
+			return fmt.Errorf("production Client Panel requires FRPC_VERSION")
+		}
+	}
 	if ip.IsLoopback() {
 		return nil
 	}

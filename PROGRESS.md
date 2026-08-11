@@ -44,7 +44,7 @@
 - [x] Mapping 启停、Domain 删除和 DNS 冲突处理使用持久化幂等记录，并校验 `expected_config_version` / `expected_revision`；Client 浏览器请求保留同一 Idempotency-Key 透传到 Server。
 - [x] Router Snapshot 通过独立 HMAC 密钥原子写入；保存 `router_config_version`、`router_applied_version`、last-good 路径/哈希；DB-free Runtime 按 Host 选择 control/business 路由并 fail-closed。
 - [x] HTTPS 域名按模式进入 `pending_certificate`；ACME Provider 使用官方 `x/crypto/acme` 执行 DNS-01、TXT 传播检查与清理，证书私钥只使用独立 wrapping key 加密。
-- [x] FRPS 可选固定二进制托管，启动前验证配置中声明的 SHA-256；Plugin 保持 loopback-only 与 fail-closed。
+- [x] FRPS 开发模式可选固定二进制托管；生产模式强制配置固定 FRPS、SHA-256 和配置文件，并在启动前验证；Plugin 保持 loopback-only 与 fail-closed。
 - [x] FPPB1 加密备份使用随机 per-package salt；提供解密、SQLite integrity check 和带 `.before-restore-*` 保留副本的原子恢复函数。
 - [x] `/internal/frp/plugin` 增加 loopback-only 网络边界；Cloudflare Token 替换保留旧版本直到新版本完成 pending 验证。
 - [x] Server 管理员 Cookie Session 使用会话绑定的 CSRF hash；Cloudflare、用户生命周期、Router rebuild、加密备份和 FRP 凭证重置等敏感操作要求短期 `reauth_ticket`，只存 hash，不记录明文。
@@ -54,7 +54,7 @@
 - [x] Mapping 删除保留 Domain Binding 直到 managed DNS 清理完成；Domain 删除失败可重试，Mapping 删除操作在补偿完成后才成功；端口更新成功后释放旧租约。
 - [x] Client 应用失败事务化回滚 pending Revision：Revision 留存为 `failed`、`pending_revision_id` 清空、旧 active Revision/端口保持有效、新端口 pending lease 释放，失败后可继续创建下一条不可变 Revision。
 - [x] 管理员用户删除进入 `deleting` 状态并立即撤销 Session/运行时凭据；Domain、Mapping 按依赖顺序进入持久化补偿队列，强制删除会记录 `external_residues`，本地用户删除后保留用户级 Operation 证据。
-- [x] Client 固定 FRPC 进程写入受保护 PID 标记；启动时只回收命令行匹配固定二进制的孤儿进程，PID 复用时拒绝终止并清除运行时秘密。
+- [x] Client 生产模式强制配置固定 FRPC、SHA-256 和版本，并在启动时验证二进制；固定 FRPC 进程写入受保护 PID 标记，启动时只回收命令行匹配固定二进制的孤儿进程，PID 复用时拒绝终止并清除运行时秘密。
 - [x] Client 登录前只做 TLS 证书检查，不发送登录密码；生产 HTTPS 需系统 CA、IP SAN/custom CA 或用户确认的 SPKI pin，pin 仅驻留内存并绑定当前 Server；切换 Server 会注销旧会话、停止旧 FRPC 并清理缓存/秘密。
 - [x] Client 离线回退只允许当前登录会话的 GET 快照，4xx/会话替换/停用永不被缓存掩盖；退出、切换 Server、会话失效会清理缓存和内存运行时秘密；浏览器 `localStorage` 仅保存 `last_server_panel_url`。
 - [x] Client Operations 页面展示阶段、步骤、状态、错误、重试和 external residues；所有异步操作保留可见的 loading/error/retry 反馈。
@@ -217,6 +217,7 @@
 | 2026-08-12 | 恢复审计与固定 FRP 证据刷新 | 当前工作树重新通过 `make test lint accessibility`、`make contract`；官方 FRP v0.68.0 Darwin ARM64 二进制（固定 SHA-256）真实 TCP、`frpc verify` 和 Plugin 网络 E2E 全部通过，`make external-acceptance` 记录 10 passed / 0 failed / 1 blocked，`make acceptance-evidence` 绑定当前 revision 的 141 个标准条目和 1 个 DOD-001 派生记录。`make target-acceptance` 在本机按标准返回 blocked（Darwin，不冒充 Linux 目标签收）；真实 Cloudflare/ACME/TLS/目标部署/正式签名/负责人审批证据仍待外部。 |
 | 2026-08-12 | 双发行物实际启动复验 | 当前构建的 Server/Client 二进制均真实启动并分别通过 `/healthz`；Server 初始化的 `initial-admin.txt` 与 `frps-transport.secret` 权限均为 `0600`，Client 健康响应包含 `request_id`，临时运行数据与进程退出均隔离验证。 |
 | 2026-08-12 | 当前提交托管门禁最终复核 | 提交 [`6d7bb76`](https://github.com/sshiong/frp-panel-platform-v3/commit/6d7bb76f9195da73e2d5a961ab31f349c8cdeaa3) 的 [`ci run 31516100819`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31516100819) 与 [`CodeQL run 31516100238`](https://github.com/sshiong/frp-panel-platform-v3/actions/runs/31516100238) 已通过 Go/TypeScript、contract、coverage、fault-injection、固定 FRP Linux E2E、target acceptance、security、container scan 和 release metadata；本地固定 FRP 外部采集保持 10 passed / 0 failed / 1 blocked，142 条证据索引与当前提交绑定，PR #2 仍等待正式 review/审批。 |
+| 2026-08-12 | 生产固定 FRP 启动边界加固 | 修复生产环境可无 FRPS/FRPC 进入空运行或 simulation 的缺口：Server 现在强制 `FRPS_BINARY`、`FRPS_BINARY_SHA256`、`FRPS_CONFIG_PATH` 成组配置，Client 强制固定 FRPC、版本和 SHA-256，并在启动前验证二进制；development 模式仍可用于本地 UI/协议测试。新增配置与二进制哈希回归测试，文档同步。 |
 
 ## 未决与发布阻断项
 
